@@ -1,0 +1,170 @@
+@import 'tailwindcss';
+
+:root {
+	--color-primary-500: #22c55e;
+	--color-primary-600: #16a34a;
+	--color-primary-400: #4ade80;
+
+	--color-surface-base: #0f172a;
+	--color-surface-glow-rgb: rgba(34, 197, 94, 0.1);
+	--color-surface-overlay: rgba(15, 23, 42, 0.85);
+	--color-surface-border: rgba(55, 65, 81, 0.6);
+	--color-surface-text: #e2e8f0;
+	--color-surface-text-muted: #94a3b8;
+
+	--color-glow-rgb: rgba(34, 197, 94, 0.1);
+	--color-glow-intensity: 0.1;
+	--glow-opacity: 1;
+	--color-bg-image-opacity: 1;
+}
+
+body {
+	background: var(--color-surface-base);
+	background-image: radial-gradient(ellipse at top, rgba(var(--color-glow-rgb), calc(var(--color-glow-intensity) * var(--glow-opacity))) 0%, transparent 60%);
+	background-size: cover;
+	min-height: 100vh;
+}
+
+body::before {
+	content: '';
+	position: fixed;
+	inset: 0;
+	background: var(--color-bg-image, none);
+	opacity: var(--color-bg-image-opacity);
+	pointer-events: none;
+	z-index: -1;
+}
+
+/* Custom scrollbar styling */
+.custom-scrollbar::-webkit-scrollbar {
+	width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+	background: var(--color-surface-overlay);
+	border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+	background: var(--color-surface-border);
+	border-radius: 4px;
+	transition: background-color 0.2s ease;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+	background: var(--color-primary-500);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:active {
+	background: var(--color-primary-600);
+}
+
+/* Resizable sidebar styling */
+aside[style*="resize"] {
+	resize: horizontal;
+	max-width: 400px;
+	min-width: 240px;
+}
+
+/* Hide resize handle on mobile, show on desktop */
+@media (max-width: 1023px) {
+	aside[style*="resize"] {
+		resize: none;
+	}
+}
+
+/* Custom resize handle styling */
+aside[style*="resize"]::-webkit-resizer {
+	background: var(--color-surface-border);
+	border-radius: 2px;
+	width: 6px;
+	height: 6px;
+}
+
+aside[style*="resize"]:hover::-webkit-resizer {
+	background: var(--color-primary-500);
+}
+
+aside[style*="resize"]::-webkit-resizer:hover {
+	background: var(--color-primary-600);
+}
+
+/* Range input (slider) styling */
+input[type="range"] {
+	-webkit-appearance: none;
+	appearance: none;
+	background: transparent;
+	cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+	height: 0.5rem;
+	background: var(--color-surface-700, #334155);
+	border-radius: 0.25rem;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 1rem;
+	height: 1rem;
+	background: var(--color-primary-500);
+	border-radius: 50%;
+	margin-top: -0.25rem;
+	transition: background-color 0.15s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+	background: var(--color-primary-400);
+}
+
+input[type="range"]:focus::-webkit-slider-thumb {
+	box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3);
+}
+
+input[type="range"]::-moz-range-track {
+	height: 0.5rem;
+	background: var(--color-surface-700, #334155);
+	border-radius: 0.25rem;
+}
+
+input[type="range"]::-moz-range-thumb {
+	width: 1rem;
+	height: 1rem;
+	background: var(--color-primary-500);
+	border: none;
+	border-radius: 50%;
+	transition: background-color 0.15s;
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+	background: var(--color-primary-400);
+}
+
+input[type="range"]:focus::-moz-range-thumb {
+	box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3);
+}
+
+/* Global scrollbar styling for all scrollable elements */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--color-surface-border, #374151) transparent;
+}
+
+*::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+	background: var(--color-surface-border, #374151);
+	border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+	background: var(--color-primary-500);
+}

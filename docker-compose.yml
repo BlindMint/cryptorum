@@ -1,0 +1,28 @@
+services:
+  cryptorum:
+    image: cryptorum:latest
+    container_name: cryptorum
+    build: .
+    ports:
+      - "6060:6060"
+    volumes:
+      - ./data:/data          # SQLite DB, covers, cache
+      - /olympus/books:/books        # Book library (read-only or read-write)
+      - ./bookdrop:/bookdrop  # Auto-import folder
+      - ./config.yaml:/app/config.yaml
+    environment:
+      - TZ=America/Boise
+      - PUID=1000
+      - PGID=1000
+    restart: unless-stopped
+    networks:
+      - datashard-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cryptorum.rule=Host(`cryptorum.datashard.dev`)"
+      - "traefik.http.routers.cryptorum.entrypoints=web"
+      - "traefik.http.services.cryptorum.loadbalancer.server.port=6060"
+
+networks:
+  datashard-network:
+    external: true

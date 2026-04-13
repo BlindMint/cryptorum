@@ -1,0 +1,68 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Frontend build output and generated assets
+build/
+dist/
+frontend/build/
+frontend/.svelte-kit/
+frontend/.vite/
+frontend/.vercel/
+backend/cmd/server/static/_app/
+
+# Backend build output and caches
+backend/.gocache/
+backend/.ccache/
+backend/cryptorum
+backend/server
+/cryptorum
+/server
+*.test
+coverage.out
+
+# Runtime data, generated media, and mounted library folders
+data/
+covers/
+thumb/
+books/
+bookdrop/
+backups/
+
+# Databases and backups
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.db.bak
+*.bak
+
+# Configuration and local secrets
+config.yaml
+config.*.yaml
+.env
+.env.*
+*.env
+!.env.example
+!.env.*.example
+cookies.txt
+
+# Calibre downloads and extracted conversion caches
+calibre-cache/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.pid
+*.out
+.DS_Store
+
+# Local tool and editor state
+.claude/
+.codex
+.idea/
+.vscode/
+*.swp
+*.swo
