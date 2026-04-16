@@ -25,6 +25,13 @@ body {
 	min-height: 100vh;
 }
 
+html,
+body,
+#app {
+	width: 100%;
+	overflow-x: hidden;
+}
+
 body::before {
 	content: '';
 	position: fixed;
@@ -56,36 +63,6 @@ body::before {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:active {
-	background: var(--color-primary-600);
-}
-
-/* Resizable sidebar styling */
-aside[style*="resize"] {
-	resize: horizontal;
-	max-width: 400px;
-	min-width: 240px;
-}
-
-/* Hide resize handle on mobile, show on desktop */
-@media (max-width: 1023px) {
-	aside[style*="resize"] {
-		resize: none;
-	}
-}
-
-/* Custom resize handle styling */
-aside[style*="resize"]::-webkit-resizer {
-	background: var(--color-surface-border);
-	border-radius: 2px;
-	width: 6px;
-	height: 6px;
-}
-
-aside[style*="resize"]:hover::-webkit-resizer {
-	background: var(--color-primary-500);
-}
-
-aside[style*="resize"]::-webkit-resizer:hover {
 	background: var(--color-primary-600);
 }
 

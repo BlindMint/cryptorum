@@ -17,41 +17,65 @@ type coverCandidate struct {
 	existingCoverPath string
 }
 
+// CoverProgressFunc reports cover regeneration progress.
+type CoverProgressFunc func(processed, updated, failed, total int)
+
 // RegenerateCovers rebuilds stored covers from the source book files.
-func (s *Scanner) RegenerateCovers(missingOnly bool) (int, error) {
+func (s *Scanner) RegenerateCovers(missingOnly bool, progress CoverProgressFunc) (int, int, error) {
 	candidates, err := s.coverCandidates(missingOnly)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
 	settings := covers.LoadSettings(s.db)
 	updated := 0
+	failed := 0
+	total := len(candidates)
 
-	for _, candidate := range candidates {
+	for i, candidate := range candidates {
 		meta, err := metadata.Extract(candidate.filePath)
 		if err != nil || meta == nil || len(meta.CoverData) == 0 {
+			failed++
+			if progress != nil {
+				progress(i+1, updated, failed, total)
+			}
 			continue
 		}
 
 		processed, err := covers.ProcessCover(meta.CoverData, settings)
 		if err != nil || len(processed) == 0 {
+			failed++
+			if progress != nil {
+				progress(i+1, updated, failed, total)
+			}
 			continue
 		}
 
 		newCoverPath, err := covers.SaveCoverBytes(s.coversPath, candidate.bookID, processed)
 		if err != nil || newCoverPath == "" {
+			failed++
+			if progress != nil {
+				progress(i+1, updated, failed, total)
+			}
 			continue
 		}
 
 		if err := s.updateCoverRecord(candidate.bookID, candidate.existingCoverPath, newCoverPath); err != nil {
 			slog.Warn("Failed to update cover record", "bookID", candidate.bookID, "error", err)
+			failed++
+			if progress != nil {
+				progress(i+1, updated, failed, total)
+			}
 			continue
 		}
 
 		updated++
+		if progress != nil {
+			progress(i+1, updated, failed, total)
+		}
 	}
 
-	return updated, nil
+	return updated, failed, nil
 }
 
 // CountCoverCandidates returns the number of book files a cover regeneration job will inspect.

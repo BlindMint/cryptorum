@@ -2,12 +2,14 @@ package main
 
 import (
 	"archive/zip"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -17,9 +19,117 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+var coverThumbSizes = map[string]int{
+	"small":  240,
+	"medium": 360,
+	"large":  520,
+}
+
 // osRemove wraps os.Remove for use across handler files
 func osRemove(path string) error {
 	return os.Remove(path)
+}
+
+func resolveCoverFile(bookID string) (string, int64, error) {
+	var coverPath string
+	var coverUpdatedOn int64
+	err := appDB.QueryRow(`
+		SELECT COALESCE(cover_path, ''), COALESCE(cover_updated_on, 0) FROM book_metadata WHERE book_id = ?
+	`, bookID).Scan(&coverPath, &coverUpdatedOn)
+	if err != nil && err != sql.ErrNoRows {
+		return "", 0, err
+	}
+
+	if coverPath == "" {
+		coversPath := appConfig.GetCoversPath()
+		possiblePaths := []string{
+			filepath.Join(coversPath, bookID+".webp"),
+			filepath.Join(coversPath, bookID+".jpg"),
+			filepath.Join(coversPath, bookID+".jpeg"),
+			filepath.Join(coversPath, bookID+".png"),
+			filepath.Join(coversPath, bookID+".gif"),
+		}
+
+		for _, path := range possiblePaths {
+			if info, statErr := os.Stat(path); statErr == nil && !info.IsDir() {
+				coverPath = path
+				coverUpdatedOn = info.ModTime().Unix()
+				break
+			}
+		}
+	}
+
+	if coverPath == "" {
+		return "", 0, nil
+	}
+
+	coverPath = translateHostPathToContainerPath(coverPath)
+
+	if info, statErr := os.Stat(coverPath); statErr == nil && !info.IsDir() {
+		fileModTime := info.ModTime().Unix()
+		if fileModTime > coverUpdatedOn {
+			coverUpdatedOn = fileModTime
+		}
+	}
+
+	return coverPath, coverUpdatedOn, nil
+}
+
+func serveCoverFile(w http.ResponseWriter, r *http.Request, bookID string, coverPath string, coverUpdatedOn int64) {
+	if coverPath == "" {
+		errorResponse(w, http.StatusNotFound, "Cover not found")
+		return
+	}
+
+	w.Header().Set("ETag", fmt.Sprintf("\"cover-%s-%d\"", bookID, coverUpdatedOn))
+	w.Header().Set("Last-Modified", time.Unix(coverUpdatedOn, 0).UTC().Format(http.TimeFormat))
+	w.Header().Set("Cache-Control", "public, max-age=0, must-revalidate")
+
+	http.ServeFile(w, r, coverPath)
+}
+
+func generateCoverThumb(sourcePath, thumbPath string, sizeName string) error {
+	target, ok := coverThumbSizes[sizeName]
+	if !ok {
+		target = coverThumbSizes["medium"]
+	}
+
+	if err := os.MkdirAll(filepath.Dir(thumbPath), 0o755); err != nil {
+		return err
+	}
+
+	tmpPath := thumbPath + ".tmp.jpg"
+	_ = os.Remove(tmpPath)
+
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return err
+	}
+
+	filter := fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease", target, target)
+	cmd := exec.Command(
+		ffmpegPath,
+		"-y",
+		"-v", "error",
+		"-i", sourcePath,
+		"-vf", filter,
+		"-frames:v", "1",
+		"-f", "image2",
+		"-q:v", "4",
+		tmpPath,
+	)
+
+	if output, runErr := cmd.CombinedOutput(); runErr != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("ffmpeg thumbnail generation failed: %w: %s", runErr, strings.TrimSpace(string(output)))
+	}
+
+	if err := os.Rename(tmpPath, thumbPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	return nil
 }
 
 // translateHostPathToContainerPath translates host filesystem paths to container paths
@@ -164,9 +274,49 @@ func countCbzPages(filePath string) (int, error) {
 	return count, nil
 }
 
+func selectBookFileByFormat(bookID int64, preferredFormat string) (string, string, error) {
+	rows, err := appDB.Query(`
+		SELECT path, format
+		FROM book_file
+		WHERE book_id = ?
+		ORDER BY id
+	`, bookID)
+	if err != nil {
+		return "", "", err
+	}
+	defer rows.Close()
+
+	preferredFormat = strings.ToLower(strings.TrimSpace(preferredFormat))
+	var fallbackPath, fallbackFormat string
+
+	for rows.Next() {
+		var filePath, format string
+		if err := rows.Scan(&filePath, &format); err != nil {
+			continue
+		}
+		if fallbackPath == "" {
+			fallbackPath = filePath
+			fallbackFormat = format
+		}
+		if preferredFormat != "" && strings.EqualFold(format, preferredFormat) {
+			return filePath, format, nil
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return "", "", err
+	}
+	if fallbackPath == "" {
+		return "", "", sql.ErrNoRows
+	}
+
+	return fallbackPath, fallbackFormat, nil
+}
+
 // ServeBookFileHandler serves the raw book file for download
 func ServeBookFileHandler(w http.ResponseWriter, r *http.Request) {
 	bookID := chi.URLParam(r, "bookID")
+	requestedFormat := r.URL.Query().Get("format")
 	current := getUserFromContext(r.Context())
 	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
 	if err != nil {
@@ -183,12 +333,7 @@ func ServeBookFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var filePath string
-	var format string
-	err = appDB.QueryRow(`
-		SELECT path, format FROM book_file WHERE book_id = ? LIMIT 1
-	`, bookID).Scan(&filePath, &format)
-
+	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Book file not found")
 		return
@@ -215,6 +360,7 @@ func ServeBookFileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", filepath.Base(filePath)))
+	w.Header().Set("Accept-Ranges", "bytes")
 	http.ServeFile(w, r, filePath)
 }
 
@@ -455,6 +601,7 @@ func ServeEpubResourceHandler(w http.ResponseWriter, r *http.Request) {
 func ServeCbxPageHandler(w http.ResponseWriter, r *http.Request) {
 	bookID := chi.URLParam(r, "bookID")
 	pageNumStr := chi.URLParam(r, "pageNum")
+	requestedFormat := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
 	current := getUserFromContext(r.Context())
 	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
 	if err != nil {
@@ -477,14 +624,21 @@ func ServeCbxPageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var filePath string
-	var format string
-	err = appDB.QueryRow(`
-		SELECT path, format FROM book_file WHERE book_id = ? AND format IN ('cbz', 'cbr', 'cb7') LIMIT 1
-	`, bookID).Scan(&filePath, &format)
-
+	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	if err != nil || (requestedFormat == "" && format != "cbz" && format != "cbr" && format != "cb7") {
+		err = appDB.QueryRow(`
+			SELECT path, format FROM book_file
+			WHERE book_id = ? AND format IN ('cbz', 'cbr', 'cb7')
+			ORDER BY id
+			LIMIT 1
+		`, bookIDInt).Scan(&filePath, &format)
+	}
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "CBX file not found")
+		return
+	}
+	if format != "cbz" && format != "cbr" && format != "cb7" {
+		errorResponse(w, http.StatusBadRequest, fmt.Sprintf("Format '%s' is not supported for comic reading.", format))
 		return
 	}
 
@@ -496,6 +650,8 @@ func ServeCbxPageHandler(w http.ResponseWriter, r *http.Request) {
 		serveCbzPage(w, filePath, pageNum)
 	case "cbr":
 		serveCbrPage(w, filePath, pageNum)
+	case "cb7":
+		errorResponse(w, http.StatusNotImplemented, "CB7 reading is not supported yet")
 	default:
 		errorResponse(w, http.StatusNotImplemented, "Format not supported")
 	}
@@ -573,73 +729,20 @@ func ServeCoverHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for cover in database
-	var coverPath string
-	var coverUpdatedOn int64
-	err = appDB.QueryRow(`
-		SELECT COALESCE(cover_path, ''), COALESCE(cover_updated_on, 0) FROM book_metadata WHERE book_id = ?
-	`, bookID).Scan(&coverPath, &coverUpdatedOn)
-
+	coverPath, coverUpdatedOn, err := resolveCoverFile(bookID)
 	if err != nil || coverPath == "" {
-		// Try to find cover file by convention
-		coversPath := appConfig.GetCoversPath()
-		possiblePaths := []string{
-			filepath.Join(coversPath, bookID+".webp"),
-			filepath.Join(coversPath, bookID+".jpg"),
-			filepath.Join(coversPath, bookID+".png"),
-			filepath.Join(coversPath, bookID+".gif"),
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to resolve cover")
+		} else {
+			errorResponse(w, http.StatusNotFound, "Cover not found")
 		}
-
-		for _, path := range possiblePaths {
-			if _, err := os.Stat(path); err == nil {
-				coverPath = path
-				info, statErr := os.Stat(path)
-				if statErr == nil {
-					coverUpdatedOn = info.ModTime().Unix()
-				}
-				break
-			}
-		}
-	}
-
-	if coverPath == "" {
-		errorResponse(w, http.StatusNotFound, "Cover not found")
 		return
 	}
-
-	if info, statErr := os.Stat(coverPath); statErr == nil {
-		fileModTime := info.ModTime().Unix()
-		if fileModTime > coverUpdatedOn {
-			coverUpdatedOn = fileModTime
-		}
-	}
-
-	// Set cache headers
-	w.Header().Set("Cache-Control", "public, max-age=0, must-revalidate")
-	w.Header().Set("ETag", fmt.Sprintf("\"cover-%s-%d\"", bookID, coverUpdatedOn))
-	w.Header().Set("Last-Modified", time.Unix(coverUpdatedOn, 0).UTC().Format(http.TimeFormat))
-
-	http.ServeFile(w, r, coverPath)
+	serveCoverFile(w, r, bookID, coverPath, coverUpdatedOn)
 }
 
 // ServeCoverThumbHandler serves book cover thumbnails
 func ServeCoverThumbHandler(w http.ResponseWriter, r *http.Request) {
-	// For now, just serve the regular cover
-	// TODO: Implement thumbnail generation
-	ServeCoverHandler(w, r)
-}
-
-// TocItem represents a table of contents entry
-type TocItem struct {
-	ID       string    `json:"id"`
-	Label    string    `json:"label"`
-	Level    int       `json:"level"`
-	Children []TocItem `json:"children,omitempty"`
-}
-
-// ServeContinuousBookHandler serves cached HTML derived from the canonical
-// processed text-book package for continuous scrolling reading.
-func ServeContinuousBookHandler(w http.ResponseWriter, r *http.Request) {
 	bookID := chi.URLParam(r, "bookID")
 	current := getUserFromContext(r.Context())
 	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
@@ -657,12 +760,86 @@ func ServeContinuousBookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var filePath string
-	var format string
-	err = appDB.QueryRow(`
-		SELECT path, format FROM book_file WHERE book_id = ? LIMIT 1
-	`, bookID).Scan(&filePath, &format)
+	sizeName := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("size")))
+	if _, ok := coverThumbSizes[sizeName]; !ok {
+		sizeName = "medium"
+	}
 
+	coverPath, coverUpdatedOn, err := resolveCoverFile(bookID)
+	if err != nil || coverPath == "" {
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to resolve cover")
+		} else {
+			errorResponse(w, http.StatusNotFound, "Cover not found")
+		}
+		return
+	}
+
+	thumbDir := appConfig.GetThumbsPath()
+	thumbPath := filepath.Join(thumbDir, fmt.Sprintf("%s-%s.jpg", bookID, sizeName))
+	requestVersion := strings.TrimSpace(r.URL.Query().Get("v"))
+	versionMatches := requestVersion != "" && requestVersion == strconv.FormatInt(coverUpdatedOn, 10)
+
+	if info, statErr := os.Stat(thumbPath); statErr == nil && !info.IsDir() && info.ModTime().Unix() >= coverUpdatedOn {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("ETag", fmt.Sprintf("\"cover-thumb-%s-%s-%d\"", bookID, sizeName, coverUpdatedOn))
+		w.Header().Set("Last-Modified", time.Unix(coverUpdatedOn, 0).UTC().Format(http.TimeFormat))
+		if versionMatches {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=0, must-revalidate")
+		}
+		http.ServeFile(w, r, thumbPath)
+		return
+	}
+
+	if err := generateCoverThumb(coverPath, thumbPath, sizeName); err != nil {
+		log.Printf("Failed to generate cover thumb for book %s (%s): %v", bookID, sizeName, err)
+		serveCoverFile(w, r, bookID, coverPath, coverUpdatedOn)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("ETag", fmt.Sprintf("\"cover-thumb-%s-%s-%d\"", bookID, sizeName, coverUpdatedOn))
+	w.Header().Set("Last-Modified", time.Unix(coverUpdatedOn, 0).UTC().Format(http.TimeFormat))
+	if versionMatches {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=0, must-revalidate")
+	}
+	http.ServeFile(w, r, thumbPath)
+}
+
+// TocItem represents a table of contents entry
+type TocItem struct {
+	ID       string    `json:"id"`
+	Label    string    `json:"label"`
+	Level    int       `json:"level"`
+	Children []TocItem `json:"children,omitempty"`
+}
+
+// ServeContinuousBookHandler serves cached HTML derived from the canonical
+// processed text-book package for continuous scrolling reading.
+func ServeContinuousBookHandler(w http.ResponseWriter, r *http.Request) {
+	bookID := chi.URLParam(r, "bookID")
+	requestedFormat := r.URL.Query().Get("format")
+	current := getUserFromContext(r.Context())
+	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid book ID")
+		return
+	}
+	allowed, err := canAccessBook(current, bookIDInt)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
+		return
+	}
+	if !allowed {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
+	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Book file not found")
 		return
@@ -710,6 +887,7 @@ func getOrConvertBook(bookID, filePath, format string) (string, error) {
 func ServeContinuousMediaHandler(w http.ResponseWriter, r *http.Request) {
 	bookID := chi.URLParam(r, "bookID")
 	mediaPath := chi.URLParam(r, "*")
+	requestedFormat := r.URL.Query().Get("format")
 	current := getUserFromContext(r.Context())
 	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
 	if err != nil {
@@ -726,12 +904,33 @@ func ServeContinuousMediaHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	paths := getTextBookCachePaths(bookID)
-	filePath := filepath.Join(paths.ExplodedDir, filepath.FromSlash(mediaPath))
+	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	if err != nil {
+		errorResponse(w, http.StatusNotFound, "Book file not found")
+		return
+	}
+	if !isSupportedTextBookFormat(format) {
+		errorResponse(w, http.StatusBadRequest, fmt.Sprintf(
+			"Format '%s' is not supported for continuous reading.", format,
+		))
+		return
+	}
+	filePath = translateHostPathToContainerPath(filePath)
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		errorResponse(w, http.StatusNotFound, "Book file not found at path: "+filePath)
+		return
+	}
+	if _, err := ensureProcessedTextBook(bookID, filePath, format); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to process book: "+err.Error())
+		return
+	}
+
+	paths := getTextBookCachePaths(bookID, format)
+	explodedPath := filepath.Join(paths.ExplodedDir, filepath.FromSlash(mediaPath))
 
 	// Security: prevent path traversal
 	cleanCacheDir := filepath.Clean(paths.ExplodedDir)
-	cleanFilePath := filepath.Clean(filePath)
+	cleanFilePath := filepath.Clean(explodedPath)
 	if !strings.HasPrefix(cleanFilePath, cleanCacheDir+string(filepath.Separator)) {
 		errorResponse(w, http.StatusForbidden, "Invalid media path")
 		return
@@ -749,6 +948,7 @@ func ServeContinuousMediaHandler(w http.ResponseWriter, r *http.Request) {
 // ServeContinuousTocHandler returns the table of contents for a book's continuous view
 func ServeContinuousTocHandler(w http.ResponseWriter, r *http.Request) {
 	bookID := chi.URLParam(r, "bookID")
+	requestedFormat := r.URL.Query().Get("format")
 	current := getUserFromContext(r.Context())
 	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
 	if err != nil {
@@ -765,11 +965,7 @@ func ServeContinuousTocHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var filePath, format string
-	err = appDB.QueryRow(`
-		SELECT path, format FROM book_file WHERE book_id = ? LIMIT 1
-	`, bookID).Scan(&filePath, &format)
-
+	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Book file not found")
 		return
@@ -785,7 +981,7 @@ func ServeContinuousTocHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Failed to convert book %s for TOC: %v\n", bookID, err)
 			toc = []TocItem{}
 		} else {
-			tocCachePath := getTextBookCachePaths(bookID).TocCachePath
+			tocCachePath := getTextBookCachePaths(bookID, format).TocCachePath
 			if data, err := os.ReadFile(tocCachePath); err == nil {
 				json.Unmarshal(data, &toc)
 			} else {
@@ -876,6 +1072,7 @@ func buildTocHierarchy(flat []TocItem) []TocItem {
 // ServeContinuousStylesHandler serves the preserved stylesheet.css for original layout
 func ServeContinuousStylesHandler(w http.ResponseWriter, r *http.Request) {
 	bookID := chi.URLParam(r, "bookID")
+	requestedFormat := r.URL.Query().Get("format")
 	current := getUserFromContext(r.Context())
 	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
 	if err != nil {
@@ -891,7 +1088,23 @@ func ServeContinuousStylesHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusForbidden, "Permission denied")
 		return
 	}
-	cssPath := getTextBookCachePaths(bookID).CSSCachePath
+	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	if err != nil {
+		errorResponse(w, http.StatusNotFound, "Book file not found")
+		return
+	}
+	if !isSupportedTextBookFormat(format) {
+		errorResponse(w, http.StatusBadRequest, fmt.Sprintf(
+			"Format '%s' is not supported for continuous reading.", format,
+		))
+		return
+	}
+	filePath = translateHostPathToContainerPath(filePath)
+	if _, err := ensureProcessedTextBook(bookID, filePath, format); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to process book: "+err.Error())
+		return
+	}
+	cssPath := getTextBookCachePaths(bookID, format).CSSCachePath
 	if _, err := os.Stat(cssPath); os.IsNotExist(err) {
 		w.Header().Set("Content-Type", "text/css")
 		w.WriteHeader(http.StatusOK)
@@ -907,6 +1120,7 @@ func ServeContinuousStylesHandler(w http.ResponseWriter, r *http.Request) {
 // ServeProcessedBookFileHandler serves the canonical processed EPUB for text readers.
 func ServeProcessedBookFileHandler(w http.ResponseWriter, r *http.Request) {
 	bookID := chi.URLParam(r, "bookID")
+	requestedFormat := r.URL.Query().Get("format")
 	current := getUserFromContext(r.Context())
 	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
 	if err != nil {
@@ -923,11 +1137,7 @@ func ServeProcessedBookFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var filePath string
-	var format string
-	err = appDB.QueryRow(`
-		SELECT path, format FROM book_file WHERE book_id = ? LIMIT 1
-	`, bookID).Scan(&filePath, &format)
+	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Book file not found")
 		return

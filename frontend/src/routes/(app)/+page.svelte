@@ -1,5 +1,7 @@
 <script lang="ts">
- 	import { onMount } from 'svelte';
+ 	import { onMount, tick } from 'svelte';
+ 	import { flip } from 'svelte/animate';
+ 	import { cubicOut } from 'svelte/easing';
  	import { showFormatOnCover, getFormatColor } from '$lib/stores';
 
  	let stats = $state({
@@ -14,6 +16,14 @@
   let recentBooks = $state<any[]>([]);
  	let discoverBooks = $state<any[]>([]);
  	let formatOnCover = $state(true);
+ 	let continueReadingRowEl = $state<HTMLDivElement | null>(null);
+ 	let recentBooksRowEl = $state<HTMLDivElement | null>(null);
+ 	let discoverBooksRowEl = $state<HTMLDivElement | null>(null);
+ 	let dashboardBookCardWidth = $state(148);
+ 	let dashboardBookRowGap = $state(16);
+ 	let visibleContinueReadingCount = $state(0);
+ 	let visibleRecentBooksCount = $state(0);
+ 	let visibleDiscoverBooksCount = $state(0);
 
  	// Dashboard configuration
  	let dashboardConfig = $state({
@@ -30,6 +40,18 @@
  	$effect(() => {
  		const unsub = showFormatOnCover.subscribe((v: boolean) => formatOnCover = v);
  		return unsub;
+	});
+
+	$effect(() => {
+		continueReadingBooks.length;
+		recentBooks.length;
+		discoverBooks.length;
+		dashboardConfig.continueReadingLimit;
+		dashboardConfig.recentlyAddedLimit;
+		dashboardConfig.discoverLimit;
+		dashboardBookCardWidth;
+		dashboardBookRowGap;
+		updateDashboardRows();
 	});
 
  	onMount(async () => {
@@ -70,18 +92,77 @@
 				const data = await discoverRes.json();
 				discoverBooks = data.books || [];
 			}
+			updateDashboardRows();
 		} catch (e) {
 			console.error('Failed to fetch data:', e);
 		}
 	});
 
+	onMount(() => {
+		const updateDimensions = () => {
+			const viewportWidth = window.innerWidth;
+			if (viewportWidth < 640) {
+				dashboardBookCardWidth = 124;
+				dashboardBookRowGap = 12;
+			} else if (viewportWidth < 1024) {
+				dashboardBookCardWidth = 136;
+				dashboardBookRowGap = 14;
+			} else {
+				dashboardBookCardWidth = 148;
+				dashboardBookRowGap = 16;
+			}
+			updateDashboardRows();
+		};
+
+		const resizeObserver = new ResizeObserver(() => {
+			updateDashboardRows();
+		});
+
+		void tick().then(() => {
+			if (continueReadingRowEl) resizeObserver.observe(continueReadingRowEl);
+			if (recentBooksRowEl) resizeObserver.observe(recentBooksRowEl);
+			if (discoverBooksRowEl) resizeObserver.observe(discoverBooksRowEl);
+			updateDimensions();
+		});
+
+		window.addEventListener('resize', updateDimensions);
+
+		return () => {
+			resizeObserver.disconnect();
+			window.removeEventListener('resize', updateDimensions);
+		};
+	});
+
 	function toggleConfigModal() {
 		showConfigModal = !showConfigModal;
+	}
+
+	function getVisibleBookCount(container: HTMLElement | null, totalCount: number) {
+		if (!container || totalCount <= 0) return 0;
+		const width = container.clientWidth;
+		const slotWidth = dashboardBookCardWidth + dashboardBookRowGap;
+		const fit = Math.floor((width + dashboardBookRowGap) / slotWidth);
+		return Math.max(1, Math.min(totalCount, fit));
+	}
+
+	function updateDashboardRows() {
+		visibleContinueReadingCount = getVisibleBookCount(
+			continueReadingRowEl,
+			Math.min(continueReadingBooks.length, dashboardConfig.continueReadingLimit)
+		);
+		visibleRecentBooksCount = getVisibleBookCount(
+			recentBooksRowEl,
+			Math.min(recentBooks.length, dashboardConfig.recentlyAddedLimit)
+		);
+		visibleDiscoverBooksCount = getVisibleBookCount(
+			discoverBooksRowEl,
+			Math.min(discoverBooks.length, dashboardConfig.discoverLimit)
+		);
 	}
 </script>
 
 <div class="flex h-full flex-col gap-4 overflow-hidden">
-	<div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+	<div class="hidden sm:grid grid-cols-2 lg:grid-cols-4 gap-3">
 		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)]">
 			<div class="flex items-center justify-between">
 				<div>
@@ -141,28 +222,32 @@
 
 	<!-- Continue Reading Section -->
 	{#if dashboardConfig.showContinueReading}
-	<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-1 min-h-0 flex flex-col">
+	<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-none sm:flex-1 min-h-0 flex flex-col">
 		<div class="flex items-center justify-between mb-3">
 			<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Continue Reading</h2>
 			<a href="/library?status=reading" class="text-sm text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">View all →</a>
 		</div>
-		{#if continueReadingBooks.length > 0}
- 				<div class="grid h-full min-h-0 grid-flow-col gap-2.5 overflow-x-auto pb-0 items-stretch" style="grid-auto-columns: minmax(120px, 1fr);">
-					{#each continueReadingBooks.slice(0, dashboardConfig.continueReadingLimit) as book}
+			{#if continueReadingBooks.length > 0}
+				<div
+					bind:this={continueReadingRowEl}
+					class="dashboard-book-row"
+					style="--dashboard-book-card-width: {dashboardBookCardWidth}px; --dashboard-book-row-gap: {dashboardBookRowGap}px;"
+				>
+					{#each continueReadingBooks.slice(0, visibleContinueReadingCount || 1) as book (book.id)}
 						{@const readerUrl = (() => {
 							if (book.format === 'pdf') return `/reader/pdf/${book.id}`;
 							if (['cbz', 'cbr', 'cb7', 'cbt'].includes(book.format)) return `/reader/cbx/${book.id}`;
 							if (['mp3', 'm4a', 'm4b', 'flac', 'ogg', 'wav'].includes(book.format)) return `/reader/audio/${book.id}`;
 							return `/reader/epub/${book.id}`;
 						})()}
-						<div class="relative group h-full min-w-0">
-							<a href="/book/{book.id}" class="flex h-full min-w-0 flex-col">
-								<div class="flex-1 min-h-0 bg-slate-800 rounded-lg overflow-hidden mb-1.5 relative">
+						<div class="dashboard-book-item relative group min-w-0 self-start" animate:flip={{ duration: 90, easing: cubicOut }}>
+							<a href="/book/{book.id}" class="flex min-w-0 flex-col">
+								<div class="aspect-[2/3] bg-slate-800 rounded-lg overflow-hidden mb-1.5 relative">
 									{#if book.status === 'reading'}
 										<div class="absolute top-1 right-1 w-3 h-3 bg-blue-500 rounded-full z-10"></div>
 									{/if}
 									{#if book.cover_path}
-										<img src="/api/covers/{book.id}" alt={book.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform">
+										<img src="/api/covers/{book.id}/thumb" alt={book.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform" loading="lazy" decoding="async">
 									{:else}
 										<div class="w-full h-full flex items-center justify-center">
 											<svg class="w-12 h-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -175,15 +260,15 @@
  											<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
  										</div>
  									{/if}
- 									{#if formatOnCover && book.format}
- 										{@const formatColor = getFormatColor(book.format)}
- 										<div 
- 											class="absolute bottom-1 left-1 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase"
- 											style="background-color: {formatColor.bg}; color: {formatColor.text};"
- 										>
- 											{book.format}
- 										</div>
- 									{/if}
+								{#if formatOnCover && book.format}
+									{@const formatColor = getFormatColor(book.format)}
+									<div
+										class="absolute bottom-2 left-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+										style="background-color: {formatColor.bg}; color: {formatColor.text};"
+									>
+										{book.format}
+									</div>
+								{/if}
  								</div>
 								<div class="shrink-0">
 									<h3 class="text-xs font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
@@ -216,18 +301,22 @@
 
 	<!-- Recently Added Section -->
 	{#if dashboardConfig.showRecentlyAdded}
-		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-1 min-h-0 flex flex-col">
+		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-none sm:flex-1 min-h-0 flex flex-col">
 			<div class="flex items-center justify-between mb-3">
 				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Recently Added</h2>
 				<a href="/library" class="text-sm text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">View all →</a>
 			</div>
-		{#if recentBooks.length > 0}
-   				<div class="grid h-full min-h-0 grid-flow-col gap-2.5 overflow-x-auto pb-0 items-stretch" style="grid-auto-columns: minmax(120px, 1fr);">
-					{#each recentBooks.slice(0, dashboardConfig.recentlyAddedLimit) as book}
-						<a href="/book/{book.id}" class="group flex h-full min-w-0 flex-col">
-							<div class="flex-1 min-h-0 bg-slate-800 rounded-lg overflow-hidden mb-1.5 relative">
+			{#if recentBooks.length > 0}
+				<div
+					bind:this={recentBooksRowEl}
+					class="dashboard-book-row"
+					style="--dashboard-book-card-width: {dashboardBookCardWidth}px; --dashboard-book-row-gap: {dashboardBookRowGap}px;"
+				>
+					{#each recentBooks.slice(0, visibleRecentBooksCount || 1) as book (book.id)}
+						<a href="/book/{book.id}" class="dashboard-book-item group flex min-w-0 flex-col self-start" animate:flip={{ duration: 90, easing: cubicOut }}>
+							<div class="aspect-[2/3] bg-slate-800 rounded-lg overflow-hidden mb-1.5 relative">
 								{#if book.cover_path}
-									<img src="/api/covers/{book.id}" alt={book.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform">
+									<img src="/api/covers/{book.id}/thumb" alt={book.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform" loading="lazy" decoding="async">
 								{:else}
 									<div class="w-full h-full flex items-center justify-center">
 										<svg class="w-12 h-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -240,15 +329,15 @@
  										<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
  									</div>
  								{/if}
- 								{#if formatOnCover && book.format}
- 									{@const formatColor = getFormatColor(book.format)}
- 									<div 
- 										class="absolute bottom-1 left-1 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase"
- 										style="background-color: {formatColor.bg}; color: {formatColor.text};"
- 									>
- 										{book.format}
- 									</div>
- 								{/if}
+								{#if formatOnCover && book.format}
+									{@const formatColor = getFormatColor(book.format)}
+									<div
+										class="absolute bottom-2 left-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+										style="background-color: {formatColor.bg}; color: {formatColor.text};"
+									>
+										{book.format}
+									</div>
+								{/if}
  							</div>
 							<div class="shrink-0">
 								<h3 class="text-xs font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
@@ -259,8 +348,8 @@
 							</div>
 						</a>
 					{/each}
- 				</div>
- 			{:else}
+				</div>
+			{:else}
  				<div class="text-center py-12">
  					<svg class="w-16 h-16 text-[var(--color-primary-400)] mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
  						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
@@ -274,7 +363,7 @@
 
  	<!-- Discover Section -->
 	{#if dashboardConfig.showDiscover}
-		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-1 min-h-0 flex flex-col">
+		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-none sm:flex-1 min-h-0 flex flex-col">
 			<div class="flex items-center justify-between mb-3">
 				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Discover</h2>
 				<button
@@ -289,12 +378,16 @@
 				</button>
 			</div>
 		{#if discoverBooks.length > 0}
-   				<div class="grid h-full min-h-0 grid-flow-col gap-2.5 overflow-x-auto pb-0 items-stretch" style="grid-auto-columns: minmax(120px, 1fr);">
-					{#each discoverBooks.slice(0, dashboardConfig.discoverLimit) as book}
-						<a href="/book/{book.id}" class="group flex h-full min-w-0 flex-col">
-							<div class="flex-1 min-h-0 bg-slate-800 rounded-lg overflow-hidden mb-1.5 relative">
+				<div
+					bind:this={discoverBooksRowEl}
+					class="dashboard-book-row"
+					style="--dashboard-book-card-width: {dashboardBookCardWidth}px; --dashboard-book-row-gap: {dashboardBookRowGap}px;"
+				>
+					{#each discoverBooks.slice(0, visibleDiscoverBooksCount || 1) as book (book.id)}
+						<a href="/book/{book.id}" class="dashboard-book-item group flex min-w-0 flex-col self-start" animate:flip={{ duration: 90, easing: cubicOut }}>
+							<div class="aspect-[2/3] bg-slate-800 rounded-lg overflow-hidden mb-1.5 relative">
 								{#if book.cover_path}
-									<img src="/api/covers/{book.id}" alt={book.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform">
+									<img src="/api/covers/{book.id}/thumb" alt={book.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform" loading="lazy" decoding="async">
 								{:else}
 									<div class="w-full h-full flex items-center justify-center">
 										<svg class="w-12 h-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -307,15 +400,15 @@
  										<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
  									</div>
  								{/if}
- 								{#if formatOnCover && book.format}
- 									{@const formatColor = getFormatColor(book.format)}
- 									<div 
- 										class="absolute bottom-1 left-1 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase"
- 										style="background-color: {formatColor.bg}; color: {formatColor.text};"
- 									>
- 										{book.format}
- 									</div>
- 								{/if}
+								{#if formatOnCover && book.format}
+									{@const formatColor = getFormatColor(book.format)}
+									<div
+										class="absolute bottom-2 left-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+										style="background-color: {formatColor.bg}; color: {formatColor.text};"
+									>
+										{book.format}
+									</div>
+								{/if}
  							</div>
 							<div class="shrink-0">
 								<h3 class="text-xs font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
@@ -326,8 +419,8 @@
 							</div>
 						</a>
 					{/each}
- 				</div>
- 			{:else}
+				</div>
+			{:else}
  				<div class="text-center py-12">
  					<svg class="w-16 h-16 text-[var(--color-primary-400)] mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
  						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
@@ -420,3 +513,26 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.dashboard-book-row {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: var(--dashboard-book-row-gap, 16px);
+		width: 100%;
+		min-width: 0;
+		overflow: hidden;
+	}
+
+	.dashboard-book-item {
+		flex: 0 0 var(--dashboard-book-card-width, 148px);
+		width: var(--dashboard-book-card-width, 148px);
+		min-width: 0;
+		transition: transform 180ms ease, opacity 180ms ease;
+	}
+
+	.dashboard-book-item a {
+		width: 100%;
+	}
+</style>

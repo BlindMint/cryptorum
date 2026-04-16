@@ -1,9 +1,18 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import AutocompleteInput from '$lib/components/AutocompleteInput.svelte';
+	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
+	import {
+		getBookReaderHref,
+		getFormatDisplayLabel,
+		getPreferredBookFormat,
+		getPreferredTextFormat,
+		getReaderRouteKind,
+		getSpeedReaderHref,
+		uniqueBookFormats
+	} from '$lib/utils/book-formats';
 
 	let book = $state<any>(null);
 	let files = $state<any[]>([]);
@@ -15,8 +24,16 @@
 	let sessionsLoading = $state(false);
 	let similarBooks = $state<any[]>([]);
 	let similarLoading = $state(false);
+	let similarBooksLoaded = $state(false);
 	let saveError = $state<string | null>(null);
 	let showMetadataLookup = $state(false);
+	let showCoverModal = $state(false);
+	let showShelfPicker = $state(false);
+	let regeneratingCover = $state(false);
+	let shelves = $state<any[]>([]);
+	let shelfActionInProgress = $state(false);
+	let shelfActionMessage = $state('');
+	let formatMenuOpen = $state(false);
 	let convertMenuFileId = $state<number | null>(null);
 	let selectedConvertFormat = $state<'epub' | 'fb2' | 'txt' | 'rtf'>('epub');
 
@@ -29,19 +46,31 @@
 		{ value: 'finished', label: 'Already Read' }
 	];
 
-	onMount(async () => {
-		await fetchBook();
-	});
-
 	$effect(() => {
 		const bookId = $page.params.bookID;
 		if (bookId) {
-			fetchBook();
+			sessions = [];
+			similarBooks = [];
+			similarBooksLoaded = false;
+			void fetchBook();
+		}
+	});
+
+	$effect(() => {
+		if (book?.id && activeTab === 'similar' && !similarLoading && !similarBooksLoaded) {
+			void fetchSimilarBooks();
+		}
+	});
+
+	$effect(() => {
+		if (showShelfPicker) {
+			void fetchShelves();
 		}
 	});
 
 	async function fetchBook() {
 		loading = true;
+		formatMenuOpen = false;
 		const bookId = $page.params.bookID;
 		try {
 			const [bookRes, filesRes] = await Promise.all([
@@ -92,18 +121,30 @@
 	}
 
 	async function fetchSimilarBooks() {
-		if (similarBooks.length > 0) return;
+		if (!book?.id || similarLoading || similarBooksLoaded) return;
 		similarLoading = true;
 		const bookId = $page.params.bookID;
 		try {
 			const res = await fetch(`/api/books/${bookId}/similar?limit=6`);
 			if (res.ok) {
 				similarBooks = await res.json();
+				similarBooksLoaded = true;
 			}
 		} catch (e) {
 			console.error('Failed to fetch similar books:', e);
 		} finally {
 			similarLoading = false;
+		}
+	}
+
+	async function fetchShelves() {
+		try {
+			const res = await fetch('/api/shelves');
+			if (res.ok) {
+				shelves = await res.json();
+			}
+		} catch (e) {
+			console.error('Failed to fetch shelves:', e);
 		}
 	}
 
@@ -193,13 +234,41 @@
 		return hoveredPath === fullPath || !!fullPath.startsWith((hoveredPath || '') + '.');
 	}
 
-	function getReaderUrl(format: string): string {
-		const f = format.toLowerCase();
-		if (['mp3', 'm4b', 'm4a', 'opus', 'ogg', 'aac'].includes(f)) return `/reader/audio/${book.id}`;
-		if (['pdf'].includes(f)) return `/reader/pdf/${book.id}`;
-		if (['cbz', 'cbr', 'cb7', 'cbt'].includes(f)) return `/reader/cbx/${book.id}`;
-		return `/reader/epub/${book.id}`;
+	function getReadableFormats(): string[] {
+		return uniqueBookFormats(files).filter((format) => {
+			if (format === 'cb7') return false;
+			return getReaderRouteKind(format) !== null;
+		});
 	}
+
+	function getSpeedReadableFormats(): string[] {
+		return uniqueBookFormats(files).filter((format) => format === 'pdf' || getReaderRouteKind(format) === 'epub');
+	}
+
+	function getPrimaryReadFormat(): string | null {
+		const preferred = getPreferredBookFormat(files);
+		const readable = getReadableFormats();
+		if (preferred && readable.includes(preferred)) {
+			return preferred;
+		}
+		return readable[0] || null;
+	}
+
+	function getPrimarySpeedReadFormat(): string | null {
+		const speedReadable = getSpeedReadableFormats();
+		const preferredText = getPreferredTextFormat(files);
+		if (preferredText && speedReadable.includes(preferredText)) {
+			return preferredText;
+		}
+		if (speedReadable.includes('pdf')) {
+			return 'pdf';
+		}
+		return speedReadable[0] || null;
+	}
+
+	const readableFormats = $derived(getReadableFormats());
+	const primaryReadFormat = $derived(getPrimaryReadFormat());
+	const primarySpeedReadFormat = $derived(getPrimarySpeedReadFormat());
 
 	function formatSize(bytes: number): string {
 		if (bytes < 1024) return bytes + ' B';
@@ -297,6 +366,7 @@
 			genres: parseJsonArray(book.genres || '[]').join(', '),
 			tags: parseJsonArray(book.tags || '[]').join(', '),
 			isbn: book.isbn || '',
+			asin: book.asin || '',
 			language: book.language || '',
 			page_count: book.page_count || 0
 		};
@@ -315,6 +385,70 @@
 			startEditing();
 		}
 		showMetadataLookup = false;
+	}
+
+	function openCoverModal() {
+		if (book?.cover_path) {
+			showCoverModal = true;
+		}
+	}
+
+	function openShelfPicker() {
+		showShelfPicker = true;
+		shelfActionMessage = '';
+	}
+
+	async function addBookToShelf(shelfId: number) {
+		if (!book?.id || shelfActionInProgress) return;
+		shelfActionInProgress = true;
+		shelfActionMessage = '';
+		try {
+			const res = await fetch(`/api/shelves/${shelfId}/books`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ book_id: book.id })
+			});
+			if (res.ok) {
+				shelfActionMessage = 'Added to shelf';
+				await fetchShelves();
+			} else {
+				shelfActionMessage = await res.text() || 'Failed to add book';
+			}
+		} catch (e) {
+			console.error('Failed to add book to shelf:', e);
+			shelfActionMessage = 'Failed to add book';
+		} finally {
+			shelfActionInProgress = false;
+		}
+	}
+
+	function closeCoverModal() {
+		showCoverModal = false;
+	}
+
+	function handleCoverModalKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape' && showCoverModal) {
+			closeCoverModal();
+		}
+	}
+
+	async function regenerateCover() {
+		if (!book?.id || regeneratingCover) return;
+		regeneratingCover = true;
+		try {
+			const res = await fetch(`/api/books/${book.id}/cover/regenerate`, {
+				method: 'POST'
+			});
+			if (res.ok) {
+				await fetchBook();
+			} else {
+				console.error('Failed to regenerate cover:', await res.text());
+			}
+		} catch (e) {
+			console.error('Failed to regenerate cover:', e);
+		} finally {
+			regeneratingCover = false;
+		}
 	}
 
 	async function saveMetadata() {
@@ -355,6 +489,7 @@
  					genres: genresArray,
  					tags: tagsArray,
  					isbn: editForm.isbn,
+					asin: editForm.asin,
  					language: editForm.language,
  					page_count: editForm.page_count
 				})
@@ -451,16 +586,37 @@
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-6">
 				<div class="flex items-center justify-between mb-4">
 					<h3 class="text-lg font-medium text-[var(--color-surface-text)]">Edit Metadata</h3>
-					<button
-						onclick={() => showMetadataLookup = true}
-						type="button"
-						class="inline-flex items-center px-3 py-1.5 text-sm bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white rounded transition-colors"
-					>
-						<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-						</svg>
-						Lookup Metadata
-					</button>
+					<div class="flex flex-wrap items-center gap-2">
+						<button
+							onclick={regenerateCover}
+							type="button"
+							disabled={regeneratingCover}
+							class="inline-flex items-center px-3 py-1.5 text-sm bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] rounded transition-colors border border-[var(--color-surface-border)] disabled:opacity-50"
+						>
+							{#if regeneratingCover}
+								<svg class="animate-spin -ml-0.5 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
+									<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+									<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+								</svg>
+								Regenerating...
+							{:else}
+								<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+								</svg>
+								Regenerate Cover
+							{/if}
+						</button>
+						<button
+							onclick={() => showMetadataLookup = true}
+							type="button"
+							class="inline-flex items-center px-3 py-1.5 text-sm bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white rounded transition-colors"
+						>
+							<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+							</svg>
+							Lookup Metadata
+						</button>
+					</div>
 				</div>
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 					<div>
@@ -515,6 +671,10 @@
 					<div>
 						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-isbn">ISBN</label>
 						<input id="book-isbn" type="text" bind:value={editForm.isbn} class="w-full bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
+					</div>
+					<div>
+						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-asin">ASIN</label>
+						<input id="book-asin" type="text" bind:value={editForm.asin} class="w-full bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
 					</div>
 					<div>
 						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-pages">Pages</label>
@@ -622,19 +782,23 @@
 				</button>
 			</div>
 
-			<div class="flex flex-col md:flex-row gap-6">
-				<div class="w-full md:w-64 xl:w-72 flex-shrink-0">
-					<div class="aspect-[2/3] bg-slate-800 rounded-lg overflow-hidden border border-[var(--color-surface-border)]">
-						{#if book.cover_path}
-							<img src="/api/covers/{book.id}" alt={book.title} class="w-full h-full object-cover">
-						{:else}
-							<div class="w-full h-full flex items-center justify-center">
-								<svg class="w-12 h-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-								</svg>
-							</div>
-						{/if}
-					</div>
+				<div class="flex flex-col md:flex-row gap-6 md:items-start">
+					<div class="w-full max-w-[13rem] mx-auto md:mx-0 flex-shrink-0 flex flex-col">
+						<button
+							type="button"
+							onclick={openCoverModal}
+							class="block w-full text-left {book.cover_path ? 'cursor-zoom-in' : 'cursor-default'}"
+							disabled={!book.cover_path}
+							title={book.cover_path ? 'Open cover preview' : undefined}
+						>
+						<BookCoverFrame
+							src={book.cover_path ? `/api/covers/${book.id}` : null}
+							alt={book.title}
+							mode="contain"
+							frameClass="aspect-[2/3] w-full"
+							imageClass="transition-transform duration-200"
+						/>
+					</button>
 
 					<div class="mt-4">
 						<div class="flex items-center justify-between mb-2">
@@ -661,17 +825,53 @@
 						</div>
 					</div>
 
-					<div class="mt-4 flex flex-col gap-2">
-						<a
-							href={getReaderUrl(files[0]?.format || 'epub')}
-							class="flex items-center justify-center w-full px-4 py-2.5 bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white font-medium rounded-lg transition-colors text-sm"
-						>
-							{book.opened && book.percent > 0 ? 'Continue Reading' : 'Read Now'}
-						</a>
-						{#if files.some(f => ['epub', 'pdf'].includes(f.format?.toLowerCase()))}
+					<div class="mt-3 mb-4 md:mb-0 flex flex-col gap-2">
+						{#if primaryReadFormat}
+							<div class="relative">
+								<div class="flex w-full overflow-hidden rounded-lg">
+									<a
+										href={getBookReaderHref(book.id, primaryReadFormat)}
+										class="flex min-w-0 flex-1 items-center justify-between gap-3 bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] px-3 sm:px-4 py-2 text-sm font-medium text-white transition-colors"
+									>
+										<span class="truncate">{book.opened && book.percent > 0 ? 'Continue Reading' : 'Read Now'}</span>
+										<span class="text-[10px] uppercase tracking-[0.14em] text-white/80">{getFormatDisplayLabel(primaryReadFormat)}</span>
+									</a>
+									{#if readableFormats.length > 1}
+										<button
+											type="button"
+											onclick={() => formatMenuOpen = !formatMenuOpen}
+											class="inline-flex items-center justify-center border-l border-white/20 bg-[var(--color-primary-500)] px-3 text-white transition-colors hover:bg-[var(--color-primary-600)]"
+											aria-label="Choose reader format"
+											aria-expanded={formatMenuOpen}
+										>
+											<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+											</svg>
+										</button>
+									{/if}
+								</div>
+								{#if formatMenuOpen && readableFormats.length > 1}
+									<div class="absolute right-0 top-full z-20 mt-2 w-56 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-800)] shadow-lg">
+										{#each readableFormats.filter((format) => format !== primaryReadFormat) as format}
+											<a
+												href={getBookReaderHref(book.id, format)}
+												onclick={() => formatMenuOpen = false}
+												class="flex items-center justify-between px-3 py-2 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)]"
+											>
+												<span>{getFormatDisplayLabel(format)}</span>
+												<span class="text-xs uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">
+													{getReaderRouteKind(format) || 'reader'}
+												</span>
+											</a>
+										{/each}
+									</div>
+								{/if}
+							</div>
+						{/if}
+						{#if primarySpeedReadFormat}
 							<a
-								href="/reader/speed/{book.id}"
-								class="flex items-center justify-center w-full px-4 py-2.5 bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] font-medium rounded-lg transition-colors text-sm border border-[var(--color-surface-border)]"
+								href={getSpeedReaderHref(book.id, primarySpeedReadFormat)}
+								class="flex items-center justify-center w-full px-3 sm:px-4 py-2 bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] font-medium rounded-lg transition-colors text-sm border border-[var(--color-surface-border)]"
 							>
 								<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
@@ -679,6 +879,16 @@
 								Speed Read
 							</a>
 						{/if}
+						<button
+							type="button"
+							onclick={openShelfPicker}
+							class="flex items-center justify-center w-full px-3 sm:px-4 py-2 bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] font-medium rounded-lg transition-colors text-sm border border-[var(--color-surface-border)]"
+						>
+							<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
+							</svg>
+							Add to Shelf
+						</button>
 					</div>
 				</div>
 
@@ -753,6 +963,10 @@
 							<dd class="text-sm text-[var(--color-surface-text)] font-mono">{book.isbn || '-'}</dd>
 						</div>
 						<div class="flex items-start gap-2">
+							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">ASIN</dt>
+							<dd class="text-sm text-[var(--color-surface-text)] font-mono">{book.asin || '-'}</dd>
+						</div>
+						<div class="flex items-start gap-2">
 							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Rating</dt>
 							<dd class="text-sm text-[var(--color-surface-text)] flex items-center gap-0.5">
 								{#if book.rating}
@@ -776,6 +990,18 @@
 								</button>
 							</dd>
 						</div>
+						{#if uniqueBookFormats(files).length > 0}
+							<div class="flex items-start gap-2 col-span-2">
+								<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Formats</dt>
+								<dd class="flex flex-wrap gap-2 min-w-0">
+									{#each uniqueBookFormats(files) as format}
+										<span class="rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-2.5 py-0.5 text-xs font-medium uppercase tracking-[0.08em] text-[var(--color-surface-text)]">
+											{getFormatDisplayLabel(format)}
+										</span>
+									{/each}
+								</dd>
+							</div>
+						{/if}
 						{#if book.series}
 							<div class="flex items-start gap-2 col-span-2">
 								<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Series</dt>
@@ -1071,3 +1297,109 @@
 		onApplied={refreshAfterMetadataApply}
 	/>
 {/if}
+
+{#if showShelfPicker}
+	<div class="fixed inset-0 z-[80] flex items-center justify-center p-4">
+		<button
+			type="button"
+			class="absolute inset-0 bg-black/70"
+			aria-label="Close shelf picker"
+			onclick={() => showShelfPicker = false}
+		></button>
+		<div class="relative w-full max-w-md overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
+			<div class="border-b border-[var(--color-surface-border)] px-5 py-4">
+				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add to Shelf</h3>
+				<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">{book.title || 'This book'}</p>
+			</div>
+			<div class="max-h-[60vh] overflow-y-auto p-4">
+				{#if shelves.length === 0}
+					<div class="py-6 text-center text-sm text-[var(--color-surface-text-muted)]">
+						No shelves yet.
+					</div>
+				{:else}
+					<div class="space-y-2">
+						{#each shelves as shelf}
+							<button
+								type="button"
+								onclick={() => addBookToShelf(shelf.id)}
+								disabled={shelfActionInProgress}
+								class="flex w-full items-center justify-between rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-700)] disabled:opacity-50"
+							>
+								<span class="flex min-w-0 items-center gap-3">
+									<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg {shelf.is_magic === 1 ? 'bg-purple-500/20 text-purple-300' : 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-400)]'}">
+										<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
+										</svg>
+									</span>
+									<span class="min-w-0">
+										<span class="block truncate text-sm font-medium text-[var(--color-surface-text)]">{shelf.name}</span>
+										<span class="block text-xs text-[var(--color-surface-text-muted)]">{shelf.book_count} books{#if shelf.is_magic === 1} · Magic{/if}</span>
+									</span>
+								</span>
+								<span class="text-xs font-medium text-[var(--color-primary-400)]">Add</span>
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
+			<div class="flex items-center justify-between gap-3 border-t border-[var(--color-surface-border)] px-5 py-4">
+				{#if shelfActionMessage}
+					<p class="text-sm text-[var(--color-surface-text-muted)]">{shelfActionMessage}</p>
+				{:else}
+					<span class="text-sm text-[var(--color-surface-text-muted)]">Choose a shelf to add this book.</span>
+				{/if}
+				<div class="flex items-center gap-3">
+					<a href="/shelves/new" class="text-sm text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">
+						New shelf
+					</a>
+					<button
+						type="button"
+						onclick={() => showShelfPicker = false}
+						class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)]"
+					>
+						Close
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if showCoverModal && book}
+	<div class="fixed inset-0 z-[140] flex items-center justify-center p-4">
+		<button
+			type="button"
+			class="absolute inset-0 bg-black/75"
+			onclick={closeCoverModal}
+			aria-label="Close cover preview"
+		></button>
+		<div class="relative z-[1] w-full max-w-3xl max-h-[90vh] overflow-auto rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
+			<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-4 py-3">
+				<div class="min-w-0">
+					<p class="text-sm font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Cover Preview'}</p>
+					<p class="text-xs text-[var(--color-surface-text-muted)]">Cover preview</p>
+				</div>
+				<button
+					type="button"
+					onclick={closeCoverModal}
+					class="rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-600)]"
+				>
+					Close
+				</button>
+			</div>
+			<div class="flex justify-center p-4">
+				<div class="w-full max-w-[24rem]">
+					<BookCoverFrame
+						src={book.cover_path ? `/api/covers/${book.id}` : null}
+						alt={book.title}
+						mode="contain"
+						frameClass="aspect-[2/3] w-full"
+						imageClass="object-contain p-2"
+					/>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<svelte:window onkeydown={handleCoverModalKeydown} />

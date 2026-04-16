@@ -164,8 +164,32 @@ func (s *Scanner) processFile(libraryID int64, path string, ownerUserID int64) (
 		return false, fmt.Errorf("failed to compute hash: %w", err)
 	}
 
-	// Check for existing file by hash (duplicate detection)
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext != "" {
+		ext = ext[1:]
+	}
+
+	// Check if path already exists before duplicate detection so rescans can repair
+	// weak metadata from older extraction logic.
+	var existingFileID int64
 	var existingBookID int64
+	var existingHash string
+	err = s.db.QueryRow("SELECT id, book_id, hash FROM book_file WHERE path = ?", path).Scan(&existingFileID, &existingBookID, &existingHash)
+	if err == nil {
+		if existingHash != hash {
+			s.db.Exec("UPDATE book_file SET hash = ?, last_modified = ? WHERE id = ?",
+				hash, info.ModTime().Unix(), existingFileID)
+			slog.Info("Updated file hash", "path", path)
+		}
+		if repairsExtractedMetadata(ext) {
+			if repairErr := s.repairWeakExtractedMetadata(existingBookID, path, ownerUserID); repairErr != nil {
+				slog.Debug("Skipped metadata repair", "path", path, "error", repairErr)
+			}
+		}
+		return false, nil
+	}
+
+	// Check for existing file by hash (duplicate detection)
 	err = s.db.QueryRow(`
 		SELECT b.id FROM book b
 		JOIN book_file bf ON b.id = bf.book_id
@@ -174,21 +198,6 @@ func (s *Scanner) processFile(libraryID int64, path string, ownerUserID int64) (
 	if err == nil {
 		slog.Debug("File already exists", "path", path, "hash", hash)
 		return false, nil
-	}
-
-	// Check if path exists but hash changed (file updated)
-	var existingFileID int64
-	err = s.db.QueryRow("SELECT id FROM book_file WHERE path = ?", path).Scan(&existingFileID)
-	if err == nil {
-		s.db.Exec("UPDATE book_file SET hash = ?, last_modified = ? WHERE id = ?",
-			hash, info.ModTime().Unix(), existingFileID)
-		slog.Info("Updated file hash", "path", path)
-		return false, nil
-	}
-
-	ext := strings.ToLower(filepath.Ext(path))
-	if ext != "" {
-		ext = ext[1:]
 	}
 
 	now := time.Now().Unix()
@@ -227,6 +236,15 @@ func (s *Scanner) processFile(libraryID int64, path string, ownerUserID int64) (
 	return true, nil
 }
 
+func repairsExtractedMetadata(ext string) bool {
+	switch ext {
+	case "pdf", "mobi", "azw3", "mp3", "m4a", "m4b", "flac", "ogg", "wav":
+		return true
+	default:
+		return false
+	}
+}
+
 // saveMetadata upserts book metadata and saves the cover image to disk
 func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerUserID int64) error {
 	authorsJSON, _ := json.Marshal(meta.Authors)
@@ -251,8 +269,8 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 	_, err := s.db.Exec(`
 		INSERT INTO book_metadata
 		    (book_id, title, authors, series, series_number, publisher, pub_date,
-		     description, rating, genres, isbn, language, page_count, cover_path, cover_updated_on, owner_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		     description, rating, genres, isbn, asin, language, page_count, cover_path, cover_updated_on, owner_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(book_id) DO UPDATE SET
 		    title         = COALESCE(NULLIF(excluded.title, ''), title),
 		    authors       = COALESCE(NULLIF(excluded.authors, '[]'), authors),
@@ -264,6 +282,7 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 		    rating        = COALESCE(NULLIF(excluded.rating, 0), rating),
 		    genres        = COALESCE(NULLIF(excluded.genres, '[]'), genres),
 		    isbn          = COALESCE(NULLIF(excluded.isbn, ''), isbn),
+		    asin          = COALESCE(NULLIF(excluded.asin, ''), asin),
 		    language      = COALESCE(NULLIF(excluded.language, ''), language),
 		    page_count    = COALESCE(NULLIF(excluded.page_count, 0), page_count),
 		    cover_path    = COALESCE(NULLIF(excluded.cover_path, ''), cover_path),
@@ -273,7 +292,7 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 		    END
 	`, bookID, meta.Title, string(authorsJSON), meta.Series, meta.SeriesNumber,
 		meta.Publisher, meta.PubDate, meta.Description, meta.Rating,
-		string(genresJSON), meta.ISBN, meta.Language, meta.PageCount, coverPath, coverUpdatedOn, ownerUserID)
+		string(genresJSON), meta.ISBN, meta.ASIN, meta.Language, meta.PageCount, coverPath, coverUpdatedOn, ownerUserID)
 
 	if err != nil {
 		return err
@@ -283,10 +302,90 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 		_ = os.Remove(existingCoverPath)
 	}
 
-	// Sync to FTS index
-	s.syncFTS(bookID, meta.Title, meta.Authors, meta.Description, meta.Series)
+	s.syncFTSFromDB(bookID)
 
 	return nil
+}
+
+func (s *Scanner) repairWeakExtractedMetadata(bookID int64, path string, ownerUserID int64) error {
+	var title, authorsRaw, publisher, pubDate, coverPath string
+	var pageCount int
+	err := s.db.QueryRow(`
+		SELECT COALESCE(title, ''), COALESCE(authors, '[]'), COALESCE(publisher, ''),
+		       COALESCE(pub_date, ''), COALESCE(page_count, 0), COALESCE(cover_path, '')
+		FROM book_metadata
+		WHERE book_id = ?
+	`, bookID).Scan(&title, &authorsRaw, &publisher, &pubDate, &pageCount, &coverPath)
+	if err != nil {
+		return err
+	}
+
+	generated := metadata.ExtractFilename(path)
+	oldFilenameShape := strings.EqualFold(strings.TrimSpace(title), strings.TrimSpace(generated.Title)) &&
+		sameStringList(authorsRaw, generated.Authors)
+	missingUsefulFields := publisher == "" || pubDate == "" || pageCount == 0 || coverPath == ""
+	if !oldFilenameShape && !missingUsefulFields {
+		return nil
+	}
+
+	extracted, err := metadata.Extract(path)
+	if err != nil || extracted == nil || extracted.Source == "filename" {
+		return err
+	}
+
+	if err := s.saveMetadata(bookID, extracted, ownerUserID); err != nil {
+		return err
+	}
+
+	if oldFilenameShape && strings.TrimSpace(extracted.Title) != "" && len(extracted.Authors) > 0 {
+		authorsJSON, _ := json.Marshal(extracted.Authors)
+		_, err = s.db.Exec(`
+			UPDATE book_metadata
+			SET title = ?, authors = ?
+			WHERE book_id = ?
+		`, extracted.Title, string(authorsJSON), bookID)
+		if err != nil {
+			return err
+		}
+		s.syncFTS(bookID, extracted.Title, extracted.Authors, extracted.Description, extracted.Series)
+	}
+
+	return nil
+}
+
+func sameStringList(raw string, expected []string) bool {
+	var existing []string
+	if err := json.Unmarshal([]byte(raw), &existing); err != nil {
+		return false
+	}
+	if len(existing) != len(expected) {
+		return false
+	}
+	for i := range existing {
+		if !strings.EqualFold(strings.TrimSpace(existing[i]), strings.TrimSpace(expected[i])) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Scanner) syncFTSFromDB(bookID int64) {
+	var title, authorsRaw, description, series string
+	err := s.db.QueryRow(`
+		SELECT COALESCE(title, ''), COALESCE(authors, '[]'), COALESCE(description, ''), COALESCE(series, '')
+		FROM book_metadata
+		WHERE book_id = ?
+	`, bookID).Scan(&title, &authorsRaw, &description, &series)
+	if err != nil {
+		slog.Warn("Failed to read metadata for FTS sync", "bookID", bookID, "error", err)
+		return
+	}
+
+	var authors []string
+	if err := json.Unmarshal([]byte(authorsRaw), &authors); err != nil {
+		authors = []string{}
+	}
+	s.syncFTS(bookID, title, authors, description, series)
 }
 
 // syncFTS updates the FTS5 index for a book

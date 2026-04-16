@@ -3,10 +3,11 @@
 	import { page } from '$app/stores';
 	import { browser } from '$app/environment';
 	import { readerSettings, waveformStyles, skipIntervalOptions, sleepTimerOptions, type AudioReaderSetting } from '$lib/stores/readerSettings';
+	import { normalizeBookFormat } from '$lib/utils/book-formats';
 
 	let book = $state<any>(null);
 	let loading = $state(true);
-	let audioElement: HTMLAudioElement;
+	let audioElement = $state<HTMLAudioElement | null>(null);
 	let isPlaying = $state(false);
 	let currentTime = $state(0);
 	let duration = $state(0);
@@ -18,16 +19,17 @@
 	let currentChapter = $state(0);
 	let sleepTimerRemaining = $state<number | null>(null);
 	let sleepTimerInterval: ReturnType<typeof setInterval> | null = null;
-	let waveformCanvas: HTMLCanvasElement;
+	let waveformCanvas = $state<HTMLCanvasElement | null>(null);
 	let waveformCtx: CanvasRenderingContext2D | null = null;
 	let audioContext: AudioContext | null = null;
 	let analyser: AnalyserNode | null = null;
-	let audioData: Uint8Array | null = null;
+	let audioData = $state<Uint8Array<ArrayBuffer> | null>(null);
 	let savedProgress = $state<any>(null);
 	let progressSaveTimeout: ReturnType<typeof setTimeout> | null = null;
 	let currentSessionId = $state<number | null>(null);
 	let sessionEnded = false;
 	let handlePageExit: (() => void) | null = null;
+	let requestedFormat = $state('');
 
 	let settings = $state<AudioReaderSetting>({
 		playbackSpeed: 1.0,
@@ -54,6 +56,7 @@
 			const res = await fetch(`/api/books/${bookId}`);
 			if (res.ok) {
 				book = await res.json();
+				requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
 				await fetchProgress();
 				await startSession();
 			}
@@ -258,11 +261,11 @@
 		sleepTimerRemaining = timerSeconds;
 		sleepTimerInterval = setInterval(() => {
 			if (sleepTimerRemaining !== null) {
-				sleepTimerRemaining--;
-				if (sleepTimerRemaining <= 0) {
-					audioElement.pause();
-					isPlaying = false;
-					clearInterval(sleepTimerInterval!);
+					sleepTimerRemaining--;
+					if (sleepTimerRemaining <= 0) {
+						audioElement?.pause();
+						isPlaying = false;
+						clearInterval(sleepTimerInterval!);
 					sleepTimerInterval = null;
 					sleepTimerRemaining = null;
 				}
@@ -449,7 +452,7 @@
 						ontimeupdate={handleTimeUpdate}
 						onloadedmetadata={handleLoadedMetadata}
 						onended={handleEnded}
-						src="/api/books/{book?.id}/file"
+						src={book?.id ? `/api/books/${book.id}/file${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}` : ''}
 					></audio>
 
 					<!-- Waveform -->

@@ -2,15 +2,21 @@ package metadata
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -26,9 +32,11 @@ type BookMetadata struct {
 	Rating       float64  `json:"rating,omitempty"`
 	Genres       []string `json:"genres"`
 	ISBN         string   `json:"isbn"`
+	ASIN         string   `json:"asin,omitempty"`
 	CoverData    []byte   `json:"-"` // Cover image data
 	PageCount    int      `json:"page_count,omitempty"`
 	Language     string   `json:"language,omitempty"`
+	Source       string   `json:"-"`
 }
 
 // Extract extracts metadata from a book file based on its format
@@ -54,6 +62,11 @@ func Extract(filePath string) (*BookMetadata, error) {
 	}
 }
 
+// ExtractFilename exposes the filename fallback parser for guarded metadata repair.
+func ExtractFilename(filePath string) *BookMetadata {
+	return extractFromFilename(filePath)
+}
+
 // EPUB metadata extraction
 type opfPackage struct {
 	XMLName  xml.Name    `xml:"package"`
@@ -73,8 +86,9 @@ type opfMetadata struct {
 }
 
 type opfIdentifier struct {
-	ID    string `xml:"id,attr"`
-	Value string `xml:",chardata"`
+	ID     string `xml:"id,attr"`
+	Scheme string `xml:"scheme,attr"`
+	Value  string `xml:",chardata"`
 }
 
 type opfCreator struct {
@@ -177,11 +191,15 @@ func extractEPUBMetadata(filePath string) (*BookMetadata, error) {
 		metadata.Language = pkg.Metadata.Language[0].Value
 	}
 
-	// Extract ISBN from identifiers
+	// Extract ISBN/ASIN from identifiers
 	for _, id := range pkg.Metadata.ISBN {
-		if strings.HasPrefix(id.Value, "978") || strings.HasPrefix(id.Value, "979") {
-			metadata.ISBN = id.Value
-			break
+		value := strings.TrimSpace(id.Value)
+		scheme := strings.ToLower(strings.TrimSpace(id.Scheme + " " + id.ID))
+		if metadata.ISBN == "" && (strings.HasPrefix(value, "978") || strings.HasPrefix(value, "979")) {
+			metadata.ISBN = value
+		}
+		if metadata.ASIN == "" && (strings.Contains(scheme, "asin") || looksLikeASIN(value)) {
+			metadata.ASIN = normalizeASIN(value)
 		}
 	}
 
@@ -193,7 +211,7 @@ func extractEPUBMetadata(filePath string) (*BookMetadata, error) {
 			for _, item := range pkg.Manifest.Items {
 				if item.ID == coverHref || item.Href == coverHref {
 					coverPath := filepath.Join(opfDir, item.Href)
-					metadata.CoverData = readZipEntry(reader, coverPath)
+					metadata.CoverData = readValidZipEntry(reader, coverPath)
 					break
 				}
 			}
@@ -207,7 +225,7 @@ func extractEPUBMetadata(filePath string) (*BookMetadata, error) {
 			if isImageFile(item.Href) && (strings.Contains(strings.ToLower(item.ID), "cover") ||
 				strings.Contains(strings.ToLower(item.Href), "cover")) {
 				coverPath := filepath.Join(opfDir, item.Href)
-				metadata.CoverData = readZipEntry(reader, coverPath)
+				metadata.CoverData = readValidZipEntry(reader, coverPath)
 				break
 			}
 		}
@@ -223,6 +241,50 @@ func extractEPUBMetadata(filePath string) (*BookMetadata, error) {
 	}
 
 	return metadata, nil
+}
+
+func normalizeASIN(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	var builder strings.Builder
+	for _, r := range value {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
+}
+
+func looksLikeASIN(value string) bool {
+	value = normalizeASIN(value)
+	if len(value) != 10 {
+		return false
+	}
+	if looksLikeISBN10(value) {
+		return false
+	}
+	hasLetter := false
+	for _, r := range value {
+		if r >= 'A' && r <= 'Z' {
+			hasLetter = true
+			break
+		}
+	}
+	return hasLetter
+}
+
+func looksLikeISBN10(value string) bool {
+	if len(value) != 10 {
+		return false
+	}
+	for i, r := range value {
+		if i == 9 && r == 'X' {
+			continue
+		}
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func readZipEntry(reader *zip.ReadCloser, path string) []byte {
@@ -243,16 +305,44 @@ func readZipEntry(reader *zip.ReadCloser, path string) []byte {
 	return nil
 }
 
-// PDF metadata extraction (simplified - using filename parsing)
+func readValidZipEntry(reader *zip.ReadCloser, path string) []byte {
+	data := readZipEntry(reader, path)
+	if isRenderableCoverData(data) {
+		return data
+	}
+	return nil
+}
+
+func isRenderableCoverData(data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+
+	if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+		return true
+	}
+	if len(data) >= 12 && bytes.Equal(data[:4], []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP")) {
+		return true
+	}
+
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return false
+	}
+	return strings.Contains(strings.ToLower(string(trimmed)), "<svg")
+}
+
 func extractPDFMetadata(filePath string) (*BookMetadata, error) {
-	// For now, use filename parsing
-	// Full PDF metadata extraction would require pdfcpu library
-	metadata := extractFromFilename(filePath)
+	metadata := &BookMetadata{
+		Authors: []string{},
+		Genres:  []string{},
+		Source:  "pdf",
+	}
 
 	// Try to open PDF and extract basic info
 	f, err := os.Open(filePath)
 	if err != nil {
-		return metadata, nil
+		return extractFromFilename(filePath), nil
 	}
 	defer f.Close()
 
@@ -260,15 +350,223 @@ func extractPDFMetadata(filePath string) (*BookMetadata, error) {
 	buf := make([]byte, 1024)
 	n, _ := f.Read(buf)
 	if n < 5 || string(buf[:5]) != "%PDF-" {
-		return metadata, nil
+		return extractFromFilename(filePath), nil
+	}
+
+	extractPDFInfoMetadata(filePath, metadata)
+	extractPDFXMPMetadata(filePath, metadata)
+
+	filenameMetadata := extractFromFilename(filePath)
+	if strings.TrimSpace(metadata.Title) == "" {
+		metadata.Title = filenameMetadata.Title
+	}
+	if len(metadata.Authors) == 0 {
+		metadata.Authors = filenameMetadata.Authors
+	}
+	if metadata.Series == "" {
+		metadata.Series = filenameMetadata.Series
+	}
+	if metadata.SeriesNumber == 0 {
+		metadata.SeriesNumber = filenameMetadata.SeriesNumber
 	}
 
 	metadata.CoverData = renderPDFCover(filePath)
-	if len(metadata.CoverData) == 0 {
+	if !isRenderableCoverData(metadata.CoverData) {
 		metadata.CoverData = findFolderCoverImage(filePath)
 	}
 
 	return metadata, nil
+}
+
+func extractPDFInfoMetadata(filePath string, metadata *BookMetadata) {
+	if _, err := exec.LookPath("pdfinfo"); err != nil {
+		return
+	}
+
+	cmd := exec.Command("pdfinfo", "-enc", "UTF-8", filePath)
+	output, err := cmd.Output()
+	if err != nil {
+		return
+	}
+
+	for _, line := range strings.Split(string(output), "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+
+		switch key {
+		case "Title":
+			metadata.Title = value
+		case "Author":
+			metadata.Authors = splitAuthors(value)
+		case "Subject":
+			metadata.Description = value
+		case "Pages":
+			if pages, err := strconv.Atoi(value); err == nil && pages > 0 {
+				metadata.PageCount = pages
+			}
+		case "CreationDate":
+			if metadata.PubDate == "" {
+				metadata.PubDate = normalizePDFInfoDate(value)
+			}
+		}
+	}
+}
+
+func extractPDFXMPMetadata(filePath string, metadata *BookMetadata) {
+	if _, err := exec.LookPath("pdfinfo"); err != nil {
+		return
+	}
+
+	cmd := exec.Command("pdfinfo", "-meta", filePath)
+	output, err := cmd.Output()
+	if err != nil || len(bytes.TrimSpace(output)) == 0 {
+		return
+	}
+
+	decoder := xml.NewDecoder(bytes.NewReader(output))
+	stack := []xml.Name{}
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			stack = append(stack, t.Name)
+		case xml.EndElement:
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		case xml.CharData:
+			text := strings.TrimSpace(string(t))
+			if text == "" || len(stack) == 0 {
+				continue
+			}
+			leaf := stack[len(stack)-1].Local
+			parent := ""
+			grandparent := ""
+			if len(stack) >= 2 {
+				parent = stack[len(stack)-2].Local
+			}
+			if len(stack) >= 3 {
+				grandparent = stack[len(stack)-3].Local
+			}
+
+			switch {
+			case leaf == "li" && parent == "Alt" && grandparent == "title":
+				metadata.Title = text
+			case leaf == "li" && parent == "Seq" && grandparent == "creator":
+				metadata.Authors = splitAuthors(text)
+			case leaf == "li" && parent == "Bag" && grandparent == "publisher" && metadata.Publisher == "":
+				metadata.Publisher = text
+			case leaf == "li" && parent == "Alt" && grandparent == "description" && metadata.Description == "":
+				metadata.Description = text
+			case leaf == "CreateDate" && metadata.PubDate == "":
+				metadata.PubDate = normalizeISODate(text)
+			case leaf == "MetadataDate" && metadata.PubDate == "":
+				metadata.PubDate = normalizeISODate(text)
+			case leaf == "Language" && metadata.Language == "":
+				metadata.Language = text
+			}
+		}
+	}
+}
+
+func splitAuthors(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+
+	separators := []string{";", " & ", " and "}
+	for _, separator := range separators {
+		if strings.Contains(value, separator) {
+			return cleanStringList(strings.Split(value, separator))
+		}
+	}
+	return cleanStringList(strings.Split(value, ","))
+}
+
+func splitList(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	if strings.Contains(value, ";") {
+		return cleanStringList(strings.Split(value, ";"))
+	}
+	return cleanStringList(strings.Split(value, ","))
+}
+
+func firstListValue(value string) string {
+	values := splitList(value)
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+func cleanStringList(values []string) []string {
+	out := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func normalizeISODate(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) >= 10 && value[4] == '-' && value[7] == '-' {
+		return value[:10]
+	}
+	if len(value) >= 4 && isDigits(value[:4]) {
+		return value[:4]
+	}
+	return value
+}
+
+func normalizePDFInfoDate(value string) string {
+	parts := strings.Fields(value)
+	if len(parts) >= 5 {
+		month := map[string]string{
+			"Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04",
+			"May": "05", "Jun": "06", "Jul": "07", "Aug": "08",
+			"Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12",
+		}[parts[1]]
+		if month != "" && isDigits(parts[2]) && isDigits(parts[4]) {
+			day, _ := strconv.Atoi(parts[2])
+			return fmt.Sprintf("%s-%s-%02d", parts[4], month, day)
+		}
+	}
+	if strings.HasPrefix(value, "D:") && len(value) >= 10 && isDigits(value[2:10]) {
+		return fmt.Sprintf("%s-%s-%s", value[2:6], value[6:8], value[8:10])
+	}
+	return normalizeISODate(value)
+}
+
+func isDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // CBX (comic book archive) metadata extraction
@@ -352,7 +650,7 @@ func extractCBXMetadata(filePath string) (*BookMetadata, error) {
 		metadata = extractFromFilename(filePath)
 	}
 
-	if len(metadata.CoverData) == 0 {
+	if !isRenderableCoverData(metadata.CoverData) {
 		metadata.CoverData = findFolderCoverImage(filePath)
 	}
 
@@ -386,7 +684,7 @@ func extractFirstZipImage(reader *zip.ReadCloser) []byte {
 		}
 		data, err := io.ReadAll(rc)
 		rc.Close()
-		if err == nil && len(data) > 0 {
+		if err == nil && isRenderableCoverData(data) {
 			return data
 		}
 	}
@@ -444,7 +742,7 @@ func findFolderCoverImage(filePath string) []byte {
 
 	for _, candidate := range candidates {
 		data, err := os.ReadFile(candidate.path)
-		if err == nil && len(data) > 0 {
+		if err == nil && isRenderableCoverData(data) {
 			return data
 		}
 	}
@@ -464,7 +762,21 @@ func renderPDFCover(filePath string) []byte {
 	defer os.RemoveAll(tempDir)
 
 	prefix := filepath.Join(tempDir, "cover")
-	cmd := exec.Command("pdftoppm", "-f", "1", "-singlefile", "-jpeg", "-r", "150", filePath, prefix)
+	cmd := exec.Command("pdftoppm", "-f", "1", "-singlefile", "-jpeg", "-r", "150", "-cropbox", filePath, prefix)
+	if err := cmd.Run(); err == nil {
+		if data, readErr := os.ReadFile(prefix + ".jpg"); readErr == nil && len(data) > 0 {
+			return data
+		}
+	}
+
+	cmd = exec.Command("pdftoppm", "-f", "1", "-singlefile", "-png", "-r", "150", "-cropbox", filePath, prefix)
+	if err := cmd.Run(); err == nil {
+		if data, readErr := os.ReadFile(prefix + ".png"); readErr == nil && len(data) > 0 {
+			return data
+		}
+	}
+
+	cmd = exec.Command("pdftoppm", "-f", "1", "-singlefile", "-jpeg", "-r", "150", filePath, prefix)
 	if err := cmd.Run(); err == nil {
 		if data, readErr := os.ReadFile(prefix + ".jpg"); readErr == nil && len(data) > 0 {
 			return data
@@ -484,17 +796,185 @@ func renderPDFCover(filePath string) []byte {
 
 // Audio metadata extraction (simplified)
 func extractAudioMetadata(filePath string) (*BookMetadata, error) {
-	// For a complete implementation, we would use dhowden/tag library
-	// For now, use filename parsing
-	metadata := extractFromFilename(filePath)
+	metadata := extractFFProbeMetadata(filePath)
+	if metadata == nil {
+		metadata = extractFromFilename(filePath)
+	}
+	if !isRenderableCoverData(metadata.CoverData) {
+		metadata.CoverData = findFolderCoverImage(filePath)
+	}
 	return metadata, nil
+}
+
+func extractFFProbeMetadata(filePath string) *BookMetadata {
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		return nil
+	}
+
+	cmd := exec.Command("ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", filePath)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	var parsed struct {
+		Format struct {
+			Tags map[string]string `json:"tags"`
+		} `json:"format"`
+	}
+	if err := json.Unmarshal(output, &parsed); err != nil {
+		return nil
+	}
+	if len(parsed.Format.Tags) == 0 {
+		return nil
+	}
+
+	tags := map[string]string{}
+	for key, value := range parsed.Format.Tags {
+		tags[strings.ToLower(key)] = strings.TrimSpace(value)
+	}
+
+	metadata := &BookMetadata{
+		Authors: []string{},
+		Genres:  []string{},
+		Source:  "ffprobe",
+	}
+	metadata.Title = firstNonEmpty(tags["title"], tags["album"])
+	author := firstNonEmpty(tags["artist"], tags["album_artist"], tags["author"], tags["composer"])
+	metadata.Authors = splitAuthors(author)
+	metadata.Publisher = tags["publisher"]
+	metadata.PubDate = normalizeISODate(firstNonEmpty(tags["date"], tags["year"]))
+	metadata.Genres = splitList(tags["genre"])
+	metadata.ISBN = firstNonEmpty(tags["isbn"], tags["isbn13"], tags["isbn10"])
+	metadata.ASIN = normalizeASIN(tags["asin"])
+	metadata.Description = firstNonEmpty(tags["description"], tags["comment"])
+	metadata.Language = tags["language"]
+
+	if metadata.Title == "" && len(metadata.Authors) == 0 && metadata.Publisher == "" && metadata.PubDate == "" {
+		return nil
+	}
+
+	filenameMetadata := extractFromFilename(filePath)
+	if metadata.Title == "" {
+		metadata.Title = filenameMetadata.Title
+	}
+	if len(metadata.Authors) == 0 {
+		metadata.Authors = filenameMetadata.Authors
+	}
+	return metadata
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 // MOBI metadata extraction (simplified)
 func extractMOBIMetadata(filePath string) (*BookMetadata, error) {
-	// MOBI format is complex, for now use filename parsing
-	metadata := extractFromFilename(filePath)
+	metadata := extractEbookMetaMetadata(filePath)
+	if metadata == nil {
+		metadata = extractFromFilename(filePath)
+	}
+	metadata.CoverData = extractEbookMetaCover(filePath)
+	if !isRenderableCoverData(metadata.CoverData) {
+		metadata.CoverData = findFolderCoverImage(filePath)
+	}
 	return metadata, nil
+}
+
+func extractEbookMetaMetadata(filePath string) *BookMetadata {
+	if _, err := exec.LookPath("ebook-meta"); err != nil {
+		return nil
+	}
+
+	cmd := exec.Command("ebook-meta", filePath)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	metadata := &BookMetadata{
+		Authors: []string{},
+		Genres:  []string{},
+		Source:  "ebook-meta",
+	}
+
+	for _, line := range strings.Split(string(output), "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+
+		switch key {
+		case "title":
+			metadata.Title = value
+		case "author(s)", "authors", "author":
+			metadata.Authors = splitAuthors(value)
+		case "publisher":
+			metadata.Publisher = value
+		case "published":
+			metadata.PubDate = normalizeISODate(value)
+		case "comments", "description":
+			metadata.Description = value
+		case "tags":
+			metadata.Genres = splitList(value)
+		case "isbn":
+			metadata.ISBN = value
+		case "languages", "language":
+			metadata.Language = firstListValue(value)
+		case "series":
+			metadata.Series = value
+		case "series index":
+			if parsed, err := strconv.ParseFloat(value, 64); err == nil {
+				metadata.SeriesNumber = parsed
+			}
+		}
+	}
+
+	if metadata.Title == "" && len(metadata.Authors) == 0 && metadata.Publisher == "" && metadata.ISBN == "" {
+		return nil
+	}
+
+	filenameMetadata := extractFromFilename(filePath)
+	if metadata.Title == "" {
+		metadata.Title = filenameMetadata.Title
+	}
+	if len(metadata.Authors) == 0 {
+		metadata.Authors = filenameMetadata.Authors
+	}
+	return metadata
+}
+
+func extractEbookMetaCover(filePath string) []byte {
+	if _, err := exec.LookPath("ebook-meta"); err != nil {
+		return nil
+	}
+
+	tempDir, err := os.MkdirTemp("", "cryptorum-ebook-cover-*")
+	if err != nil {
+		return nil
+	}
+	defer os.RemoveAll(tempDir)
+
+	coverPath := filepath.Join(tempDir, "cover.jpg")
+	cmd := exec.Command("ebook-meta", filePath, "--get-cover", coverPath)
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(coverPath)
+	if err != nil || !isRenderableCoverData(data) {
+		return nil
+	}
+	return data
 }
 
 // extractFromFilename extracts metadata from filename patterns
@@ -507,6 +987,7 @@ func extractFromFilename(filePath string) *BookMetadata {
 	metadata := &BookMetadata{
 		Authors: []string{},
 		Genres:  []string{},
+		Source:  "filename",
 	}
 
 	filename := filepath.Base(filePath)

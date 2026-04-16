@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { browser } from '$app/environment';
 	import { readerSettings, cbxFitModes, cbxScrollModes, type CbxReaderSetting } from '$lib/stores/readerSettings';
+	import { normalizeBookFormat } from '$lib/utils/book-formats';
 
 	let book = $state<any>(null);
 	let loading = $state(true);
@@ -38,6 +39,7 @@
 	let lastWheelNavigationAt = 0;
 	let sessionEnded = false;
 	let handlePageExit: (() => void) | null = null;
+	let requestedFormat = $state('');
 
 	const progress = $derived(numPages > 0 ? (currentPage / numPages) * 100 : 0);
 
@@ -47,9 +49,10 @@
 			const res = await fetch(`/api/books/${bookId}`);
 			if (res.ok) {
 				book = await res.json();
+				requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
 				await fetchProgress();
 				await startSession();
-				const pagesRes = await fetch(`/api/cbx/${bookId}/pages`);
+				const pagesRes = await fetch(`/api/cbx/${bookId}/pages${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`);
 				if (pagesRes.ok) {
 					const data = await pagesRes.json();
 					numPages = data.pages;
@@ -340,7 +343,7 @@
 	}
 
 	function getPageUrl(pageNum: number): string {
-		return `/api/cbx/${book.id}/page/${pageNum}`;
+		return `/api/cbx/${book.id}/page/${pageNum}${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`;
 	}
 
 	function resetToDefaults() {
@@ -503,7 +506,10 @@
 			onkeydown={(e) => { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); leftSidebarOpen = false; rightSidebarOpen = false; } }}
 		>
 			{#if loading}
-				<div class="loading-spinner"></div>
+				<div class="loading-state" aria-live="polite">
+					<div class="loading-spinner"></div>
+					<p>Loading comic...</p>
+				</div>
 			{:else if numPages > 0}
 				{#if settings.scrollMode === 'long-strip' || settings.scrollMode === 'infinite'}
 					<div class="long-strip">
@@ -549,28 +555,26 @@
 					</div>
 
 					<!-- Floating Nav Buttons -->
-					{#if settings.scrollMode !== 'long-strip' && settings.scrollMode !== 'infinite'}
-						<button
-							class="floating-nav floating-prev"
-							onclick={prevPage}
-							aria-label="Previous page"
-							disabled={settings.mangaMode || settings.readingDirection === 'rtl' ? currentPage >= numPages : currentPage <= 1}
-						>
-							<svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-								<polyline points="15 18 9 12 15 6"></polyline>
-							</svg>
-						</button>
-						<button
-							class="floating-nav floating-next"
-							onclick={nextPage}
-							aria-label="Next page"
-							disabled={settings.mangaMode || settings.readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= numPages}
-						>
-							<svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-								<polyline points="9 18 15 12 9 6"></polyline>
-							</svg>
-						</button>
-					{/if}
+					<button
+						class="floating-nav floating-prev"
+						onclick={prevPage}
+						aria-label="Previous page"
+						disabled={settings.mangaMode || settings.readingDirection === 'rtl' ? currentPage >= numPages : currentPage <= 1}
+					>
+						<svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<polyline points="15 18 9 12 15 6"></polyline>
+						</svg>
+					</button>
+					<button
+						class="floating-nav floating-next"
+						onclick={nextPage}
+						aria-label="Next page"
+						disabled={settings.mangaMode || settings.readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= numPages}
+					>
+						<svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<polyline points="9 18 15 12 9 6"></polyline>
+						</svg>
+					</button>
 				{/if}
 			{:else}
 				<div class="error-message">
@@ -751,6 +755,7 @@
 		flex-direction: column;
 		font-family: system-ui, -apple-system, sans-serif;
 		overflow: hidden;
+		min-width: 0;
 	}
 
 	.top-nav {
@@ -938,6 +943,7 @@
 		justify-content: center;
 		overflow: auto;
 		position: relative;
+		min-width: 0;
 	}
 
 	.page-viewer {
@@ -1006,6 +1012,20 @@
 		border-top-color: var(--color-primary-500, #22c55e);
 		border-radius: 50%;
 		animation: spin 1s linear infinite;
+	}
+
+	.loading-state {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 12px;
+		text-align: center;
+		color: var(--color-surface-text-muted, #94a3b8);
+	}
+
+	.loading-state p {
+		margin: 0;
+		font-size: 14px;
 	}
 
 	@keyframes spin { to { transform: rotate(360deg); } }
@@ -1161,5 +1181,98 @@
 		width: 18px;
 		height: 18px;
 		accent-color: var(--color-primary-500, #22c55e);
+	}
+
+	@media (max-width: 768px) {
+		.top-nav {
+			height: 44px;
+			padding: 0 8px;
+		}
+
+		.nav-left,
+		.nav-right {
+			gap: 2px;
+			min-width: 0;
+		}
+
+		.nav-center {
+			display: none;
+		}
+
+		.nav-btn {
+			width: 32px;
+			height: 32px;
+		}
+
+		.icon,
+		.icon-lg {
+			width: 18px;
+			height: 18px;
+		}
+
+		.page-controls {
+			gap: 2px;
+		}
+
+		.progress-bar {
+			height: 10px;
+		}
+
+		.left-sidebar,
+		.right-sidebar {
+			width: 100vw;
+			max-width: 100vw;
+		}
+
+		.left-sidebar {
+			border-right: none;
+		}
+
+		.right-sidebar {
+			border-left: none;
+		}
+
+		.cbx-container {
+			padding: 0 8px;
+		}
+
+		.page-viewer {
+			flex-direction: column;
+			gap: 12px;
+			width: 100%;
+		}
+
+		.page-image {
+			width: 100%;
+			height: auto;
+			max-height: calc(100vh - 120px);
+		}
+
+		.long-strip {
+			padding: 0 8px;
+		}
+
+		.strip-content {
+			padding: 12px 0 20px;
+		}
+
+		.floating-nav {
+			width: 36px;
+			height: 56px;
+			border-radius: 999px;
+		}
+
+		.floating-prev {
+			left: 8px;
+		}
+
+		.floating-next {
+			right: 8px;
+		}
+
+		.loading-spinner {
+			width: 40px;
+			height: 40px;
+		}
 	}
 </style>

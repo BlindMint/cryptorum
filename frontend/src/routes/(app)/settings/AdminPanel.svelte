@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
 
 	type AdminJob = {
 		id: number;
@@ -10,6 +11,7 @@
 		total_items: number;
 		completed_items: number;
 		failed_items: number;
+		result?: any;
 		error?: string;
 		created_at: number;
 		started_at?: number;
@@ -45,6 +47,7 @@
 	};
 
 	type BackupSettings = {
+		enabled: boolean;
 		cron: string;
 		keep_last: number;
 	};
@@ -69,11 +72,16 @@
 	let logFrom = $state('');
 	let logTo = $state('');
 	let backups = $state<BackupItem[]>([]);
-	let backupSettings = $state<BackupSettings>({ cron: '', keep_last: 14 });
+	let backupSettings = $state<BackupSettings>({ enabled: true, cron: '', keep_last: 14 });
 	let savingBackupSettings = $state(false);
 	let creatingBackup = $state(false);
 	let coverJobQueueing = $state<'all' | 'missing' | ''>('');
 	let coverJobMessage = $state('');
+	let backupsExpanded = $state(false);
+	let jobsExpanded = $state(false);
+	let notificationsExpanded = $state(false);
+	let logsExpanded = $state(false);
+	let reviewJob = $state<AdminJob | null>(null);
 
 	function formatTime(value: number) {
 		return new Intl.DateTimeFormat(undefined, {
@@ -141,6 +149,14 @@
 		}
 	}
 
+	function sectionBodyClass(expanded: boolean): string {
+		return expanded ? 'max-h-[70vh] overflow-auto' : 'max-h-[22rem] overflow-auto';
+	}
+
+	function sectionButtonLabel(expanded: boolean): string {
+		return expanded ? 'Show less' : 'Show all';
+	}
+
 	function buildLogExportUrl(format: 'json' | 'text') {
 		const params = new URLSearchParams();
 		params.set('format', format);
@@ -153,8 +169,10 @@
 		return `/api/logs?${params.toString()}`;
 	}
 
-	async function loadJobs() {
-		jobsLoading = true;
+	async function loadJobs(silent = false) {
+		if (!silent) {
+			jobsLoading = true;
+		}
 		jobError = '';
 		try {
 			const params = new URLSearchParams();
@@ -170,7 +188,9 @@
 			console.error('Failed to load jobs:', error);
 			jobError = 'Unable to load jobs.';
 		} finally {
-			jobsLoading = false;
+			if (!silent) {
+				jobsLoading = false;
+			}
 		}
 	}
 
@@ -227,7 +247,7 @@
 			if (res.ok) {
 				const data = await res.json();
 				backups = data.items ?? [];
-				backupSettings = data.settings ?? backupSettings;
+				backupSettings = { ...backupSettings, ...(data.settings ?? {}) };
 			} else {
 				backupError = 'Unable to load backups.';
 			}
@@ -249,6 +269,10 @@
 		await loadJobs();
 	}
 
+	function openMetadataReview(job: AdminJob) {
+		reviewJob = job;
+	}
+
 	async function markNotificationRead(notificationId: number) {
 		await fetch(`/api/notifications/${notificationId}/read`, { method: 'POST' });
 		await loadNotifications();
@@ -260,6 +284,12 @@
 		await loadNotifications();
 	}
 
+	async function deleteAllNotifications() {
+		if (!confirm('Dismiss all notifications?')) return;
+		await fetch('/api/notifications', { method: 'DELETE' });
+		await loadNotifications();
+	}
+
 	async function saveBackupSettings() {
 		savingBackupSettings = true;
 		backupError = '';
@@ -268,6 +298,7 @@
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
+					enabled: backupSettings.enabled,
 					cron: backupSettings.cron,
 					keep_last: backupSettings.keep_last
 				})
@@ -364,6 +395,11 @@
 
 	onMount(() => {
 		refreshAll();
+		const interval = setInterval(() => {
+			void loadJobs(true);
+			void loadNotifications();
+		}, 5000);
+		return () => clearInterval(interval);
 	});
 </script>
 
@@ -387,7 +423,13 @@
 				<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Backups</h3>
 				<p class="text-sm text-[var(--color-surface-text-muted)]">Manual backups, restore actions, and scheduled backup settings</p>
 			</div>
-			<div class="flex items-center gap-2">
+			<div class="flex flex-wrap items-center gap-2">
+				<button
+					onclick={() => backupsExpanded = !backupsExpanded}
+					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-[var(--color-primary-500)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] transition-colors"
+				>
+					{sectionButtonLabel(backupsExpanded)}
+				</button>
 				<button
 					onclick={createBackupNow}
 					disabled={creatingBackup}
@@ -403,7 +445,7 @@
 				</button>
 			</div>
 		</div>
-		<div class="grid gap-4 border-b border-[var(--color-surface-border)] p-6 lg:grid-cols-3">
+		<div class="grid gap-4 border-b border-[var(--color-surface-border)] p-6 lg:grid-cols-4">
 			<label class="space-y-2 lg:col-span-2">
 				<span class="text-sm font-medium text-[var(--color-surface-text)]">Backup Cron</span>
 				<input
@@ -412,6 +454,17 @@
 					placeholder="0 4 * * 1"
 					class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)]"
 				>
+			</label>
+			<label class="space-y-2">
+				<span class="text-sm font-medium text-[var(--color-surface-text)]">Automatic Backups</span>
+				<div class="flex items-center gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2">
+					<input
+						type="checkbox"
+						bind:checked={backupSettings.enabled}
+						class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+					>
+					<span class="text-sm text-[var(--color-surface-text)]">Enabled</span>
+				</div>
 			</label>
 			<label class="space-y-2">
 				<span class="text-sm font-medium text-[var(--color-surface-text)]">Keep Last</span>
@@ -435,7 +488,7 @@
 				{savingBackupSettings ? 'Saving...' : 'Save Backup Settings'}
 			</button>
 		</div>
-		<div class="p-6 space-y-3">
+		<div class={sectionBodyClass(backupsExpanded) + ' p-6 space-y-3'}>
 			{#if backupsLoading}
 				<div class="text-sm text-[var(--color-surface-text-muted)]">Loading backups...</div>
 			{:else if backupError}
@@ -490,6 +543,12 @@
 				</div>
 				<div class="flex flex-wrap items-center gap-2">
 					<button
+						onclick={() => jobsExpanded = !jobsExpanded}
+						class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-[var(--color-primary-500)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] transition-colors"
+					>
+						{sectionButtonLabel(jobsExpanded)}
+					</button>
+					<button
 						onclick={() => queueCoverJob('missing')}
 						disabled={coverJobQueueing !== ''}
 						class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors disabled:opacity-50"
@@ -516,7 +575,7 @@
 					</select>
 				</div>
 			</div>
-			<div class="p-6 space-y-4">
+			<div class={sectionBodyClass(jobsExpanded) + ' p-6 space-y-4'}>
 				{#if coverJobMessage}
 					<div class="text-sm text-emerald-300">{coverJobMessage}</div>
 				{/if}
@@ -550,12 +609,22 @@
 											<div class="text-xs text-red-300">{job.error}</div>
 										{/if}
 									</div>
-									<button
-										onclick={() => deleteJob(job.id)}
-										class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-xs text-[var(--color-surface-text-muted)] hover:border-red-500/50 hover:text-red-300 transition-colors"
-									>
-										Delete
-									</button>
+									<div class="flex shrink-0 items-center gap-2">
+										{#if job.job_type === 'metadata_lookup' && job.status !== 'queued' && job.status !== 'running'}
+											<button
+												onclick={() => openMetadataReview(job)}
+												class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors"
+											>
+												Review
+											</button>
+										{/if}
+										<button
+											onclick={() => deleteJob(job.id)}
+											class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-xs text-[var(--color-surface-text-muted)] hover:border-red-500/50 hover:text-red-300 transition-colors"
+										>
+											Delete
+										</button>
+									</div>
 								</div>
 							</div>
 						{/each}
@@ -565,13 +634,29 @@
 		</section>
 
 		<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] overflow-hidden">
-			<div class="flex items-center justify-between border-b border-[var(--color-surface-border)] px-6 py-4">
+			<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-6 py-4">
 				<div>
 					<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Notifications</h3>
 					<p class="text-sm text-[var(--color-surface-text-muted)]">{unreadCount} unread</p>
 				</div>
+				<div class="flex items-center gap-2">
+					{#if notifications.length > 0}
+						<button
+							onclick={deleteAllNotifications}
+							class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-red-500/50 hover:text-red-300 transition-colors"
+						>
+							Dismiss all
+						</button>
+					{/if}
+					<button
+						onclick={() => notificationsExpanded = !notificationsExpanded}
+						class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-[var(--color-primary-500)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] transition-colors"
+					>
+						{sectionButtonLabel(notificationsExpanded)}
+					</button>
+				</div>
 			</div>
-			<div class="p-6 space-y-3">
+			<div class={sectionBodyClass(notificationsExpanded) + ' p-6 space-y-3'}>
 				{#if notificationsLoading}
 					<div class="text-sm text-[var(--color-surface-text-muted)]">Loading notifications...</div>
 				{:else if notificationError}
@@ -608,7 +693,7 @@
 										onclick={() => deleteNotification(item.id)}
 										class="rounded-lg border border-[var(--color-surface-border)] px-2 py-1 text-xs text-red-300 hover:border-red-500/50"
 									>
-										Delete
+										Dismiss
 									</button>
 								</div>
 							</div>
@@ -619,16 +704,22 @@
 		</section>
 	</div>
 
-	<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] overflow-hidden">
-		<div class="flex items-center justify-between border-b border-[var(--color-surface-border)] px-6 py-4">
-			<div>
-				<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Logs</h3>
-				<p class="text-sm text-[var(--color-surface-text-muted)]">Searchable app events with export</p>
-			</div>
-			<div class="flex items-center gap-2">
-				<a href={buildLogExportUrl('text')} download class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors">
-					Export Text
-				</a>
+		<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] overflow-hidden">
+			<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-6 py-4">
+				<div>
+					<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Logs</h3>
+					<p class="text-sm text-[var(--color-surface-text-muted)]">Searchable app events with export</p>
+				</div>
+				<div class="flex flex-wrap items-center gap-2">
+					<button
+						onclick={() => logsExpanded = !logsExpanded}
+						class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-[var(--color-primary-500)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] transition-colors"
+					>
+						{sectionButtonLabel(logsExpanded)}
+					</button>
+					<a href={buildLogExportUrl('text')} download class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors">
+						Export Text
+					</a>
 				<a href={buildLogExportUrl('json')} download class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors">
 					Export JSON
 				</a>
@@ -674,7 +765,7 @@
 				</button>
 			</div>
 		</div>
-		<div class="p-6">
+		<div class={sectionBodyClass(logsExpanded) + ' p-6'}>
 			{#if logsLoading}
 				<div class="text-sm text-[var(--color-surface-text-muted)]">Loading logs...</div>
 			{:else if logError}
@@ -703,3 +794,12 @@
 		</div>
 	</section>
 </div>
+
+{#if reviewJob}
+	<BulkMetadataReviewModal
+		jobId={reviewJob.id}
+		initialJob={reviewJob}
+		onClose={() => reviewJob = null}
+		onApplied={loadJobs}
+	/>
+{/if}

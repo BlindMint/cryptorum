@@ -21,6 +21,7 @@ import (
 )
 
 type BackupSettingsResponse struct {
+	Enabled  bool   `json:"enabled"`
 	Cron     string `json:"cron"`
 	KeepLast int    `json:"keep_last"`
 }
@@ -41,6 +42,7 @@ type BackupListResponse struct {
 
 func currentBackupSettings() BackupSettingsResponse {
 	return BackupSettingsResponse{
+		Enabled:  appConfig.Tasks.DatabaseBackup.Enabled,
 		Cron:     appConfig.Tasks.DatabaseBackup.Cron,
 		KeepLast: appConfig.Tasks.DatabaseBackup.KeepLast,
 	}
@@ -60,6 +62,7 @@ func updateBackupSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cronValue := strings.TrimSpace(req.Cron)
+	enabled := req.Enabled
 	keepLast := req.KeepLast
 	if keepLast <= 0 {
 		keepLast = appConfig.Tasks.DatabaseBackup.KeepLast
@@ -68,18 +71,20 @@ func updateBackupSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := config.UpdateDatabaseBackupConfig(cronValue, keepLast); err != nil {
+	if err := config.UpdateDatabaseBackupConfig(enabled, cronValue, keepLast); err != nil {
 		slog.Error("Failed to persist database backup settings", "error", err)
 		errorResponse(w, http.StatusInternalServerError, "Failed to save backup settings")
 		return
 	}
 
+	appConfig.Tasks.DatabaseBackup.Enabled = enabled
 	appConfig.Tasks.DatabaseBackup.Cron = cronValue
 	appConfig.Tasks.DatabaseBackup.KeepLast = keepLast
 	startDatabaseBackupSchedule()
 
 	recordAppLog("info", "backup", "Updated backup schedule", map[string]any{
 		"cron":      cronValue,
+		"enabled":   enabled,
 		"keep_last": keepLast,
 	})
 
@@ -93,6 +98,10 @@ func startDatabaseBackupSchedule() {
 	if backupCronRunner != nil {
 		backupCronRunner.Stop()
 		backupCronRunner = nil
+	}
+
+	if !appConfig.Tasks.DatabaseBackup.Enabled {
+		return
 	}
 
 	cronSpec := strings.TrimSpace(appConfig.Tasks.DatabaseBackup.Cron)

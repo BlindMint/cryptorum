@@ -18,6 +18,11 @@
 	let buttonRef: HTMLButtonElement | null = null;
 	let panelRef = $state<HTMLDivElement | null>(null);
 	let refreshTimer: number | null = null;
+	let {
+		mobileMenu = false
+	} = $props<{
+		mobileMenu?: boolean;
+	}>();
 
 	function formatTime(value: number) {
 		return new Intl.DateTimeFormat(undefined, {
@@ -48,6 +53,11 @@
 
 	async function removeNotification(notificationId: number) {
 		await fetch(`/api/notifications/${notificationId}`, { method: 'DELETE' });
+		await loadNotifications();
+	}
+
+	async function dismissAllNotifications() {
+		await fetch('/api/notifications', { method: 'DELETE' });
 		await loadNotifications();
 	}
 
@@ -83,15 +93,27 @@
 	<button
 		bind:this={buttonRef}
 		onclick={() => open = !open}
-		class="relative p-2 rounded-lg text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors"
+		class={`relative rounded-lg text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors ${mobileMenu ? 'flex w-full items-center justify-between gap-3 px-0 py-0' : 'p-2'}`}
 		title="Notifications"
 		aria-label="Notifications"
 	>
-		<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
-		</svg>
-		{#if unreadCount > 0}
-			<span class="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 rounded-full bg-[var(--color-primary-500)] text-white text-[10px] font-semibold flex items-center justify-center">{unreadCount}</span>
+		{#if mobileMenu}
+			<span class="flex items-center gap-3">
+				<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
+				</svg>
+				<span class="text-sm font-medium text-[var(--color-surface-text)]">Notifications</span>
+			</span>
+			{#if unreadCount > 0}
+				<span class="min-w-5 h-5 px-1 rounded-full bg-[var(--color-primary-500)] text-white text-[10px] font-semibold flex items-center justify-center">{unreadCount}</span>
+			{/if}
+		{:else}
+			<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
+			</svg>
+			{#if unreadCount > 0}
+				<span class="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 rounded-full bg-[var(--color-primary-500)] text-white text-[10px] font-semibold flex items-center justify-center">{unreadCount}</span>
+			{/if}
 		{/if}
 	</button>
 
@@ -105,7 +127,14 @@
 					<div class="text-sm font-semibold text-[var(--color-surface-text)]">Notifications</div>
 					<div class="text-xs text-[var(--color-surface-text-muted)]">{unreadCount} unread</div>
 				</div>
-				<a href="/settings?tab=admin" class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Admin</a>
+				<div class="flex items-center gap-3">
+					{#if notifications.length > 0}
+						<button onclick={dismissAllNotifications} class="text-xs text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]">
+							Dismiss all
+						</button>
+					{/if}
+					<a href="/settings?tab=admin" class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Admin</a>
+				</div>
 			</div>
 			<div class="max-h-96 overflow-auto">
 				{#if notifications.length === 0}
@@ -130,7 +159,7 @@
 								{#if !item.read_at}
 									<button onclick={() => markNotificationRead(item.id)} class="text-xs text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]">Read</button>
 								{/if}
-								<button onclick={() => removeNotification(item.id)} class="text-xs text-red-300 hover:text-red-200">Delete</button>
+								<button onclick={() => removeNotification(item.id)} class="text-xs text-red-300 hover:text-red-200">Dismiss</button>
 							</div>
 						</div>
 					{/each}

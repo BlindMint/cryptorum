@@ -478,6 +478,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 // GetBookTextHandler extracts plain text from any supported book format for the speed reader
 func GetBookTextHandler(w http.ResponseWriter, r *http.Request) {
 	bookID := chi.URLParam(r, "bookID")
+	requestedFormat := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
 	current := getUserFromContext(r.Context())
 	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
 	if err != nil {
@@ -527,6 +528,9 @@ func GetBookTextHandler(w http.ResponseWriter, r *http.Request) {
 
 	for _, file := range files {
 		format := strings.ToLower(file.Format)
+		if requestedFormat != "" && !strings.EqualFold(format, requestedFormat) {
+			continue
+		}
 		filePath := translateHostPathToContainerPath(file.Path)
 		switch format {
 		case "pdf":
@@ -567,6 +571,7 @@ success:
 // GetEpubTextHandler extracts plain text from an EPUB for the speed reader
 func GetEpubTextHandler(w http.ResponseWriter, r *http.Request) {
 	bookID := chi.URLParam(r, "bookID")
+	requestedFormat := r.URL.Query().Get("format")
 	current := getUserFromContext(r.Context())
 	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
 	if err != nil {
@@ -583,17 +588,20 @@ func GetEpubTextHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var filePath string
-	err = appDB.QueryRow(`
-		SELECT path FROM book_file WHERE book_id = ? AND format = 'epub' LIMIT 1
-	`, bookID).Scan(&filePath)
+	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "EPUB file not found")
 		return
 	}
+	if !isSupportedTextBookFormat(format) {
+		errorResponse(w, http.StatusBadRequest, fmt.Sprintf(
+			"Format '%s' is not supported for speed reading.", format,
+		))
+		return
+	}
 
 	filePath = translateHostPathToContainerPath(filePath)
-	result, err := ensureProcessedTextBook(bookID, filePath, "epub")
+	result, err := ensureProcessedTextBook(bookID, filePath, format)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, fmt.Sprintf("Failed to extract text: %v", err))
 		return

@@ -2,6 +2,12 @@
 	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, removeCustomTheme, selectCustomTheme, generateId, type CustomTheme } from '$lib/stores/theme';
 	import ThemePreviewSwatch from './ThemePreviewSwatch.svelte';
 
+	let {
+		mobileMenu = false
+	} = $props<{
+		mobileMenu?: boolean;
+	}>();
+
 	let showDropdown = $state(false);
 	let showCustomThemeEditor = $state(false);
 	let editingTheme = $state<CustomTheme | null>(null);
@@ -289,12 +295,21 @@
 <div class="relative">
 	<button
 		onclick={() => showDropdown = !showDropdown}
-		class="p-2 rounded-lg text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors"
+		class={`rounded-lg text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors ${mobileMenu ? 'flex w-full items-center justify-between gap-3 px-0 py-0' : 'p-2'}`}
 		aria-label="Change theme"
 	>
-		<svg class="w-5 h-5" viewBox="0 -960 960 960" fill="currentColor">
-			<path d="M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 32.5-156t88-127Q256-817 330-848.5T488-880q80 0 151 27.5t124.5 76q53.5 48.5 85 115T880-518q0 115-70 176.5T640-280h-74q-9 0-12.5 5t-3.5 11q0 12 15 34.5t15 51.5q0 50-27.5 74T480-80Zm0-400Zm-177 23q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120-160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm200 0q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120 160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17ZM480-160q9 0 14.5-5t5.5-13q0-14-15-33t-15-57q0-42 29-67t71-25h70q66 0 113-38.5T800-518q0-121-92.5-201.5T488-800q-136 0-232 93t-96 227q0 133 93.5 226.5T480-160Z"/>
-		</svg>
+		{#if mobileMenu}
+			<span class="flex items-center gap-3">
+				<svg class="h-5 w-5" viewBox="0 -960 960 960" fill="currentColor">
+					<path d="M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 32.5-156t88-127Q256-817 330-848.5T488-880q80 0 151 27.5t124.5 76q53.5 48.5 85 115T880-518q0 115-70 176.5T640-280h-74q-9 0-12.5 5t-3.5 11q0 12 15 34.5t15 51.5q0 50-27.5 74T480-80Zm0-400Zm-177 23q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120-160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm200 0q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120 160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17ZM480-160q9 0 14.5-5t5.5-13q0-14-15-33t-15-57q0-42 29-67t71-25h70q66 0 113-38.5T800-518q0-121-92.5-201.5T488-800q-136 0-232 93t-96 227q0 133 93.5 226.5T480-160Z"/>
+				</svg>
+				<span class="text-sm font-medium text-[var(--color-surface-text)]">Theme</span>
+			</span>
+		{:else}
+			<svg class="w-5 h-5" viewBox="0 -960 960 960" fill="currentColor">
+				<path d="M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 32.5-156t88-127Q256-817 330-848.5T488-880q80 0 151 27.5t124.5 76q53.5 48.5 85 115T880-518q0 115-70 176.5T640-280h-74q-9 0-12.5 5t-3.5 11q0 12 15 34.5t15 51.5q0 50-27.5 74T480-80Zm0-400Zm-177 23q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120-160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm200 0q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120 160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17ZM480-160q9 0 14.5-5t5.5-13q0-14-15-33t-15-57q0-42 29-67t71-25h70q66 0 113-38.5T800-518q0-121-92.5-201.5T488-800q-136 0-232 93t-96 227q0 133 93.5 226.5T480-160Z"/>
+			</svg>
+		{/if}
 	</button>
 
 	{#if showDropdown}
@@ -306,32 +321,34 @@
 				{#if showCustomThemeEditor}
 					<div class="space-y-3">
 						<div class="flex items-center justify-between">
-							<h4 class="text-sm font-medium text-[var(--color-surface-text)]">
-								{editingTheme ? 'Edit Custom Theme' : 'Add Custom Theme'}
-							</h4>
-							<button
-								onclick={() => showCustomThemeEditor = false}
-								class="text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]"
-							>
+								<h4 class="text-sm font-medium text-[var(--color-surface-text)]">
+									{editingTheme ? 'Edit Custom Theme' : 'Add Custom Theme'}
+								</h4>
+								<button
+									type="button"
+									onclick={() => showCustomThemeEditor = false}
+									aria-label="Close custom theme editor"
+									class="text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]"
+								>
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
 								</svg>
 							</button>
-						</div>
-						<div>
-							<label class="block text-xs text-[var(--color-surface-text-muted)] mb-1">Theme Name</label>
-							<input
-								type="text"
-								bind:value={newThemeName}
-								placeholder="My Theme"
-								class="w-full px-3 py-2 rounded bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] text-sm"
-							/>
-						</div>
-						<div class="grid grid-cols-2 gap-3">
+							</div>
 							<div>
-								<label class="block text-xs text-[var(--color-surface-text-muted)] mb-2">Text Color</label>
-								<div class="flex items-start gap-3">
-						<div class="relative flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--color-surface-border)] shadow-inner" style="background-color: {resolvePreviewColor(newThemeFg, '#ffffff')};">
+								<div class="block text-xs text-[var(--color-surface-text-muted)] mb-1">Theme Name</div>
+								<input
+									type="text"
+									bind:value={newThemeName}
+									placeholder="My Theme"
+									class="w-full px-3 py-2 rounded bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] text-sm"
+								/>
+							</div>
+							<div class="grid grid-cols-2 gap-3">
+								<div>
+									<div class="block text-xs text-[var(--color-surface-text-muted)] mb-2">Text Color</div>
+									<div class="flex items-start gap-3">
+							<div class="relative flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--color-surface-border)] shadow-inner" style="background-color: {resolvePreviewColor(newThemeFg, '#ffffff')};">
 										<span class="absolute inset-0 ring-1 ring-inset ring-black/10"></span>
 										<input
 											type="color"
@@ -357,12 +374,12 @@
 											class="w-full px-3 py-2 rounded bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] text-sm font-mono"
 										/>
 									</div>
+									</div>
 								</div>
-							</div>
-							<div>
-								<label class="block text-xs text-[var(--color-surface-text-muted)] mb-2">Background Color</label>
-								<div class="flex items-start gap-3">
-						<div class="relative flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--color-surface-border)] shadow-inner" style="background-color: {resolvePreviewColor(newThemeBg, '#111111')};">
+								<div>
+									<div class="block text-xs text-[var(--color-surface-text-muted)] mb-2">Background Color</div>
+									<div class="flex items-start gap-3">
+							<div class="relative flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--color-surface-border)] shadow-inner" style="background-color: {resolvePreviewColor(newThemeBg, '#111111')};">
 										<span class="absolute inset-0 ring-1 ring-inset ring-black/10"></span>
 										<input
 											type="color"
@@ -394,18 +411,20 @@
 						<p class="text-xs text-[var(--color-surface-text-muted)]">
 							Use HEX like <span class="font-mono">#ffffff</span> or RGB like <span class="font-mono">rgb(255, 255, 255)</span>.
 						</p>
-						<div class="flex justify-end gap-2">
-							<button
-								onclick={() => showCustomThemeEditor = false}
-								class="px-3 py-1.5 text-sm rounded bg-[var(--color-surface-base)] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)] transition-colors"
-							>
+							<div class="flex justify-end gap-2">
+								<button
+									type="button"
+									onclick={() => showCustomThemeEditor = false}
+									class="px-3 py-1.5 text-sm rounded bg-[var(--color-surface-base)] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)] transition-colors"
+								>
 								Cancel
-							</button>
-							<button
-								onclick={saveCustomTheme}
-								disabled={!canSaveCustomTheme}
-								class="px-3 py-1.5 text-sm rounded bg-[var(--color-primary-500)] text-white hover:bg-[var(--color-primary-600)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-							>
+								</button>
+								<button
+									type="button"
+									onclick={saveCustomTheme}
+									disabled={!canSaveCustomTheme}
+									class="px-3 py-1.5 text-sm rounded bg-[var(--color-primary-500)] text-white hover:bg-[var(--color-primary-600)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+								>
 								{editingTheme ? 'Update' : 'Add'} Theme
 							</button>
 						</div>
@@ -413,41 +432,45 @@
 				{:else}
 					{#if $currentTheme.appearance.customThemes && $currentTheme.appearance.customThemes.length > 0}
 						<div>
-							<div class="flex items-center justify-between mb-2">
-								<div class="text-xs font-medium text-[var(--color-surface-text-muted)] uppercase tracking-wider">Custom Themes</div>
-								<button
-									onclick={openAddCustomTheme}
-									class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)] font-medium"
-								>
+								<div class="flex items-center justify-between mb-2">
+									<div class="text-xs font-medium text-[var(--color-surface-text-muted)] uppercase tracking-wider">Custom Themes</div>
+									<button
+										type="button"
+										onclick={openAddCustomTheme}
+										class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)] font-medium"
+									>
 									+ Add
 								</button>
 							</div>
 							<div class="grid grid-cols-2 gap-2">
-								{#each $currentTheme.appearance.customThemes as theme}
-									<div class="relative group">
-										<button
-											onclick={() => selectTheme(theme.id)}
-											class="w-full flex items-center gap-2 p-2 rounded-lg border-2 transition-all {$currentTheme.appearance.selectedCustomThemeId === theme.id ? 'border-[var(--color-primary-500)]' : 'border-[var(--color-surface-border)] hover:border-[var(--color-surface-500)]'}"
-										>
+									{#each $currentTheme.appearance.customThemes as theme}
+										<div class="relative group">
+											<button
+												type="button"
+												onclick={() => selectTheme(theme.id)}
+												class="w-full flex items-center gap-2 p-2 rounded-lg border-2 transition-all {$currentTheme.appearance.selectedCustomThemeId === theme.id ? 'border-[var(--color-primary-500)]' : 'border-[var(--color-surface-border)] hover:border-[var(--color-surface-500)]'}"
+											>
 											<ThemePreviewSwatch background={theme.background} foreground={theme.foreground} />
 											<div class="flex-1 min-w-0 text-left">
 												<div class="text-sm text-[var(--color-surface-text)] truncate">{theme.name}</div>
 											</div>
 										</button>
-										<div class="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-											<button
-												onclick={(e) => openEditCustomTheme(e, theme)}
-												aria-label={`Edit ${theme.name} theme`}
-												class="p-1 rounded bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text-muted)]"
+											<div class="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+												<button
+													type="button"
+													onclick={(e) => openEditCustomTheme(e, theme)}
+													aria-label={`Edit ${theme.name} theme`}
+													class="p-1 rounded bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text-muted)]"
 											>
 												<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
 												</svg>
-											</button>
-											<button
-												onclick={(e) => deleteCustomTheme(e, theme.id)}
-												aria-label={`Delete ${theme.name} theme`}
-												class="p-1 rounded bg-red-500/20 hover:bg-red-500/40 text-red-400"
+												</button>
+												<button
+													type="button"
+													onclick={(e) => deleteCustomTheme(e, theme.id)}
+													aria-label={`Delete ${theme.name} theme`}
+													class="p-1 rounded bg-red-500/20 hover:bg-red-500/40 text-red-400"
 											>
 												<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -462,12 +485,13 @@
 
 					<div>
 						<div class="text-xs font-medium text-[var(--color-surface-text-muted)] mb-3 uppercase tracking-wider">Primary</div>
-						<div class="grid grid-cols-10 gap-2">
-							{#each primaryColors as color}
-								<button
-									onclick={(e) => { handleButtonClick(e); selectPrimary(color); }}
-									class="w-6 h-6 rounded-full border border-[var(--color-surface-border)] {getPrimaryColorClass(color)} {$currentTheme.primary === color ? 'ring-2 ring-[var(--color-surface-text)]' : ''} transition-all hover:scale-110"
-									aria-label={`Select ${color} primary color`}
+							<div class="grid grid-cols-10 gap-2">
+								{#each primaryColors as color}
+									<button
+										type="button"
+										onclick={(e) => { handleButtonClick(e); selectPrimary(color); }}
+										class="w-6 h-6 rounded-full border border-[var(--color-surface-border)] {getPrimaryColorClass(color)} {$currentTheme.primary === color ? 'ring-2 ring-[var(--color-surface-text)]' : ''} transition-all hover:scale-110"
+										aria-label={`Select ${color} primary color`}
 								></button>
 							{/each}
 						</div>
@@ -475,22 +499,24 @@
 
 					<div>
 						<div class="text-xs font-medium text-[var(--color-surface-text-muted)] mb-3 uppercase tracking-wider">Surface</div>
-						<div class="grid grid-cols-6 gap-2">
-							{#each surfaceColors as color}
-								<button
-									onclick={(e) => { handleButtonClick(e); selectSurface(color); }}
-									class="w-8 h-8 rounded-lg border border-[var(--color-surface-border)] {getSurfaceColorClass(color)} {$currentTheme.surface === color ? 'ring-2 ring-[var(--color-surface-text)]' : ''} transition-all hover:scale-105"
-									aria-label={`Select ${color} surface`}
+							<div class="grid grid-cols-6 gap-2">
+								{#each surfaceColors as color}
+									<button
+										type="button"
+										onclick={(e) => { handleButtonClick(e); selectSurface(color); }}
+										class="w-8 h-8 rounded-lg border border-[var(--color-surface-border)] {getSurfaceColorClass(color)} {$currentTheme.surface === color ? 'ring-2 ring-[var(--color-surface-text)]' : ''} transition-all hover:scale-105"
+										aria-label={`Select ${color} surface`}
 								></button>
 							{/each}
 						</div>
 					</div>
 
-					{#if !$currentTheme.appearance.customThemes || $currentTheme.appearance.customThemes.length === 0}
-						<button
-							onclick={openAddCustomTheme}
-							class="w-full py-2 text-sm text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)] border border-dashed border-[var(--color-surface-border)] hover:border-[var(--color-primary-500)] rounded-lg transition-colors"
-						>
+						{#if !$currentTheme.appearance.customThemes || $currentTheme.appearance.customThemes.length === 0}
+							<button
+								type="button"
+								onclick={openAddCustomTheme}
+								class="w-full py-2 text-sm text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)] border border-dashed border-[var(--color-surface-border)] hover:border-[var(--color-primary-500)] rounded-lg transition-colors"
+							>
 							+ Add Custom Theme
 						</button>
 					{/if}

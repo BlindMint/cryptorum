@@ -208,6 +208,7 @@ func initRoutes(r *chi.Mux) {
 				r.Get("/progress", GetReadingProgressHandler)
 				r.Put("/progress", UpdateReadingProgressHandler)
 				r.Put("/speed-reader", UpdateSpeedReaderProgressHandler)
+				r.Post("/cover/regenerate", RegenerateBookCoverHandler)
 				r.Get("/annotations", GetAnnotationsHandler)
 				r.Post("/annotations", CreateAnnotationHandler)
 				r.Delete("/annotations/{id}", DeleteAnnotationHandler)
@@ -275,6 +276,8 @@ func initRoutes(r *chi.Mux) {
 		// Admin workflow
 		r.Route("/jobs", func(r chi.Router) {
 			r.Get("/", ListJobsHandler)
+			r.Get("/{jobID}", GetJobHandler)
+			r.Post("/metadata-lookup", QueueMetadataLookupJobHandler)
 			r.Post("/metadata-apply", QueueMetadataApplyJobHandler)
 			r.Delete("/{jobID}", DeleteJobHandler)
 		})
@@ -293,6 +296,7 @@ func initRoutes(r *chi.Mux) {
 		})
 		r.Route("/notifications", func(r chi.Router) {
 			r.Get("/", ListNotificationsHandler)
+			r.Delete("/", DeleteAllNotificationsHandler)
 			r.Post("/{notificationID}/read", MarkNotificationReadHandler)
 			r.Delete("/{notificationID}", DeleteNotificationHandler)
 		})
@@ -539,6 +543,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(bm.title, '') as title,
 		       COALESCE(bm.authors, '[]') as authors,
 		       COALESCE(bm.cover_path, '') as cover_path,
+		       COALESCE(bm.cover_updated_on, 0) as cover_updated_on,
 		       COALESCE(rp.status, 'unread') as status,
 		       COALESCE(rp.percent, 0) as percent,
 		       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened,
@@ -575,16 +580,17 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type BookResponse struct {
-		ID        int64   `json:"id"`
-		LibraryID int64   `json:"library_id"`
-		AddedAt   int64   `json:"added_at"`
-		Title     string  `json:"title"`
-		Authors   string  `json:"authors"`
-		CoverPath string  `json:"cover_path"`
-		Status    string  `json:"status"`
-		Percent   float64 `json:"percent"`
-		Opened    bool    `json:"opened"`
-		Format    string  `json:"format"`
+		ID             int64   `json:"id"`
+		LibraryID      int64   `json:"library_id"`
+		AddedAt        int64   `json:"added_at"`
+		Title          string  `json:"title"`
+		Authors        string  `json:"authors"`
+		CoverPath      string  `json:"cover_path"`
+		CoverUpdatedOn int64   `json:"cover_updated_on"`
+		Status         string  `json:"status"`
+		Percent        float64 `json:"percent"`
+		Opened         bool    `json:"opened"`
+		Format         string  `json:"format"`
 	}
 
 	type BooksResponse struct {
@@ -598,7 +604,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var b BookResponse
 		var opened int
-		if err := rows.Scan(&b.ID, &b.LibraryID, &b.AddedAt, &b.Title, &b.Authors, &b.CoverPath, &b.Status, &b.Percent, &opened, &b.Format); err != nil {
+		if err := rows.Scan(&b.ID, &b.LibraryID, &b.AddedAt, &b.Title, &b.Authors, &b.CoverPath, &b.CoverUpdatedOn, &b.Status, &b.Percent, &opened, &b.Format); err != nil {
 			continue
 		}
 		b.Opened = opened == 1
@@ -648,6 +654,7 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 		Genres             string  `json:"genres"`
 		Tags               string  `json:"tags"`
 		ISBN               string  `json:"isbn"`
+		ASIN               string  `json:"asin"`
 		Language           string  `json:"language"`
 		PageCount          int     `json:"page_count"`
 		Status             string  `json:"status"`
@@ -673,6 +680,7 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(bm.genres, '[]') as genres,
 		       COALESCE(bm.tags, '[]') as tags,
 		       COALESCE(bm.isbn, '') as isbn,
+		       COALESCE(bm.asin, '') as asin,
 		       COALESCE(bm.language, '') as language,
 		       COALESCE(bm.page_count, 0) as page_count,
 		       COALESCE(rp.status, 'unread') as status,
@@ -688,7 +696,7 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 		&book.ID, &book.LibraryID, &book.AddedAt, &book.LibraryName,
 		&book.Title, &book.Authors, &book.Series, &book.SeriesNumber,
 		&book.Publisher, &book.PubDate, &book.Description, &book.CoverPath,
-		&book.Rating, &book.Genres, &book.Tags, &book.ISBN, &book.Language, &book.PageCount,
+		&book.Rating, &book.Genres, &book.Tags, &book.ISBN, &book.ASIN, &book.Language, &book.PageCount,
 		&book.Status, &book.Percent, &book.SpeedReaderPercent, &opened,
 	)
 
@@ -732,6 +740,7 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 		Genres       []string `json:"genres"`
 		Tags         []string `json:"tags"`
 		ISBN         string   `json:"isbn"`
+		ASIN         string   `json:"asin"`
 		Language     string   `json:"language"`
 		PageCount    int      `json:"page_count"`
 	}
@@ -747,8 +756,8 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 	// Upsert metadata
 	_, err = appDB.Exec(`
 		INSERT INTO book_metadata (book_id, title, authors, series, series_number, publisher, pub_date,
-		                           description, rating, genres, tags, isbn, language, page_count, owner_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		                           description, rating, genres, tags, isbn, asin, language, page_count, owner_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(book_id) DO UPDATE SET
 		    title = excluded.title,
 		    authors = excluded.authors,
@@ -761,11 +770,12 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 		    genres = excluded.genres,
 		    tags = excluded.tags,
 		    isbn = excluded.isbn,
+		    asin = excluded.asin,
 		    language = excluded.language,
 		    page_count = excluded.page_count,
 		    owner_user_id = excluded.owner_user_id
 	`, bookID, req.Title, string(authorsJSON), req.Series, req.SeriesNumber, req.Publisher, req.PubDate,
-		req.Description, req.Rating, string(genresJSON), string(tagsJSON), req.ISBN, req.Language, req.PageCount, current.ID)
+		req.Description, req.Rating, string(genresJSON), string(tagsJSON), req.ISBN, req.ASIN, req.Language, req.PageCount, current.ID)
 
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to update book metadata")
@@ -1918,9 +1928,9 @@ func searchBooksHandler(w http.ResponseWriter, r *http.Request) {
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
 		LEFT JOIN reading_progress rp ON b.id = rp.book_id
-		WHERE (`+ownerClause+`) AND (bm.title LIKE ? OR bm.authors LIKE ? OR bm.description LIKE ? OR COALESCE(bm.series, '') LIKE ?)
+		WHERE (`+ownerClause+`) AND (bm.title LIKE ? OR bm.authors LIKE ? OR bm.description LIKE ? OR COALESCE(bm.series, '') LIKE ? OR COALESCE(bm.asin, '') LIKE ?)
 		LIMIT 50
-	`, append(ownerArgs, likePattern, likePattern, likePattern, likePattern)...)
+	`, append(ownerArgs, likePattern, likePattern, likePattern, likePattern, likePattern)...)
 
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Search failed")
@@ -2432,13 +2442,29 @@ func updateBookdropHandler(w http.ResponseWriter, r *http.Request) {
 // getCbxPageCountHandler returns the total page count for a CBX archive
 func getCbxPageCountHandler(w http.ResponseWriter, r *http.Request) {
 	bookID := chi.URLParam(r, "bookID")
+	requestedFormat := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
 
-	var filePath string
-	err := appDB.QueryRow(`
-		SELECT path FROM book_file WHERE book_id = ? AND format IN ('cbz', 'cbr', 'cb7') LIMIT 1
-	`, bookID).Scan(&filePath)
+	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid book ID")
+		return
+	}
+
+	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	if err != nil || (requestedFormat == "" && format != "cbz" && format != "cbr" && format != "cb7") {
+		err = appDB.QueryRow(`
+			SELECT path, format FROM book_file
+			WHERE book_id = ? AND format IN ('cbz', 'cbr', 'cb7')
+			ORDER BY id
+			LIMIT 1
+		`, bookIDInt).Scan(&filePath, &format)
+	}
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "CBX file not found")
+		return
+	}
+	if format != "cbz" && format != "cbr" && format != "cb7" {
+		errorResponse(w, http.StatusBadRequest, fmt.Sprintf("Format '%s' is not supported for comic reading.", format))
 		return
 	}
 

@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { browser } from '$app/environment';
 	import { readerSettings, speedReaderThemes, fontFamilies, type SpeedReaderSetting } from '$lib/stores/readerSettings';
 	import { currentTheme as appThemeStore, resolveThemeColors, type FullTheme } from '$lib/stores/theme';
 	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
+	import { normalizeBookFormat } from '$lib/utils/book-formats';
 
 	interface ProcessedWord {
 		text: string;
@@ -25,7 +26,7 @@
 	let containerEl: HTMLDivElement;
 	let settingsPanelRef: HTMLDivElement | null = $state(null);
 	let wpmMenuRef: HTMLDivElement | null = $state(null);
-	let wordContainerEl: HTMLDivElement;
+	let wordContainerEl = $state<HTMLDivElement | null>(null);
 	let currentSessionId = $state<number | null>(null);
 	let lastWheelNavigationAt = 0;
 	let sessionEnded = false;
@@ -169,32 +170,45 @@
 		updateReaderTheme();
 	});
 
-	onMount(async () => {
-		await document.fonts?.ready;
-		const bookId = $page.params.bookID;
-		try {
-			const res = await fetch(`/api/books/${bookId}`);
-			if (res.ok) {
-				book = await res.json();
-				await fetchProgress();
-				await loadText();
-				await startSession();
-			}
-		} catch (e) {
-			console.error('Failed to load book:', e);
-		} finally {
-			loading = false;
-		}
-
-		handlePageExit = () => {
-			stop();
-			void endSession(true);
+	onMount(() => {
+		const globalTapListener = (event: MouseEvent) => {
+			const target = event.target as Node | null;
+			if (!target || !containerEl || !containerEl.contains(target)) return;
+			handleTap(event);
 		};
 
-		window.addEventListener('pagehide', handlePageExit);
-		window.addEventListener('beforeunload', handlePageExit);
-		window.addEventListener('keydown', handleKeyDown);
-		window.addEventListener('wheel', handleWheelNavigation, { passive: false });
+		void (async () => {
+			await document.fonts?.ready;
+			const bookId = $page.params.bookID;
+			try {
+				const res = await fetch(`/api/books/${bookId}`);
+				if (res.ok) {
+					book = await res.json();
+					await fetchProgress();
+					await loadText();
+					await startSession();
+				}
+			} catch (e) {
+				console.error('Failed to load book:', e);
+			} finally {
+				loading = false;
+			}
+
+			handlePageExit = () => {
+				stop();
+				void endSession(true);
+			};
+
+			window.addEventListener('pagehide', handlePageExit);
+			window.addEventListener('beforeunload', handlePageExit);
+			window.addEventListener('keydown', handleKeyDown);
+			window.addEventListener('wheel', handleWheelNavigation, { passive: false });
+			window.addEventListener('click', globalTapListener);
+		})();
+
+		return () => {
+			window.removeEventListener('click', globalTapListener);
+		};
 	});
 
 	function handleKeyDown(e: KeyboardEvent) {
@@ -299,7 +313,8 @@
 
 	async function loadText() {
 		try {
-			const res = await fetch(`/api/books/${book.id}/text`);
+			const requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
+			const res = await fetch(`/api/books/${book.id}/text${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`);
 			if (res.ok) {
 				const text = await res.text();
 				words = processText(text);
@@ -471,6 +486,10 @@
 	function handleTap(event: MouseEvent | TouchEvent) {
 		const target = event.target as HTMLElement;
 
+		if (target.closest('.top-nav') || target.closest('.speed-footer')) {
+			return;
+		}
+
 		if (showSettings) {
 			if (settingsPanelRef && settingsPanelRef.contains(target)) {
 				return;
@@ -585,18 +604,16 @@
 	<title>{book?.title || 'Speed Reader'} - Cryptorum</title>
 </svelte:head>
 
-<div
-	bind:this={containerEl}
-	class="fixed inset-0 z-50 flex flex-col select-none"
-		style="background-color: {readerTheme.bg}; color: {readerTheme.text}; font-family: {settings.fontFamily};"
-	onclick={handleTap}
-	role="application"
-	aria-label="Speed Reader"
->
+	<div
+		bind:this={containerEl}
+		class="fixed inset-0 z-50 flex flex-col select-none"
+			style="background-color: {readerTheme.bg}; color: {readerTheme.text}; font-family: {settings.fontFamily};"
+		role="application"
+		aria-label="Speed Reader"
+	>
 	<!-- Top Bar -->
 	<header
 		class="top-nav transition-opacity duration-200 {showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}"
-		onclick={(e) => e.stopPropagation()}
 	>
 		<div class="nav-left">
 			<a href={book ? `/book/${book.id}` : '/book'} onclick={closeReader} class="nav-btn nav-close" title="Close">
@@ -616,26 +633,29 @@
 			<span class="nav-stat hidden sm:inline">{(currentIndex + 1).toLocaleString()} / {words.length.toLocaleString()}</span>
 			<span class="nav-stat hidden sm:inline">{formatProgress()}</span>
 			<div class="nav-divider hidden sm:block"></div>
-			<button
-				onclick={(e) => { e.stopPropagation(); showWpmMenu = !showWpmMenu; }}
-				class="nav-btn nav-pill hidden sm:inline-flex"
-				title="Playback speed"
+				<button
+					type="button"
+					onclick={(e) => { e.stopPropagation(); showWpmMenu = !showWpmMenu; }}
+					class="nav-btn nav-pill hidden sm:inline-flex"
+					title="Playback speed"
 			>
 				{settings.wpm} wpm
 			</button>
-			<button
-				onclick={(e) => { e.stopPropagation(); openWordPicker(e); }}
-				class="nav-btn"
-				title="Word Picker"
+				<button
+					type="button"
+					onclick={(e) => { e.stopPropagation(); openWordPicker(e); }}
+					class="nav-btn"
+					title="Word Picker"
 			>
 				<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 					<path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7"></path>
 				</svg>
 			</button>
-			<button
-				onclick={(e) => { e.stopPropagation(); showSettings = !showSettings; }}
-				data-settings-button
-				class="nav-btn"
+				<button
+					type="button"
+					onclick={(e) => { e.stopPropagation(); showSettings = !showSettings; }}
+					data-settings-button
+					class="nav-btn"
 				class:active={showSettings}
 				title="Settings"
 			>
@@ -644,10 +664,11 @@
 					<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
 				</svg>
 			</button>
-			<button
-				onclick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
-				class="nav-btn"
-				title="Toggle fullscreen"
+				<button
+					type="button"
+					onclick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
+					class="nav-btn"
+					title="Toggle fullscreen"
 			>
 				<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 					<polyline points="15 3 21 3 21 9"></polyline>
@@ -726,7 +747,7 @@
 
 			<!-- Word -->
 			{@const wordParts = getWordParts(words[currentIndex])}
-			<div 
+			<div
 				bind:this={wordContainerEl}
 				class="absolute speed-word-stage"
 				style="--focal-point: {settings.focalPoint * 100}%; top: 50%;"
@@ -761,22 +782,27 @@
 	</div>
 
 	<!-- Bottom Bar -->
-	<footer 
-		class="absolute bottom-0 left-0 right-0 p-4 transition-opacity duration-200 {showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}"
-		onclick={(e) => e.stopPropagation()}
+	<footer
+		class="speed-footer absolute bottom-0 left-0 right-0 p-4 transition-opacity duration-200 {showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}"
 	>
 		<div class="flex items-center justify-center gap-6">
 			<button
+				type="button"
 				onclick={prevWord}
 				class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors text-2xl font-light"
+				aria-label="Previous word"
+				title="Previous word"
 			>
 				&lt;
 			</button>
 
 			<button
+				type="button"
 				onclick={togglePlay}
 				class="w-16 h-16 rounded-full text-white flex items-center justify-center transition-colors shadow-lg"
 				style="background-color: var(--color-primary-500);"
+				aria-label={isPlaying ? 'Pause' : 'Play'}
+				title={isPlaying ? 'Pause' : 'Play'}
 			>
 				{#if isPlaying}
 					<svg class="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
@@ -790,8 +816,11 @@
 			</button>
 
 			<button
+				type="button"
 				onclick={nextWord}
 				class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors text-2xl font-light"
+				aria-label="Next word"
+				title="Next word"
 			>
 				&gt;
 			</button>
@@ -799,40 +828,43 @@
 	</footer>
 
 	<!-- WPM Menu Popup -->
-	{#if showWpmMenu}
-		<div 
-			bind:this={wpmMenuRef}
-			class="absolute bottom-24 right-4 w-64 rounded-xl shadow-xl z-[70] p-4"
-			style="background-color: {readerTheme.bg}; border: 1px solid {readerTheme.text}20;"
-			onclick={(e) => e.stopPropagation()}
-		>
+		{#if showWpmMenu}
+			<div
+				bind:this={wpmMenuRef}
+				class="absolute bottom-24 right-4 w-64 rounded-xl shadow-xl z-[70] p-4"
+				style="background-color: {readerTheme.bg}; border: 1px solid {readerTheme.text}20;"
+			>
 			<!-- WPM Value Display -->
 			<div class="flex items-center justify-between mb-4">
-				<button
-					onclick={() => updateWpm(Math.max(50, settings.wpm - 100))}
-					class="px-2 py-1 rounded text-sm transition-colors"
-					style="background-color: {readerTheme.text}20; color: {readerTheme.text};"
+					<button
+						type="button"
+						onclick={() => updateWpm(Math.max(50, settings.wpm - 100))}
+						class="px-2 py-1 rounded text-sm transition-colors"
+						style="background-color: {readerTheme.text}20; color: {readerTheme.text};"
 				>
 					-100
 				</button>
-				<button
-					onclick={() => updateWpm(Math.max(50, settings.wpm - 50))}
-					class="px-2 py-1 rounded text-sm transition-colors"
+					<button
+						type="button"
+						onclick={() => updateWpm(Math.max(50, settings.wpm - 50))}
+						class="px-2 py-1 rounded text-sm transition-colors"
 					style="background-color: {readerTheme.text}20; color: {readerTheme.text};"
 				>
 					-50
 				</button>
 				<span class="text-2xl font-bold text-center flex-1" style="color: {readerTheme.text};">{settings.wpm}</span>
-				<button
-					onclick={() => updateWpm(Math.min(1200, settings.wpm + 50))}
-					class="px-2 py-1 rounded text-sm transition-colors"
+					<button
+						type="button"
+						onclick={() => updateWpm(Math.min(1200, settings.wpm + 50))}
+						class="px-2 py-1 rounded text-sm transition-colors"
 					style="background-color: {readerTheme.text}20; color: {readerTheme.text};"
 				>
 					+50
 				</button>
-				<button
-					onclick={() => updateWpm(Math.min(1200, settings.wpm + 100))}
-					class="px-2 py-1 rounded text-sm transition-colors"
+					<button
+						type="button"
+						onclick={() => updateWpm(Math.min(1200, settings.wpm + 100))}
+						class="px-2 py-1 rounded text-sm transition-colors"
 					style="background-color: {readerTheme.text}20; color: {readerTheme.text};"
 				>
 					+100
@@ -841,9 +873,10 @@
 
 			<!-- WPM Slider Row -->
 			<div class="flex items-center gap-2">
-				<button
-					onclick={() => updateWpm(Math.max(50, settings.wpm - 10))}
-					class="text-xl transition-colors"
+					<button
+						type="button"
+						onclick={() => updateWpm(Math.max(50, settings.wpm - 10))}
+						class="text-xl transition-colors"
 					style="color: {readerTheme.text};"
 				>
 					-
@@ -858,9 +891,10 @@
 					class="flex-1 h-2 rounded-lg appearance-none cursor-pointer"
 					style="background-color: {readerTheme.text}20;"
 				/>
-				<button
-					onclick={() => updateWpm(Math.min(1200, settings.wpm + 10))}
-					class="text-xl transition-colors"
+					<button
+						type="button"
+						onclick={() => updateWpm(Math.min(1200, settings.wpm + 10))}
+						class="text-xl transition-colors"
 					style="color: {readerTheme.text};"
 				>
 					+
@@ -870,12 +904,17 @@
 	{/if}
 
 	<!-- Word Picker Panel -->
-	{#if showWordPicker}
-		<div
-			class="fixed inset-0 z-[60] flex flex-col"
-			style="background-color: {readerTheme.bg};"
-			onclick={(e) => { if (e.target === e.currentTarget) cancelWordPicker(); }}
-		>
+		{#if showWordPicker}
+			<div
+				class="fixed inset-0 z-[60] flex flex-col"
+				style="background-color: {readerTheme.bg};"
+				role="dialog"
+				aria-modal="true"
+				aria-label="Word picker"
+				tabindex="0"
+				onkeydown={(e) => { if (e.key === 'Escape') cancelWordPicker(); }}
+				onclick={(e) => { if (e.target === e.currentTarget) cancelWordPicker(); }}
+			>
 			<!-- Header -->
 			<div class="flex-shrink-0 flex items-center justify-between px-5 py-4 border-b" style="border-color: {readerTheme.text}20;">
 				<div>
@@ -884,7 +923,7 @@
 						Tap a word to select it, then confirm
 					</p>
 				</div>
-				<button onclick={cancelWordPicker} class="p-1.5 transition-colors" style="color: {readerTheme.text}80;">
+					<button type="button" onclick={cancelWordPicker} class="p-1.5 transition-colors" style="color: {readerTheme.text}80;" aria-label="Close word picker" title="Close word picker">
 					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
 					</svg>
@@ -911,10 +950,13 @@
 							{@const idx = para.start + j}
 							{@const isOrigin = idx === wordPickerOrigin}
 							{@const isPending = idx === wordPickerPending}
-							<span
-								id="wk-{idx}"
-								onclick={() => { wordPickerPending = idx; }}
-								class="cursor-pointer rounded px-0.5 py-px transition-colors {
+								<span
+									id="wk-{idx}"
+									onclick={() => { wordPickerPending = idx; }}
+									role="button"
+									tabindex="0"
+									onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); wordPickerPending = idx; } }}
+									class="cursor-pointer rounded px-0.5 py-px transition-colors {
 									isOrigin && isPending
 										? 'text-white'
 										: isOrigin
@@ -961,16 +1003,18 @@
 
 			<!-- Actions -->
 			<div class="flex-shrink-0 flex gap-3 px-5 py-4 border-t" style="border-color: {readerTheme.text}20;">
-				<button
-					onclick={cancelWordPicker}
-					class="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+					<button
+						type="button"
+						onclick={cancelWordPicker}
+						class="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
 					style="background-color: {readerTheme.text}15; color: {readerTheme.text};"
 				>
 					Cancel
 				</button>
-				<button
-					onclick={confirmWordPicker}
-					class="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+					<button
+						type="button"
+						onclick={confirmWordPicker}
+						class="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
 					style="background-color: var(--color-primary-500); color: white;"
 				>
 					Start Here
@@ -981,15 +1025,15 @@
 
 	<!-- Settings Panel -->
 	{#if showSettings}
-		<div 
+		<div
 			bind:this={settingsPanelRef}
 			class="fixed top-12 right-0 h-[calc(100vh-3rem)] w-[480px] shadow-xl z-[60] flex flex-col transform transition-transform duration-300"
 			style="background-color: var(--color-surface-overlay); border-left: 1px solid var(--color-surface-border);"
 		>
 			<div class="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
-				<!-- Theme -->
-				<div>
-					<label class="text-sm font-medium block mb-2" style="color: var(--color-surface-text);">Theme</label>
+					<!-- Theme -->
+					<div>
+						<div class="text-sm font-medium block mb-2" style="color: var(--color-surface-text);">Theme</div>
 					<div class="grid grid-cols-2 gap-2">
 						{#each speedReaderThemes as theme}
 							<button
@@ -1015,9 +1059,9 @@
 					<p class="text-xs mt-1" style="color: var(--color-surface-text-muted);">Applies to the reading background and foreground.</p>
 				</div>
 
-				<!-- Font Family -->
-				<div>
-					<label class="text-sm font-medium block mb-2" style="color: var(--color-surface-text);">Font Family</label>
+					<!-- Font Family -->
+					<div>
+						<div class="text-sm font-medium block mb-2" style="color: var(--color-surface-text);">Font Family</div>
 					<div class="grid grid-cols-2 gap-2">
 						{#each fontFamilies as font}
 							<button
@@ -1031,10 +1075,10 @@
 					</div>
 				</div>
 
-				<!-- Letter Spacing -->
-				<div>
-					<div class="flex justify-between mb-2">
-						<label class="text-sm font-medium" style="color: var(--color-surface-text);">Letter Spacing</label>
+					<!-- Letter Spacing -->
+					<div>
+						<div class="flex justify-between mb-2">
+							<div class="text-sm font-medium" style="color: var(--color-surface-text);">Letter Spacing</div>
 						<span class="text-sm" style="color: var(--color-surface-text-muted);">{settings.letterSpacing}px</span>
 					</div>
 					<input
@@ -1049,10 +1093,10 @@
 					/>
 				</div>
 
-				<!-- Focal Point -->
-				<div>
-					<div class="flex justify-between mb-2">
-						<label class="text-sm font-medium" style="color: var(--color-surface-text);">Focal Point</label>
+					<!-- Focal Point -->
+					<div>
+						<div class="flex justify-between mb-2">
+							<div class="text-sm font-medium" style="color: var(--color-surface-text);">Focal Point</div>
 						<span class="text-sm" style="color: var(--color-surface-text-muted);">{(settings.focalPoint * 100).toFixed(0)}%</span>
 					</div>
 					<input
@@ -1067,25 +1111,28 @@
 					<p class="text-xs mt-1" style="color: var(--color-surface-text-muted);">Position of accent character on screen</p>
 				</div>
 
-				<!-- Center Word Toggle -->
-				<div class="flex items-center justify-between">
-					<div>
-						<label class="text-sm font-medium block" style="color: var(--color-surface-text);">Center Word</label>
-						<p class="text-xs" style="color: var(--color-surface-text-muted);">Center entire word instead of focal point</p>
-					</div>
-					<button
-						onclick={() => updateSetting('centerWord', !settings.centerWord)}
-						class="relative w-12 h-6 rounded-full transition-colors {settings.centerWord ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
-					>
-						<span 
+					<!-- Center Word Toggle -->
+						<div class="flex items-center justify-between">
+						<div>
+							<div class="text-sm font-medium block" style="color: var(--color-surface-text);">Center Word</div>
+							<p class="text-xs" style="color: var(--color-surface-text-muted);">Center entire word instead of focal point</p>
+						</div>
+						<button
+							type="button"
+							onclick={() => updateSetting('centerWord', !settings.centerWord)}
+							class="relative w-12 h-6 rounded-full transition-colors {settings.centerWord ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
+							aria-label={settings.centerWord ? 'Disable center word' : 'Enable center word'}
+							title={settings.centerWord ? 'Disable center word' : 'Enable center word'}
+						>
+						<span
 							class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform {settings.centerWord ? 'left-7' : 'left-1'}"
 						></span>
 					</button>
 				</div>
 
-				<!-- Accent Color -->
-				<div>
-					<label class="text-sm font-medium block mb-2" style="color: var(--color-surface-text);">Accent Color</label>
+					<!-- Accent Color -->
+					<div>
+						<div class="text-sm font-medium block mb-2" style="color: var(--color-surface-text);">Accent Color</div>
 					<div class="flex items-center space-x-3">
 						<input
 							type="color"
@@ -1103,25 +1150,28 @@
 					</div>
 				</div>
 
-				<!-- Accent Toggle -->
-				<div class="flex items-center justify-between">
-					<div>
-						<label class="text-sm font-medium block" style="color: var(--color-surface-text);">Accent Character</label>
-						<p class="text-xs" style="color: var(--color-surface-text-muted);">Highlight the focal character</p>
-					</div>
-					<button
-						onclick={() => updateSetting('accentEnabled', !settings.accentEnabled)}
-						class="relative w-12 h-6 rounded-full transition-colors {settings.accentEnabled ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
-					>
-						<span 
+					<!-- Accent Toggle -->
+						<div class="flex items-center justify-between">
+						<div>
+							<div class="text-sm font-medium block" style="color: var(--color-surface-text);">Accent Character</div>
+							<p class="text-xs" style="color: var(--color-surface-text-muted);">Highlight the focal character</p>
+						</div>
+						<button
+							type="button"
+							onclick={() => updateSetting('accentEnabled', !settings.accentEnabled)}
+							class="relative w-12 h-6 rounded-full transition-colors {settings.accentEnabled ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
+							aria-label={settings.accentEnabled ? 'Disable accent character' : 'Enable accent character'}
+							title={settings.accentEnabled ? 'Disable accent character' : 'Enable accent character'}
+						>
+						<span
 							class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform {settings.accentEnabled ? 'left-7' : 'left-1'}"
 						></span>
 					</button>
 				</div>
 
-				<!-- Focus Indicator -->
-				<div>
-					<label class="text-sm font-medium block mb-2" style="color: var(--color-surface-text);">Focus Indicator</label>
+					<!-- Focus Indicator -->
+					<div>
+						<div class="text-sm font-medium block mb-2" style="color: var(--color-surface-text);">Focus Indicator</div>
 					<div class="flex space-x-2">
 						{#each [['off', 'Off'], ['lines', 'Lines'], ['arrows', 'Arrows']] as [value, label]}
 							<button
@@ -1135,10 +1185,10 @@
 					</div>
 				</div>
 
-				<!-- Focus Indicator Distance -->
-				<div>
-					<div class="flex justify-between mb-2">
-						<label class="text-sm font-medium" style="color: var(--color-surface-text);">Focus Distance</label>
+					<!-- Focus Indicator Distance -->
+					<div>
+						<div class="flex justify-between mb-2">
+							<div class="text-sm font-medium" style="color: var(--color-surface-text);">Focus Distance</div>
 						<span class="text-sm" style="color: var(--color-surface-text-muted);">{settings.focusIndicatorDistance}px</span>
 					</div>
 					<input
@@ -1153,10 +1203,10 @@
 					/>
 				</div>
 
-				<!-- Focus Indicator Length -->
-				<div>
-					<div class="flex justify-between mb-2">
-						<label class="text-sm font-medium" style="color: var(--color-surface-text);">Indicator Length</label>
+					<!-- Focus Indicator Length -->
+					<div>
+						<div class="flex justify-between mb-2">
+							<div class="text-sm font-medium" style="color: var(--color-surface-text);">Indicator Length</div>
 						<span class="text-sm" style="color: var(--color-surface-text-muted);">{settings.focusIndicatorLength}px</span>
 					</div>
 					<input
@@ -1172,42 +1222,48 @@
 					<p class="text-xs mt-1" style="color: var(--color-surface-text-muted);">Length of the vertical T-bar stubs</p>
 				</div>
 
-				<!-- Horizontal Bars Toggle -->
-				<div class="flex items-center justify-between">
-					<div>
-						<label class="text-sm font-medium block" style="color: var(--color-surface-text);">Horizontal Bars</label>
-						<p class="text-xs" style="color: var(--color-surface-text-muted);">Show focus guide lines</p>
-					</div>
-					<button
-						onclick={() => updateSetting('horizontalBars', !settings.horizontalBars)}
-						class="relative w-12 h-6 rounded-full transition-colors {settings.horizontalBars ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
-					>
-						<span 
+					<!-- Horizontal Bars Toggle -->
+						<div class="flex items-center justify-between">
+						<div>
+							<div class="text-sm font-medium block" style="color: var(--color-surface-text);">Horizontal Bars</div>
+							<p class="text-xs" style="color: var(--color-surface-text-muted);">Show focus guide lines</p>
+						</div>
+						<button
+							type="button"
+							onclick={() => updateSetting('horizontalBars', !settings.horizontalBars)}
+							class="relative w-12 h-6 rounded-full transition-colors {settings.horizontalBars ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
+							aria-label={settings.horizontalBars ? 'Hide horizontal bars' : 'Show horizontal bars'}
+							title={settings.horizontalBars ? 'Hide horizontal bars' : 'Show horizontal bars'}
+						>
+						<span
 							class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform {settings.horizontalBars ? 'left-7' : 'left-1'}"
 						></span>
 					</button>
 				</div>
 
-				<!-- Automatic Sentence Pause -->
-				<div class="flex items-center justify-between">
-					<div>
-						<label class="text-sm font-medium block" style="color: var(--color-surface-text);">Auto Sentence Pause</label>
-						<p class="text-xs" style="color: var(--color-surface-text-muted);">Calculate pause based on WPM</p>
-					</div>
-					<button
-						onclick={() => updateSetting('autoSentencePause', !settings.autoSentencePause)}
-						class="relative w-12 h-6 rounded-full transition-colors {settings.autoSentencePause ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
-					>
-						<span 
+					<!-- Automatic Sentence Pause -->
+						<div class="flex items-center justify-between">
+						<div>
+							<div class="text-sm font-medium block" style="color: var(--color-surface-text);">Auto Sentence Pause</div>
+							<p class="text-xs" style="color: var(--color-surface-text-muted);">Calculate pause based on WPM</p>
+						</div>
+						<button
+							type="button"
+							onclick={() => updateSetting('autoSentencePause', !settings.autoSentencePause)}
+							class="relative w-12 h-6 rounded-full transition-colors {settings.autoSentencePause ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
+							aria-label={settings.autoSentencePause ? 'Disable automatic sentence pause' : 'Enable automatic sentence pause'}
+							title={settings.autoSentencePause ? 'Disable automatic sentence pause' : 'Enable automatic sentence pause'}
+						>
+						<span
 							class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform {settings.autoSentencePause ? 'left-7' : 'left-1'}"
 						></span>
 					</button>
 				</div>
 
-				<!-- Manual Sentence Pause (disabled when auto is on) -->
-				<div class:opacity-50={settings.autoSentencePause}>
-					<div class="flex justify-between mb-2">
-						<label class="text-sm font-medium" style="color: var(--color-surface-text);">Sentence Pause</label>
+					<!-- Manual Sentence Pause (disabled when auto is on) -->
+					<div class:opacity-50={settings.autoSentencePause}>
+						<div class="flex justify-between mb-2">
+							<div class="text-sm font-medium" style="color: var(--color-surface-text);">Sentence Pause</div>
 						<span class="text-sm" style="color: var(--color-surface-text-muted);">{settings.sentencePause}ms</span>
 					</div>
 					<input
@@ -1223,10 +1279,10 @@
 					/>
 				</div>
 
-				<!-- Word Size -->
-				<div>
-					<div class="flex justify-between mb-2">
-						<label class="text-sm font-medium" style="color: var(--color-surface-text);">Word Size</label>
+					<!-- Word Size -->
+					<div>
+						<div class="flex justify-between mb-2">
+							<div class="text-sm font-medium" style="color: var(--color-surface-text);">Word Size</div>
 						<span class="text-sm" style="color: var(--color-surface-text-muted);">{settings.wordSize}px</span>
 					</div>
 					<input
@@ -1241,17 +1297,20 @@
 					/>
 				</div>
 
-				<!-- Keep Screen On -->
-				<div class="flex items-center justify-between">
-					<div>
-						<label class="text-sm font-medium block" style="color: var(--color-surface-text);">Keep Screen On</label>
-						<p class="text-xs" style="color: var(--color-surface-text-muted);">Prevent screen from turning off</p>
-					</div>
-					<button
-						onclick={() => updateSetting('keepScreenOn', !settings.keepScreenOn)}
-						class="relative w-12 h-6 rounded-full transition-colors {settings.keepScreenOn ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
-					>
-						<span 
+					<!-- Keep Screen On -->
+						<div class="flex items-center justify-between">
+						<div>
+							<div class="text-sm font-medium block" style="color: var(--color-surface-text);">Keep Screen On</div>
+							<p class="text-xs" style="color: var(--color-surface-text-muted);">Prevent screen from turning off</p>
+						</div>
+						<button
+							type="button"
+							onclick={() => updateSetting('keepScreenOn', !settings.keepScreenOn)}
+							class="relative w-12 h-6 rounded-full transition-colors {settings.keepScreenOn ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
+							aria-label={settings.keepScreenOn ? 'Disable keep screen on' : 'Enable keep screen on'}
+							title={settings.keepScreenOn ? 'Disable keep screen on' : 'Enable keep screen on'}
+						>
+						<span
 							class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform {settings.keepScreenOn ? 'left-7' : 'left-1'}"
 						></span>
 					</button>

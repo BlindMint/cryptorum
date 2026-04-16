@@ -53,20 +53,20 @@
 </svelte:head>
 
 {#if checked}
-<div class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+<div class="min-h-[100dvh] overflow-x-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4 py-4 sm:py-8">
 	<div class="w-full max-w-md">
-		<div class="text-center mb-8">
-			<div class="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 mb-4 shadow-lg">
-				<svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+		<div class="text-center mb-5 sm:mb-6">
+			<div class="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 mb-3 shadow-lg">
+				<svg class="w-8 h-8 sm:w-10 sm:h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
 				</svg>
 			</div>
-			<h1 class="text-4xl font-bold text-white mb-2">Cryptorum</h1>
+			<h1 class="text-3xl sm:text-4xl font-bold text-white mb-2">Cryptorum</h1>
 			<p class="text-slate-400">Your personal digital library</p>
 		</div>
 
-		<div class="bg-slate-800/50 backdrop-blur-sm rounded-2xl p-8 shadow-xl border border-slate-700/50">
-			<h2 class="text-xl font-semibold text-white mb-6">Sign in to your library</h2>
+		<div class="bg-slate-800/50 backdrop-blur-sm rounded-2xl p-6 sm:p-8 shadow-xl border border-slate-700/50">
+			<h2 class="text-xl font-semibold text-white mb-4 sm:mb-5">Sign in to your library</h2>
 
 			{#if error}
 				<div class="mb-4 p-3 rounded-lg bg-red-500/20 border border-red-500/50 text-red-200 text-sm">
@@ -119,7 +119,7 @@
 			</form>
 		</div>
 
-		<p class="text-center text-slate-500 text-sm mt-6">
+		<p class="hidden sm:block text-center text-slate-500 text-sm mt-5">
 			Cryptorum - Personal Digital Library
 		</p>
 	</div>

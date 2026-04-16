@@ -2,10 +2,12 @@
 	import { onMount } from 'svelte';
 	import { readerSettings, epubThemes, fontFamilies, pdfZoomModes, cbxFitModes, cbxScrollModes, skipIntervalOptions, sleepTimerOptions, waveformStyles, type ReaderSettings } from '$lib/stores/readerSettings';
 	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, updateCustomTheme, removeCustomTheme, generateId, updateGlowEnabled, updateGlowAutoMode, updateGlowColor, updateGlowIntensity, updateBgImageEnabled, updateBgImageTransparency, updateSelectedBgImage, addBackgroundImage, removeBackgroundImage } from '$lib/stores/theme';
-	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
-	import AdminPanel from './AdminPanel.svelte';
-	import MetadataManagerContent from '$lib/components/MetadataManagerContent.svelte';
-	import UsersPanel from './UsersPanel.svelte';
+import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
+import AdminPanel from './AdminPanel.svelte';
+import MetadataManagerContent from '$lib/components/MetadataManagerContent.svelte';
+import UsersPanel from './UsersPanel.svelte';
+import LibraryIconPicker from '$lib/components/LibraryIconPicker.svelte';
+import { parseLibraryIcon } from '$lib/utils/library-icons';
 	
 	let settings = $state<any>({
 		libraries: [],
@@ -28,6 +30,7 @@
 	let activeTab = $state<'general' | 'metadata' | 'reader' | 'appearance' | 'users' | 'admin'>('general');
 	let settingsSaved = $state(false);
 	let bookCoverSettings = $state({
+		preserve_full_cover: true,
 		vertical_cropping: true,
 		horizontal_cropping: true,
 		aspect_ratio_threshold: 2.5,
@@ -39,6 +42,7 @@
 	let coverActionMessage = $state('');
 
 	let showLibraryModal = $state(false);
+	let showLibraryIconPicker = $state(false);
 	let editingLibrary = $state<any>(null);
 	let showDirectoryModal = $state(false);
 	let currentDirectory = $state('/');
@@ -49,6 +53,7 @@
 		icon: '',
 		paths: ['']
 	});
+	let currentLibraryIcon = $derived(parseLibraryIcon(libraryForm.icon));
 
 	let themeState = $state<{ primary: string; surface: string; appearance: { glowEnabled: boolean; glowAutoMode: boolean; glowColor: string; glowIntensity: number; bgImageEnabled: boolean; bgImageTransparency: number; backgroundImages: string[]; selectedBgImageIndex: number; customThemes: any[]; selectedCustomThemeId: string | null } }>({ primary: 'green', surface: 'dark', appearance: { glowEnabled: true, glowAutoMode: true, glowColor: '#22c55e', glowIntensity: 10, bgImageEnabled: false, bgImageTransparency: 50, backgroundImages: [], selectedBgImageIndex: 0, customThemes: [], selectedCustomThemeId: null } });
 	let showCustomThemeEditor = $state(false);
@@ -304,8 +309,29 @@
 
 	function closeLibraryModal() {
 		showLibraryModal = false;
+		showLibraryIconPicker = false;
 		editingLibrary = null;
 	}
+
+	function openLibraryIconPicker() {
+		showLibraryIconPicker = true;
+	}
+
+	function closeLibraryIconPicker() {
+		showLibraryIconPicker = false;
+	}
+
+	function selectLibraryIcon(iconValue: string) {
+		libraryForm.icon = iconValue;
+	}
+
+	function clearLibraryIcon() {
+		libraryForm.icon = '';
+	}
+
+	$effect(() => {
+		currentLibraryIcon = parseLibraryIcon(libraryForm.icon);
+	});
 
 	async function saveReaderSettings() {
 		readerSettings.set(localReaderSettings);
@@ -504,6 +530,7 @@
 			settings = data;
 			bookdropPath = settings.bookdrop?.path || '';
 			bookCoverSettings = {
+				preserve_full_cover: data.book_covers?.preserve_full_cover ?? true,
 				vertical_cropping: data.book_covers?.vertical_cropping ?? true,
 				horizontal_cropping: data.book_covers?.horizontal_cropping ?? true,
 				aspect_ratio_threshold: data.book_covers?.aspect_ratio_threshold ?? 2.5,
@@ -705,8 +732,11 @@
 					<div class="flex items-center space-x-3">
 						<span class="text-sm text-[var(--color-surface-text-muted)]">{themeState.appearance.glowEnabled ? 'On' : 'Off'}</span>
 						<button
+							type="button"
 							onclick={() => updateGlowEnabled(!themeState.appearance.glowEnabled)}
 							class="relative w-12 h-6 rounded-full transition-colors {themeState.appearance.glowEnabled ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-border)]'}"
+							aria-label={themeState.appearance.glowEnabled ? 'Disable top glow' : 'Enable top glow'}
+							title={themeState.appearance.glowEnabled ? 'Disable top glow' : 'Enable top glow'}
 						>
 							<span
 								class="absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform {themeState.appearance.glowEnabled ? 'left-7' : 'left-1'}"
@@ -774,8 +804,11 @@
 					<div class="flex items-center space-x-3">
 						<span class="text-sm text-[var(--color-surface-text-muted)]">{themeState.appearance.bgImageEnabled ? 'On' : 'Off'}</span>
 						<button
+							type="button"
 							onclick={() => updateBgImageEnabled(!themeState.appearance.bgImageEnabled)}
 							class="relative w-12 h-6 rounded-full transition-colors {themeState.appearance.bgImageEnabled ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-border)]'}"
+							aria-label={themeState.appearance.bgImageEnabled ? 'Disable background image' : 'Enable background image'}
+							title={themeState.appearance.bgImageEnabled ? 'Disable background image' : 'Enable background image'}
 						>
 							<span
 								class="absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform {themeState.appearance.bgImageEnabled ? 'left-7' : 'left-1'}"
@@ -891,7 +924,7 @@
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 							<!-- Theme -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Theme</label>
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Theme</div>
 								<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
 									{#each epubThemes as theme}
 										<button
@@ -964,7 +997,7 @@
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 							<!-- Font Family -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Font Family</label>
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Font Family</div>
 								<div class="flex flex-wrap gap-2">
 									{#each fontFamilies as font}
 										<button
@@ -989,7 +1022,7 @@
 
 							<!-- Font Size -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Font Size</label>
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Font Size</div>
 								<div class="flex items-center space-x-2">
 									<button
 										onclick={() => updateEpubSetting('fontSize', Math.max(10, localReaderSettings.epub.fontSize - 1))}
@@ -1005,7 +1038,7 @@
 
 							<!-- Line Height -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Line Height</label>
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Line Height</div>
 								<div class="flex items-center space-x-2">
 									<button
 										onclick={() => updateEpubSetting('lineHeight', Math.max(1.0, localReaderSettings.epub.lineHeight - 0.1))}
@@ -1021,7 +1054,7 @@
 
 							<!-- Text Justification -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Text Alignment</label>
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Text Alignment</div>
 								<div class="flex space-x-1">
 									<button
 										onclick={() => updateEpubSetting('justify', false)}
@@ -1063,7 +1096,7 @@
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 							<!-- Flow -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Flow</label>
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Flow</div>
 								<div class="flex space-x-1">
 									<button
 										onclick={() => updateEpubSetting('flow', 'paginated')}
@@ -1082,7 +1115,7 @@
 
 							<!-- Max Columns -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Max Columns</label>
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Max Columns</div>
 								<select 
 									value={localReaderSettings.epub.maxColumnCount} 
 									onchange={(e) => updateEpubSetting('maxColumnCount', parseInt(e.currentTarget.value))}
@@ -1096,7 +1129,7 @@
 
 							<!-- Column Gap -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Column Gap: {localReaderSettings.epub.gap}%</label>
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Column Gap: {localReaderSettings.epub.gap}%</div>
 								<input
 									type="range"
 									min="0"
@@ -1109,7 +1142,7 @@
 
 							<!-- Max Width -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Max Width: {localReaderSettings.epub.maxInlineSize}px</label>
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Max Width: {localReaderSettings.epub.maxInlineSize}px</div>
 								<input
 									type="range"
 									min="400"
@@ -1123,7 +1156,7 @@
 
 							<!-- Max Height -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Max Height: {localReaderSettings.epub.maxBlockSize}px</label>
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Max Height: {localReaderSettings.epub.maxBlockSize}px</div>
 								<input
 									type="range"
 									min="400"
@@ -1160,7 +1193,7 @@
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 							<!-- Page Spread -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Spread</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Spread</div>
 								<select 
 									value={localReaderSettings.pdf.pageSpread} 
 									onchange={(e) => updatePdfSetting('pageSpread', e.currentTarget.value)}
@@ -1174,7 +1207,7 @@
 
 							<!-- Page Layout -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Layout</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Layout</div>
 								<select 
 									value={localReaderSettings.pdf.pageLayout} 
 									onchange={(e) => updatePdfSetting('pageLayout', e.currentTarget.value)}
@@ -1187,7 +1220,7 @@
 
 							<!-- Default Zoom -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Default Zoom</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Default Zoom</div>
 								<select 
 									value={localReaderSettings.pdf.pageZoom} 
 									onchange={(e) => updatePdfSetting('pageZoom', e.currentTarget.value)}
@@ -1201,7 +1234,7 @@
 
 							<!-- Scroll Mode -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Scroll Mode</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Scroll Mode</div>
 								<select 
 									value={localReaderSettings.pdf.scrollMode} 
 									onchange={(e) => updatePdfSetting('scrollMode', e.currentTarget.value)}
@@ -1215,7 +1248,7 @@
 
 							<!-- Page Rotation -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Rotation</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Rotation</div>
 								<select 
 									value={localReaderSettings.pdf.pageRotation} 
 									onchange={(e) => updatePdfSetting('pageRotation', parseInt(e.currentTarget.value))}
@@ -1230,7 +1263,7 @@
 
 							<!-- Background Color -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Background</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Background</div>
 								<div class="flex items-center space-x-2">
 									<input
 										type="color"
@@ -1250,7 +1283,7 @@
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 							<!-- Reading Direction -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Reading Direction</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Reading Direction</div>
 								<select 
 									value={localReaderSettings.pdf.readingDirection} 
 									onchange={(e) => updatePdfSetting('readingDirection', e.currentTarget.value)}
@@ -1275,7 +1308,7 @@
 
 							<!-- Grayscale -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Grayscale: {localReaderSettings.pdf.grayscale}%</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Grayscale: {localReaderSettings.pdf.grayscale}%</div>
 								<input
 									type="range"
 									min="0"
@@ -1341,7 +1374,7 @@
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 							<!-- Page Spread -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Spread</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Spread</div>
 								<select 
 									value={localReaderSettings.cbx.pageSpread} 
 									onchange={(e) => updateCbxSetting('pageSpread', e.currentTarget.value)}
@@ -1356,7 +1389,7 @@
 
 							<!-- Page Layout -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Layout</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Layout</div>
 								<select 
 									value={localReaderSettings.cbx.pageLayout} 
 									onchange={(e) => updateCbxSetting('pageLayout', e.currentTarget.value)}
@@ -1369,7 +1402,7 @@
 
 							<!-- Fit Mode -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Fit Mode</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Fit Mode</div>
 								<select 
 									value={localReaderSettings.cbx.fitMode} 
 									onchange={(e) => updateCbxSetting('fitMode', e.currentTarget.value)}
@@ -1383,7 +1416,7 @@
 
 							<!-- Scroll Mode -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Scroll Mode</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Scroll Mode</div>
 								<select 
 									value={localReaderSettings.cbx.scrollMode} 
 									onchange={(e) => updateCbxSetting('scrollMode', e.currentTarget.value)}
@@ -1397,7 +1430,7 @@
 
 							<!-- Reading Direction -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Reading Direction</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Reading Direction</div>
 								<select 
 									value={localReaderSettings.cbx.readingDirection} 
 									onchange={(e) => updateCbxSetting('readingDirection', e.currentTarget.value)}
@@ -1411,7 +1444,7 @@
 
 							<!-- Background Color -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Background Color</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Background Color</div>
 								<div class="flex items-center space-x-2">
 									<input
 										type="color"
@@ -1455,7 +1488,7 @@
 
 							<!-- Spread Handling -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Spread Handling</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Spread Handling</div>
 								<select 
 									value={localReaderSettings.cbx.spreadHandling} 
 									onchange={(e) => updateCbxSetting('spreadHandling', e.currentTarget.value)}
@@ -1470,7 +1503,7 @@
 
 							<!-- Vibrance -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Vibrance: {localReaderSettings.cbx.vibrance}%</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Vibrance: {localReaderSettings.cbx.vibrance}%</div>
 								<input
 									type="range"
 									min="0"
@@ -1483,7 +1516,7 @@
 
 							<!-- Saturation -->
 							<div>
-								<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Saturation: {localReaderSettings.cbx.saturation}%</label>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Saturation: {localReaderSettings.cbx.saturation}%</div>
 								<input
 									type="range"
 									min="0"
@@ -1499,9 +1532,9 @@
 					{#if localReaderSettings.cbx.scrollMode === 'long-strip' || localReaderSettings.cbx.scrollMode === 'infinite'}
 						<!-- Strip Max Width -->
 						<div class="max-w-xs">
-							<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
+							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
 								Strip Max Width: {localReaderSettings.cbx.stripMaxWidthPercent}%
-							</label>
+							</div>
 							<input
 								type="range"
 								min="50"
@@ -1537,7 +1570,7 @@
 					<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 						<!-- WPM -->
 						<div>
-							<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Words Per Minute</label>
+							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Words Per Minute</div>
 							<div class="flex items-center space-x-2">
 								<button
 									onclick={() => updateSpeedReaderSetting('wpm', Math.max(100, localReaderSettings.speedReader.wpm - 25))}
@@ -1553,7 +1586,7 @@
 
 						<!-- Word Size -->
 						<div>
-							<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Word Size</label>
+							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Word Size</div>
 							<div class="flex items-center space-x-2">
 								<button
 									onclick={() => updateSpeedReaderSetting('wordSize', Math.max(24, localReaderSettings.speedReader.wordSize - 4))}
@@ -1569,7 +1602,7 @@
 
 						<!-- Focal Point -->
 						<div>
-							<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Focal Point</label>
+							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Focal Point</div>
 							<div class="flex items-center space-x-2">
 								<button
 									onclick={() => updateSpeedReaderSetting('focalPoint', Math.max(0.2, localReaderSettings.speedReader.focalPoint - 0.02))}
@@ -1585,7 +1618,7 @@
 
 						<!-- Focus Indicator -->
 						<div>
-							<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Focus Indicator</label>
+							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Focus Indicator</div>
 							<select 
 								value={localReaderSettings.speedReader.focusIndicator} 
 								onchange={(e) => updateSpeedReaderSetting('focusIndicator', e.currentTarget.value)}
@@ -1599,7 +1632,7 @@
 
 						<!-- Sentence Pause -->
 						<div>
-							<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Sentence Pause</label>
+							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Sentence Pause</div>
 							<div class="flex items-center space-x-2">
 								<button
 									onclick={() => updateSpeedReaderSetting('sentencePause', Math.max(100, localReaderSettings.speedReader.sentencePause - 50))}
@@ -1617,7 +1650,7 @@
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<!-- Accent Color -->
 						<div>
-							<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Accent Color</label>
+							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Accent Color</div>
 							<div class="flex items-center space-x-3">
 								<input
 									type="color"
@@ -1686,7 +1719,7 @@
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<!-- Playback Speed -->
 						<div>
-							<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Default Playback Speed</label>
+							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Default Playback Speed</div>
 							<select 
 								value={localReaderSettings.audio.playbackSpeed} 
 								onchange={(e) => updateAudioSetting('playbackSpeed', parseFloat(e.currentTarget.value))}
@@ -1919,7 +1952,7 @@
 						</div>
 						<div>
 							<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Book Covers</h2>
-							<p class="text-sm text-[var(--color-surface-text-muted)]">Regenerate and crop stored book covers</p>
+							<p class="text-sm text-[var(--color-surface-text-muted)]">Regenerate and fit stored book covers</p>
 						</div>
 					</div>
 					<div class="flex items-center gap-2">
@@ -1940,68 +1973,84 @@
 					</div>
 				</div>
 				<div class="p-6 space-y-6">
-					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-						<div class="flex items-center justify-between rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
+						<div class="flex items-center justify-between gap-4">
 							<div>
-								<div class="text-sm font-medium text-[var(--color-surface-text)]">Vertical Cover Cropping</div>
-								<div class="text-xs text-[var(--color-surface-text-muted)]">Crop very tall covers from the top</div>
+								<div class="text-sm font-medium text-[var(--color-surface-text)]">Preserve Full Cover Art</div>
+								<div class="text-xs text-[var(--color-surface-text-muted)]">Fit the entire cover into a filled frame without trimming.</div>
 							</div>
 							<input
 								type="checkbox"
-								checked={bookCoverSettings.vertical_cropping}
-								onchange={(e) => updateBookCoverSetting('vertical_cropping', e.currentTarget.checked)}
+								checked={bookCoverSettings.preserve_full_cover}
+								onchange={(e) => updateBookCoverSetting('preserve_full_cover', e.currentTarget.checked)}
 								class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 							>
 						</div>
-						<div class="flex items-center justify-between rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
-							<div>
-								<div class="text-sm font-medium text-[var(--color-surface-text)]">Horizontal Cover Cropping</div>
-								<div class="text-xs text-[var(--color-surface-text-muted)]">Crop very wide covers from the left</div>
+						{#if !bookCoverSettings.preserve_full_cover}
+							<div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+								<div class="flex items-center justify-between rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+									<div>
+										<div class="text-sm font-medium text-[var(--color-surface-text)]">Vertical Cover Cropping</div>
+										<div class="text-xs text-[var(--color-surface-text-muted)]">Crop very tall covers from the top</div>
+									</div>
+									<input
+										type="checkbox"
+										checked={bookCoverSettings.vertical_cropping}
+										onchange={(e) => updateBookCoverSetting('vertical_cropping', e.currentTarget.checked)}
+										class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+									>
+								</div>
+								<div class="flex items-center justify-between rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+									<div>
+										<div class="text-sm font-medium text-[var(--color-surface-text)]">Horizontal Cover Cropping</div>
+										<div class="text-xs text-[var(--color-surface-text-muted)]">Crop very wide covers from the left</div>
+									</div>
+									<input
+										type="checkbox"
+										checked={bookCoverSettings.horizontal_cropping}
+										onchange={(e) => updateBookCoverSetting('horizontal_cropping', e.currentTarget.checked)}
+										class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+									>
+								</div>
 							</div>
-							<input
-								type="checkbox"
-								checked={bookCoverSettings.horizontal_cropping}
-								onchange={(e) => updateBookCoverSetting('horizontal_cropping', e.currentTarget.checked)}
-								class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
-							>
-						</div>
-					</div>
-					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-						<div>
-							<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Aspect Ratio Threshold</label>
-							<div class="flex items-center gap-3">
-								<input
-									type="range"
-									min="1.25"
-									max="5"
-									step="0.05"
-									value={bookCoverSettings.aspect_ratio_threshold}
-									oninput={(e) => updateBookCoverSetting('aspect_ratio_threshold', parseFloat(e.currentTarget.value))}
-									class="flex-1 h-2 bg-[var(--color-surface-700)] rounded-lg appearance-none cursor-pointer"
-								>
-								<input
-									type="number"
-									min="1.25"
-									max="5"
-									step="0.05"
-									value={bookCoverSettings.aspect_ratio_threshold}
-									oninput={(e) => updateBookCoverSetting('aspect_ratio_threshold', parseFloat(e.currentTarget.value))}
-									class="w-24 px-3 py-2 rounded-lg bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-mono"
-								>
+							<div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+								<div>
+									<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Aspect Ratio Threshold</div>
+									<div class="flex items-center gap-3">
+										<input
+											type="range"
+											min="1.25"
+											max="5"
+											step="0.05"
+											value={bookCoverSettings.aspect_ratio_threshold}
+											oninput={(e) => updateBookCoverSetting('aspect_ratio_threshold', parseFloat(e.currentTarget.value))}
+											class="flex-1 h-2 bg-[var(--color-surface-700)] rounded-lg appearance-none cursor-pointer"
+										>
+										<input
+											type="number"
+											min="1.25"
+											max="5"
+											step="0.05"
+											value={bookCoverSettings.aspect_ratio_threshold}
+											oninput={(e) => updateBookCoverSetting('aspect_ratio_threshold', parseFloat(e.currentTarget.value))}
+											class="w-24 px-3 py-2 rounded-lg bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-mono"
+										>
+									</div>
+								</div>
+								<div class="flex items-center justify-between rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+									<div>
+										<div class="text-sm font-medium text-[var(--color-surface-text)]">Smart Cropping</div>
+										<div class="text-xs text-[var(--color-surface-text-muted)]">Skip uniform margins when cropping</div>
+									</div>
+									<input
+										type="checkbox"
+										checked={bookCoverSettings.smart_cropping}
+										onchange={(e) => updateBookCoverSetting('smart_cropping', e.currentTarget.checked)}
+										class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+									>
+								</div>
 							</div>
-						</div>
-						<div class="flex items-center justify-between rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
-							<div>
-								<div class="text-sm font-medium text-[var(--color-surface-text)]">Smart Cropping</div>
-								<div class="text-xs text-[var(--color-surface-text-muted)]">Skip uniform margins when cropping</div>
-							</div>
-							<input
-								type="checkbox"
-								checked={bookCoverSettings.smart_cropping}
-								onchange={(e) => updateBookCoverSetting('smart_cropping', e.currentTarget.checked)}
-								class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
-							>
-						</div>
+						{/if}
 					</div>
 					<div class="flex items-center justify-between gap-3">
 						<p class="text-sm text-[var(--color-surface-text-muted)]">
@@ -2033,7 +2082,7 @@
 
 <!-- Remove Background Confirmation Modal -->
 {#if showRemoveBgModal}
-	<div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4" role="dialog" aria-modal="true">
+		<div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4" role="dialog" aria-modal="true" tabindex="-1">
 		<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-sm shadow-2xl">
 			<div class="p-6">
 				<h3 class="text-lg font-semibold text-[var(--color-surface-text)] mb-2">Remove Background</h3>
@@ -2059,15 +2108,21 @@
 
 <!-- Bookdrop Modal -->
 {#if showBookdropModal}
-	<div class="fixed inset-0 bg-black/60 flex items-center justify-center z-[110] p-4" role="dialog" aria-modal="true" onclick={() => showBookdropModal = false}>
-		<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-2xl overflow-hidden shadow-2xl" onclick={(e) => e.stopPropagation()}>
+		<div class="fixed inset-0 z-[110] flex items-center justify-center p-4">
+		<button
+			type="button"
+			class="absolute inset-0 bg-black/60"
+			aria-label="Close bookdrop modal"
+			onclick={() => showBookdropModal = false}
+		></button>
+		<div class="relative z-10 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-2xl overflow-hidden shadow-2xl">
 			<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
 				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add Bookdrop Location</h3>
 				<p class="text-sm text-[var(--color-surface-text-muted)] mt-1">Choose the folder where dropped books should be watched for import.</p>
 			</div>
 			<div class="p-6 space-y-4">
 				<div>
-					<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Path</label>
+					<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Path</div>
 					<div class="flex items-center gap-2">
 						<input
 							type="text"
@@ -2109,8 +2164,14 @@
 
 <!-- Custom Theme Modal -->
 {#if showCustomThemeEditor}
-	<div class="fixed inset-0 bg-black/60 flex items-center justify-center z-[120] p-4" role="dialog" aria-modal="true" onclick={() => showCustomThemeEditor = false}>
-		<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-xl overflow-hidden shadow-2xl" onclick={(e) => e.stopPropagation()}>
+		<div class="fixed inset-0 z-[120] flex items-center justify-center p-4">
+		<button
+			type="button"
+			class="absolute inset-0 bg-black/60"
+			aria-label="Close custom theme modal"
+			onclick={() => showCustomThemeEditor = false}
+		></button>
+		<div class="relative z-10 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-xl overflow-hidden shadow-2xl">
 			<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
 				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">
 					{editingCustomTheme ? 'Edit Custom Theme' : 'Add Custom Theme'}
@@ -2118,7 +2179,7 @@
 			</div>
 			<div class="p-6 space-y-4">
 				<div>
-					<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Theme Name</label>
+					<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Theme Name</div>
 					<input
 						type="text"
 						bind:value={customThemeName}
@@ -2128,7 +2189,7 @@
 				</div>
 				<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 					<div>
-						<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Text Color</label>
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Text Color</div>
 						<div class="flex items-start gap-3">
 							<label class="relative flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--color-surface-border)] shadow-inner" style="background-color: {resolvePreviewColor(customThemeFg, '#ffffff')};">
 								<span class="absolute inset-0 ring-1 ring-inset ring-black/10"></span>
@@ -2159,7 +2220,7 @@
 						</div>
 					</div>
 					<div>
-						<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Background Color</label>
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Background Color</div>
 						<div class="flex items-start gap-3">
 							<label class="relative flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--color-surface-border)] shadow-inner" style="background-color: {resolvePreviewColor(customThemeBg, '#111111')};">
 								<span class="absolute inset-0 ring-1 ring-inset ring-black/10"></span>
@@ -2222,8 +2283,14 @@
 
 <!-- Library Modal -->
 {#if showLibraryModal}
-	<div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onclick={closeLibraryModal} role="dialog" aria-modal="true">
-		<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl" onclick={(e) => e.stopPropagation()}>
+		<div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+		<button
+			type="button"
+			class="absolute inset-0 bg-black/80"
+			aria-label="Close library modal"
+			onclick={closeLibraryModal}
+		></button>
+		<div class="relative z-10 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl">
 			<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
 				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">
 					{editingLibrary ? 'Edit Library' : 'Add Library'}
@@ -2232,9 +2299,9 @@
 			<div class="p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-120px)]">
 				<div class="grid grid-cols-2 gap-4">
 					<div>
-						<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
 							Library Name
-						</label>
+						</div>
 						<input
 							type="text"
 							bind:value={libraryForm.name}
@@ -2243,23 +2310,58 @@
 						/>
 					</div>
 					<div>
-						<label class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
 							Icon
-						</label>
-						<input
-							type="text"
-							bind:value={libraryForm.icon}
-							class="w-full px-3 py-2 rounded-lg bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)] focus:border-transparent"
-							placeholder="Icon identifier"
-						/>
+						</div>
+						{#if currentLibraryIcon}
+							<div class="flex items-center gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2">
+								<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[var(--color-surface-overlay)] text-[var(--color-primary-400)]">
+									{#if currentLibraryIcon.svg}
+										<div class="h-5 w-5 overflow-hidden">{@html currentLibraryIcon.svg}</div>
+									{:else}
+										<span class="text-xs font-semibold uppercase">{currentLibraryIcon.name.slice(0, 1) || '?'}</span>
+									{/if}
+								</div>
+								<div class="min-w-0 flex-1">
+									<div class="truncate text-sm font-medium text-[var(--color-surface-text)]">{currentLibraryIcon.name}</div>
+									<div class="text-xs text-[var(--color-surface-text-muted)]">
+										{currentLibraryIcon.source === 'custom' ? 'Custom SVG' : currentLibraryIcon.source === 'svg' ? 'SVG Library' : 'Prime Icons'}
+									</div>
+								</div>
+								<button
+									type="button"
+									onclick={clearLibraryIcon}
+									class="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+									title="Remove icon"
+									aria-label="Remove icon"
+								>
+									<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+										<path d="M18 6 6 18"></path>
+										<path d="m6 6 12 12"></path>
+									</svg>
+								</button>
+							</div>
+						{:else}
+							<button
+								type="button"
+								onclick={openLibraryIconPicker}
+								class="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-3 text-sm font-medium text-[var(--color-primary-400)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)]"
+							>
+								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<path d="M12 5v14"></path>
+									<path d="M5 12h14"></path>
+								</svg>
+								+ Select icon
+							</button>
+						{/if}
 					</div>
 				</div>
 
 				<div>
 					<div class="flex items-center justify-between mb-2">
-						<label class="block text-sm font-medium text-[var(--color-surface-text)]">
+						<div class="block text-sm font-medium text-[var(--color-surface-text)]">
 							Book Folders
-						</label>
+						</div>
 						<button
 							onclick={() => openDirectoryModal('bookdrop')}
 							class="px-3 py-1.5 text-sm bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white rounded-lg transition-colors"
@@ -2318,6 +2420,13 @@
 		</div>
 	</div>
 {/if}
+
+<LibraryIconPicker
+	open={showLibraryIconPicker}
+	selectedIcon={libraryForm.icon}
+	onSelect={selectLibraryIcon}
+	onClose={closeLibraryIconPicker}
+/>
 
 <!-- Directory Selection Modal -->
 {#if showDirectoryModal}

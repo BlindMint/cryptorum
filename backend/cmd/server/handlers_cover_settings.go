@@ -12,6 +12,7 @@ import (
 )
 
 type bookCoverSettingsResponse struct {
+	PreserveFullCover    bool    `json:"preserve_full_cover"`
 	VerticalCropping     bool    `json:"vertical_cropping"`
 	HorizontalCropping   bool    `json:"horizontal_cropping"`
 	AspectRatioThreshold float64 `json:"aspect_ratio_threshold"`
@@ -21,6 +22,7 @@ type bookCoverSettingsResponse struct {
 func loadBookCoverSettingsResponse() bookCoverSettingsResponse {
 	s := covers.LoadSettings(appDB.DB)
 	return bookCoverSettingsResponse{
+		PreserveFullCover:    s.PreserveFullCover,
 		VerticalCropping:     s.VerticalCropping,
 		HorizontalCropping:   s.HorizontalCropping,
 		AspectRatioThreshold: s.AspectRatioThreshold,
@@ -42,6 +44,7 @@ func updateBookCoverSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	settings := covers.Settings{
+		PreserveFullCover:    req.PreserveFullCover,
 		VerticalCropping:     req.VerticalCropping,
 		HorizontalCropping:   req.HorizontalCropping,
 		AspectRatioThreshold: req.AspectRatioThreshold,
@@ -94,6 +97,7 @@ func regenerateBookCoversHandler(w http.ResponseWriter, r *http.Request) {
 		settings = *req.Settings
 	}
 	if err := covers.SaveSettings(appDB.DB, covers.Settings{
+		PreserveFullCover:    settings.PreserveFullCover,
 		VerticalCropping:     settings.VerticalCropping,
 		HorizontalCropping:   settings.HorizontalCropping,
 		AspectRatioThreshold: settings.AspectRatioThreshold,
@@ -167,7 +171,13 @@ func processCoverRegenerationJob(jobID int64, title, mode string, missingOnly bo
 		WHERE id = ?
 	`, "running", startedAt, jobID)
 
-	updated, err := appScanner.RegenerateCovers(missingOnly)
+	updated, failed, err := appScanner.RegenerateCovers(missingOnly, func(processed, updated, failed, total int) {
+		_, _ = appDB.Exec(`
+			UPDATE metadata_job
+			SET completed_items = ?, failed_items = ?
+			WHERE id = ?
+		`, processed, failed, jobID)
+	})
 	completedAt := time.Now().Unix()
 	if err != nil {
 		_, _ = appDB.Exec(`
@@ -193,14 +203,15 @@ func processCoverRegenerationJob(jobID int64, title, mode string, missingOnly bo
 	resultPayload := map[string]any{
 		"mode":    mode,
 		"updated": updated,
+		"failed":  failed,
 		"total":   total,
 	}
 	resultJSON, _ := json.Marshal(resultPayload)
 	_, _ = appDB.Exec(`
 		UPDATE metadata_job
-		SET status = ?, completed_items = ?, failed_items = 0, result_json = ?, completed_at = ?
+		SET status = ?, completed_items = ?, failed_items = ?, result_json = ?, completed_at = ?
 		WHERE id = ?
-	`, "completed", total, nullString(resultJSON), completedAt, jobID)
+	`, "completed", total, failed, nullString(resultJSON), completedAt, jobID)
 
 	slog.Info("Book cover regeneration finished", "mode", mode, "updated", updated, "total", total)
 	recordAppLog("info", "covers", "Cover regeneration finished", map[string]any{
@@ -212,7 +223,7 @@ func processCoverRegenerationJob(jobID int64, title, mode string, missingOnly bo
 	createAdminNotification(
 		"job_completed",
 		title,
-		fmt.Sprintf("Cover regeneration finished: %d updated from %d checked.", updated, total),
+		fmt.Sprintf("Cover regeneration finished: %d updated, %d failed from %d checked.", updated, failed, total),
 		"/settings?tab=admin",
 	)
 }

@@ -1,39 +1,45 @@
 import { browser } from '$app/environment';
 
 interface CachedBook {
-	id: number;
+	id: string;
 	content: string;
 	processedAt: number;
 }
 
 interface CachedProcessedEpub {
-	id: number;
+	id: string;
 	buffer: ArrayBuffer;
 	locations?: string;
 	processedAt: number;
 }
 
 const MAX_CACHE_SIZE = 3;
-const bookCache = new Map<number, CachedBook>();
-const processedEpubCache = new Map<number, CachedProcessedEpub>();
+const bookCache = new Map<string, CachedBook>();
+const processedEpubCache = new Map<string, CachedProcessedEpub>();
 
-export function getCachedBook(bookId: number): string | null {
+function makeCacheKey(bookId: number, variant = 'epub'): string {
+	return `${bookId}:${variant}`;
+}
+
+export function getCachedBook(bookId: number, variant = 'epub'): string | null {
 	if (!browser) return null;
-	const cached = bookCache.get(bookId);
+	const key = makeCacheKey(bookId, variant);
+	const cached = bookCache.get(key);
 	if (cached) {
-		touchCache(bookId);
+		touchCache(key);
 		return cached.content;
 	}
 	return null;
 }
 
-export function cacheBook(bookId: number, content: string): void {
+export function cacheBook(bookId: number, content: string, variant = 'epub'): void {
 	if (!browser) return;
+	const key = makeCacheKey(bookId, variant);
 
-	if (bookCache.has(bookId)) {
-		bookCache.get(bookId)!.content = content;
-		bookCache.get(bookId)!.processedAt = Date.now();
-		touchCache(bookId);
+	if (bookCache.has(key)) {
+		bookCache.get(key)!.content = content;
+		bookCache.get(key)!.processedAt = Date.now();
+		touchCache(key);
 		return;
 	}
 
@@ -44,29 +50,31 @@ export function cacheBook(bookId: number, content: string): void {
 		}
 	}
 
-	bookCache.set(bookId, {
-		id: bookId,
+	bookCache.set(key, {
+		id: key,
 		content,
 		processedAt: Date.now()
 	});
 }
 
-export function getCachedProcessedEpub(bookId: number): ArrayBuffer | null {
+export function getCachedProcessedEpub(bookId: number, variant = 'epub'): ArrayBuffer | null {
 	if (!browser) return null;
-	const cached = processedEpubCache.get(bookId);
+	const key = makeCacheKey(bookId, variant);
+	const cached = processedEpubCache.get(key);
 	if (!cached) return null;
-	touchProcessedEpubCache(bookId);
+	touchProcessedEpubCache(key);
 	return cached.buffer.slice(0);
 }
 
-export function cacheProcessedEpub(bookId: number, buffer: ArrayBuffer): void {
+export function cacheProcessedEpub(bookId: number, buffer: ArrayBuffer, variant = 'epub'): void {
 	if (!browser) return;
+	const key = makeCacheKey(bookId, variant);
 
-	if (processedEpubCache.has(bookId)) {
-		const cached = processedEpubCache.get(bookId)!;
+	if (processedEpubCache.has(key)) {
+		const cached = processedEpubCache.get(key)!;
 		cached.buffer = buffer.slice(0);
 		cached.processedAt = Date.now();
-		touchProcessedEpubCache(bookId);
+		touchProcessedEpubCache(key);
 		return;
 	}
 
@@ -77,46 +85,48 @@ export function cacheProcessedEpub(bookId: number, buffer: ArrayBuffer): void {
 		}
 	}
 
-	processedEpubCache.set(bookId, {
-		id: bookId,
+	processedEpubCache.set(key, {
+		id: key,
 		buffer: buffer.slice(0),
 		processedAt: Date.now()
 	});
 }
 
-export function getCachedEpubLocations(bookId: number): string | null {
+export function getCachedEpubLocations(bookId: number, variant = 'epub'): string | null {
 	if (!browser) return null;
-	const cached = processedEpubCache.get(bookId);
+	const key = makeCacheKey(bookId, variant);
+	const cached = processedEpubCache.get(key);
 	if (!cached?.locations) return null;
-	touchProcessedEpubCache(bookId);
+	touchProcessedEpubCache(key);
 	return cached.locations;
 }
 
-export function cacheEpubLocations(bookId: number, locations: string): void {
+export function cacheEpubLocations(bookId: number, locations: string, variant = 'epub'): void {
 	if (!browser) return;
-	const cached = processedEpubCache.get(bookId);
+	const key = makeCacheKey(bookId, variant);
+	const cached = processedEpubCache.get(key);
 	if (!cached) return;
 	cached.locations = locations;
 	cached.processedAt = Date.now();
 }
 
-function touchCache(bookId: number): void {
-	const cached = bookCache.get(bookId);
+function touchCache(cacheKey: string): void {
+	const cached = bookCache.get(cacheKey);
 	if (cached) {
 		cached.processedAt = Date.now();
 	}
 }
 
-function touchProcessedEpubCache(bookId: number): void {
-	const cached = processedEpubCache.get(bookId);
+function touchProcessedEpubCache(cacheKey: string): void {
+	const cached = processedEpubCache.get(cacheKey);
 	if (cached) {
 		cached.processedAt = Date.now();
 	}
 }
 
-function findLRUKey(): number | null {
+function findLRUKey(): string | null {
 	let oldestTime = Infinity;
-	let oldestKey: number | null = null;
+	let oldestKey: string | null = null;
 
 	for (const [key, value] of bookCache.entries()) {
 		if (value.processedAt < oldestTime) {
@@ -128,9 +138,9 @@ function findLRUKey(): number | null {
 	return oldestKey;
 }
 
-function findProcessedEpubLRUKey(): number | null {
+function findProcessedEpubLRUKey(): string | null {
 	let oldestTime = Infinity;
-	let oldestKey: number | null = null;
+	let oldestKey: string | null = null;
 
 	for (const [key, value] of processedEpubCache.entries()) {
 		if (value.processedAt < oldestTime) {
@@ -142,8 +152,8 @@ function findProcessedEpubLRUKey(): number | null {
 	return oldestKey;
 }
 
-export function isBookCached(bookId: number): boolean {
-	return bookCache.has(bookId);
+export function isBookCached(bookId: number, variant = 'epub'): boolean {
+	return bookCache.has(makeCacheKey(bookId, variant));
 }
 
 export function clearBookCache(): void {

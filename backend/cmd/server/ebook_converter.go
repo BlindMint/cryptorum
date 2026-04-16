@@ -34,14 +34,14 @@ type BookMetadata struct {
 }
 
 type textBookCachePaths struct {
-	BaseDir       string
+	BaseDir        string
 	NormalizedEPUB string
-	ExplodedDir   string
-	HTMLCachePath string
-	TextCachePath string
-	TocCachePath  string
-	MetaCachePath string
-	CSSCachePath  string
+	ExplodedDir    string
+	HTMLCachePath  string
+	TextCachePath  string
+	TocCachePath   string
+	MetaCachePath  string
+	CSSCachePath   string
 }
 
 type epubContainerDocument struct {
@@ -120,8 +120,12 @@ func isSupportedTextBookFormat(format string) bool {
 	return supportedTextBookFormats[strings.ToLower(format)]
 }
 
-func getTextBookCachePaths(bookID string) textBookCachePaths {
-	baseDir := filepath.Join(appConfig.GetBookCachePath(), bookID)
+func getTextBookCachePaths(bookID, format string) textBookCachePaths {
+	cacheKey := strings.TrimSpace(bookID)
+	if normalized := normalizeBookFormatKey(format); normalized != "" {
+		cacheKey = cacheKey + "-" + normalized
+	}
+	baseDir := filepath.Join(appConfig.GetBookCachePath(), cacheKey)
 	return textBookCachePaths{
 		BaseDir:        baseDir,
 		NormalizedEPUB: filepath.Join(baseDir, "canonical", "book.epub"),
@@ -134,8 +138,16 @@ func getTextBookCachePaths(bookID string) textBookCachePaths {
 	}
 }
 
+func normalizeBookFormatKey(format string) string {
+	format = strings.ToLower(strings.TrimSpace(format))
+	format = strings.TrimPrefix(format, ".")
+	format = strings.ReplaceAll(format, string(filepath.Separator), "-")
+	format = strings.ReplaceAll(format, " ", "-")
+	return format
+}
+
 func ensureProcessedTextBook(bookID, filePath, format string) (*ConversionResult, error) {
-	paths := getTextBookCachePaths(bookID)
+	paths := getTextBookCachePaths(bookID, format)
 
 	if isProcessedTextBookCacheValid(paths, filePath) {
 		return loadProcessedTextBook(paths)

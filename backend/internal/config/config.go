@@ -78,6 +78,7 @@ type TaskSchedule struct {
 
 // BackupConfig holds backup configuration
 type BackupConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
 	Cron     string `mapstructure:"cron"`
 	KeepLast int    `mapstructure:"keep_last"`
 }
@@ -100,9 +101,10 @@ func Load(configPath string) (*Config, error) {
 	viper.SetDefault("auth.session_duration", "720h")
 	viper.SetDefault("bookdrop.path", "./bookdrop")
 	viper.SetDefault("metadata.auto_fetch_on_import", true)
-	viper.SetDefault("metadata.providers", []string{"google_books", "open_library", "hardcover", "comicvine", "audible"})
+	viper.SetDefault("metadata.providers", []string{"google_books", "open_library", "bookbrainz", "library_of_congress", "wikidata", "internet_archive"})
 	viper.SetDefault("logging.level", "info")
 	viper.SetDefault("logging.format", "json")
+	viper.SetDefault("tasks.database_backup.enabled", true)
 	viper.SetDefault("tasks.database_backup.keep_last", 14)
 
 	if err := viper.ReadInConfig(); err != nil {
@@ -217,7 +219,8 @@ func UpdateBookdropPath(path string) error {
 }
 
 // UpdateDatabaseBackupConfig persists the scheduled database backup settings to the active config file.
-func UpdateDatabaseBackupConfig(cron string, keepLast int) error {
+func UpdateDatabaseBackupConfig(enabled bool, cron string, keepLast int) error {
+	viper.Set("tasks.database_backup.enabled", enabled)
 	viper.Set("tasks.database_backup.cron", cron)
 	viper.Set("tasks.database_backup.keep_last", keepLast)
 	return viper.WriteConfig()

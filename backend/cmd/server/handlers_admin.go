@@ -23,6 +23,11 @@ type MetadataApplyJobRequest struct {
 	IncludeCover bool                   `json:"include_cover"`
 }
 
+type MetadataLookupJobRequest struct {
+	BookIDs  []int64 `json:"book_ids"`
+	Provider string  `json:"provider,omitempty"`
+}
+
 type AdminJob struct {
 	ID             int64           `json:"id"`
 	JobType        string          `json:"job_type"`
@@ -64,6 +69,30 @@ type MetadataApplyJobResultItem struct {
 	Status   string `json:"status"`
 	Error    string `json:"error,omitempty"`
 	Provider string `json:"provider,omitempty"`
+}
+
+type MetadataLookupBookSnapshot struct {
+	BookID      int64    `json:"book_id"`
+	Title       string   `json:"title"`
+	Authors     []string `json:"authors"`
+	Series      string   `json:"series,omitempty"`
+	Publisher   string   `json:"publisher,omitempty"`
+	PubDate     string   `json:"pub_date,omitempty"`
+	Description string   `json:"description,omitempty"`
+	ISBN        string   `json:"isbn,omitempty"`
+	ASIN        string   `json:"asin,omitempty"`
+	CoverPath   string   `json:"cover_path,omitempty"`
+	PageCount   int      `json:"page_count,omitempty"`
+	Language    string   `json:"language,omitempty"`
+}
+
+type MetadataLookupJobResultItem struct {
+	BookID  int64                      `json:"book_id"`
+	Current MetadataLookupBookSnapshot `json:"current"`
+	Match   *MetadataCandidate         `json:"match,omitempty"`
+	Status  string                     `json:"status"`
+	Error   string                     `json:"error,omitempty"`
+	Query   string                     `json:"query,omitempty"`
 }
 
 func recordAppLog(level, category, message string, data any) {
@@ -147,6 +176,65 @@ func loadAdminJob(jobID int64) (AdminJob, error) {
 	return job, nil
 }
 
+func loadMetadataLookupSnapshot(bookID int64) (MetadataLookupBookSnapshot, error) {
+	var snapshot MetadataLookupBookSnapshot
+	var authorsJSON string
+	err := appDB.QueryRow(`
+		SELECT b.id,
+		       COALESCE(bm.title, ''),
+		       COALESCE(bm.authors, '[]'),
+		       COALESCE(bm.series, ''),
+		       COALESCE(bm.publisher, ''),
+		       COALESCE(bm.pub_date, ''),
+		       COALESCE(bm.description, ''),
+		       COALESCE(bm.isbn, ''),
+		       COALESCE(bm.asin, ''),
+		       COALESCE(bm.cover_path, ''),
+		       COALESCE(bm.page_count, 0),
+		       COALESCE(bm.language, '')
+		FROM book b
+		LEFT JOIN book_metadata bm ON b.id = bm.book_id
+		WHERE b.id = ?
+	`, bookID).Scan(
+		&snapshot.BookID,
+		&snapshot.Title,
+		&authorsJSON,
+		&snapshot.Series,
+		&snapshot.Publisher,
+		&snapshot.PubDate,
+		&snapshot.Description,
+		&snapshot.ISBN,
+		&snapshot.ASIN,
+		&snapshot.CoverPath,
+		&snapshot.PageCount,
+		&snapshot.Language,
+	)
+	if err != nil {
+		return MetadataLookupBookSnapshot{}, err
+	}
+
+	if err := json.Unmarshal([]byte(authorsJSON), &snapshot.Authors); err != nil {
+		snapshot.Authors = strings.Split(authorsJSON, ",")
+		for i := range snapshot.Authors {
+			snapshot.Authors[i] = strings.TrimSpace(snapshot.Authors[i])
+		}
+	}
+
+	return snapshot, nil
+}
+
+func metadataLookupQuery(snapshot MetadataLookupBookSnapshot) string {
+	parts := []string{
+		snapshot.Title,
+		strings.Join(snapshot.Authors, " "),
+		snapshot.ISBN,
+		snapshot.ASIN,
+		snapshot.Series,
+		snapshot.Publisher,
+	}
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
 func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, includeCover bool) error {
 	var exists bool
 	if err := appDB.QueryRow("SELECT EXISTS(SELECT 1 FROM book WHERE id = ?)", bookID).Scan(&exists); err != nil {
@@ -170,6 +258,7 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 		Rating       float64
 		Genres       string
 		ISBN         string
+		ASIN         string
 		CoverPath    string
 		CoverUpdated int64
 		PageCount    int64
@@ -189,6 +278,7 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 		       COALESCE(rating, 0),
 		       COALESCE(genres, '[]'),
 		       COALESCE(isbn, ''),
+		       COALESCE(asin, ''),
 		       COALESCE(cover_path, ''),
 		       COALESCE(cover_updated_on, 0),
 		       COALESCE(page_count, 0),
@@ -207,6 +297,7 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 		&current.Rating,
 		&current.Genres,
 		&current.ISBN,
+		&current.ASIN,
 		&current.CoverPath,
 		&current.CoverUpdated,
 		&current.PageCount,
@@ -218,12 +309,12 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 		_, err = appDB.Exec(`
 			INSERT INTO book_metadata (
 				book_id, title, authors, series, series_number, publisher,
-				pub_date, description, rating, genres, isbn, cover_path,
+				pub_date, description, rating, genres, isbn, asin, cover_path,
 				cover_updated_on, page_count, language, locked_fields
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, bookID, candidate.Title, nullString(authorsJSON), candidate.Series,
 			0, candidate.Publisher, candidate.PubDate, candidate.Description,
-			candidate.Rating, nullString(genresJSON), candidate.ISBN, "",
+			candidate.Rating, nullString(genresJSON), candidate.ISBN, candidate.ASIN, "",
 			0, candidate.PageCount, candidate.Language, "[]")
 		if err != nil {
 			return err
@@ -283,6 +374,11 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 			finalISBN = candidate.ISBN
 		}
 
+		finalASIN := current.ASIN
+		if candidate.ASIN != "" && !contains(locked, "asin") {
+			finalASIN = candidate.ASIN
+		}
+
 		finalPageCount := current.PageCount
 		if candidate.PageCount > 0 && !contains(locked, "page_count") {
 			finalPageCount = int64(candidate.PageCount)
@@ -305,11 +401,12 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 				rating = ?,
 				genres = ?,
 				isbn = ?,
+				asin = ?,
 				page_count = ?,
 				language = ?
 			WHERE book_id = ?
 		`, finalTitle, finalAuthors, finalSeries, finalSeriesNumber, finalPublisher,
-			finalPubDate, finalDescription, finalRating, finalGenres, finalISBN,
+			finalPubDate, finalDescription, finalRating, finalGenres, finalISBN, finalASIN,
 			finalPageCount, finalLanguage, bookID)
 		if err != nil {
 			return err
@@ -383,6 +480,226 @@ func QueueMetadataApplyJobHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, http.StatusAccepted, job)
+}
+
+func QueueMetadataLookupJobHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionManageMetadata) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
+	var req MetadataLookupJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if len(req.BookIDs) == 0 {
+		errorResponse(w, http.StatusBadRequest, "No books provided")
+		return
+	}
+
+	seen := map[int64]bool{}
+	bookIDs := make([]int64, 0, len(req.BookIDs))
+	for _, bookID := range req.BookIDs {
+		if bookID <= 0 || seen[bookID] {
+			continue
+		}
+		allowed, err := canAccessBook(current, bookID)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
+			return
+		}
+		if !allowed {
+			errorResponse(w, http.StatusForbidden, "Permission denied")
+			return
+		}
+		seen[bookID] = true
+		bookIDs = append(bookIDs, bookID)
+	}
+
+	if len(bookIDs) == 0 {
+		errorResponse(w, http.StatusBadRequest, "No valid books provided")
+		return
+	}
+
+	req.BookIDs = bookIDs
+	req.Provider = strings.TrimSpace(req.Provider)
+
+	title := fmt.Sprintf("Bulk metadata lookup (%d books)", len(req.BookIDs))
+	payload, _ := json.Marshal(req)
+	now := time.Now().Unix()
+
+	res, err := appDB.Exec(`
+		INSERT INTO metadata_job (
+			job_type, title, status, payload_json,
+			total_items, completed_items, failed_items,
+			created_at
+		) VALUES (?, ?, ?, ?, ?, 0, 0, ?)
+	`, "metadata_lookup", title, "queued", nullString(payload), len(req.BookIDs), now)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to queue job")
+		return
+	}
+
+	jobID, _ := res.LastInsertId()
+	createAdminNotification(
+		"job_queued",
+		title,
+		"Queued a background metadata lookup job.",
+		"/settings?tab=admin",
+	)
+	recordAppLog("info", "jobs", "Queued metadata lookup job", map[string]any{
+		"job_id": jobID,
+		"count":  len(req.BookIDs),
+	})
+
+	go processMetadataLookupJob(jobID, req, title)
+
+	job, err := loadAdminJob(jobID)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to load queued job")
+		return
+	}
+
+	jsonResponse(w, http.StatusAccepted, job)
+}
+
+func GetJobHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionViewAdmin) && !requirePermission(current, PermissionManageJobs) && !requirePermission(current, PermissionManageMetadata) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
+	jobID, err := strconv.ParseInt(chi.URLParam(r, "jobID"), 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid job ID")
+		return
+	}
+
+	job, err := loadAdminJob(jobID)
+	if err != nil {
+		errorResponse(w, http.StatusNotFound, "Job not found")
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, job)
+}
+
+func processMetadataLookupJob(jobID int64, req MetadataLookupJobRequest, title string) {
+	startedAt := time.Now().Unix()
+	_, _ = appDB.Exec(`
+		UPDATE metadata_job
+		SET status = ?, started_at = ?
+		WHERE id = ?
+	`, "running", startedAt, jobID)
+
+	results := make([]MetadataLookupJobResultItem, 0, len(req.BookIDs))
+	completed := 0
+	failed := 0
+	var firstErr string
+
+	for _, bookID := range req.BookIDs {
+		item := MetadataLookupJobResultItem{
+			BookID: bookID,
+			Status: "no_match",
+		}
+
+		snapshot, err := loadMetadataLookupSnapshot(bookID)
+		if err != nil {
+			item.Status = "failed"
+			item.Error = err.Error()
+			failed++
+			if firstErr == "" {
+				firstErr = err.Error()
+			}
+		} else {
+			item.Current = snapshot
+			item.Query = metadataLookupQuery(snapshot)
+			if item.Query == "" {
+				item.Status = "failed"
+				item.Error = "No searchable metadata"
+				failed++
+				if firstErr == "" {
+					firstErr = item.Error
+				}
+			} else {
+				candidates := searchMetadataCandidates(MetadataSearchFields{
+					Title:     snapshot.Title,
+					Author:    strings.Join(snapshot.Authors, " "),
+					ISBN:      snapshot.ISBN,
+					ASIN:      snapshot.ASIN,
+					Series:    snapshot.Series,
+					Publisher: snapshot.Publisher,
+					Provider:  req.Provider,
+				})
+				if len(candidates) > 0 {
+					best := candidates[0]
+					item.Match = &best
+					item.Status = "matched"
+					completed++
+				} else {
+					completed++
+				}
+			}
+		}
+
+		results = append(results, item)
+		partialJSON, _ := json.Marshal(map[string]any{
+			"items":     results,
+			"completed": completed,
+			"failed":    failed,
+			"total":     len(req.BookIDs),
+		})
+		_, _ = appDB.Exec(`
+			UPDATE metadata_job
+			SET completed_items = ?, failed_items = ?, result_json = ?
+			WHERE id = ?
+		`, completed, failed, nullString(partialJSON), jobID)
+	}
+
+	status := "completed"
+	if completed == 0 && failed > 0 {
+		status = "failed"
+	}
+
+	resultPayload := map[string]any{
+		"items":     results,
+		"completed": completed,
+		"failed":    failed,
+		"total":     len(req.BookIDs),
+	}
+	resultJSON, _ := json.Marshal(resultPayload)
+	completedAt := time.Now().Unix()
+
+	_, _ = appDB.Exec(`
+		UPDATE metadata_job
+		SET status = ?, result_json = ?, error = ?, completed_at = ?
+		WHERE id = ?
+	`, status, nullString(resultJSON), firstErr, completedAt, jobID)
+
+	matched := 0
+	for _, item := range results {
+		if item.Match != nil {
+			matched++
+		}
+	}
+
+	createAdminNotification(
+		"job_completed",
+		title,
+		fmt.Sprintf("Metadata lookup finished: %d matches, %d failed.", matched, failed),
+		"/settings?tab=admin",
+	)
+	recordAppLog("info", "jobs", "Completed metadata lookup job", map[string]any{
+		"job_id":  jobID,
+		"status":  status,
+		"matched": matched,
+		"failed":  failed,
+		"error":   firstErr,
+	})
 }
 
 func processMetadataApplyJob(jobID int64, req MetadataApplyJobRequest, title string) {
@@ -637,6 +954,26 @@ func DeleteNotificationHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func DeleteAllNotificationsHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionViewAdmin) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
+	result, err := appDB.Exec(`DELETE FROM app_notification`)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to delete notifications")
+		return
+	}
+
+	deleted, _ := result.RowsAffected()
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"status":  "deleted",
+		"deleted": deleted,
+	})
 }
 
 func ListLogsHandler(w http.ResponseWriter, r *http.Request) {

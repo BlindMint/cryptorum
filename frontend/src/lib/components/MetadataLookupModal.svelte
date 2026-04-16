@@ -10,6 +10,7 @@
 		pub_date?: string;
 		description?: string;
 		isbn?: string;
+		asin?: string;
 		cover_url?: string;
 		page_count?: number;
 		language?: string;
@@ -26,6 +27,7 @@
 		publisher?: string;
 		description?: string;
 		isbn?: string;
+		asin?: string;
 		cover_path?: string;
 	};
 
@@ -34,12 +36,14 @@
 		title: string;
 		authors: string[];
 		isbn: string;
+		asin: string;
 		series: string;
 		publisher: string;
 		description: string;
 		queryTitle: string;
 		queryAuthors: string;
 		queryIsbn: string;
+		queryAsin: string;
 		querySeries: string;
 		queryPublisher: string;
 		results: MetadataCandidate[];
@@ -70,7 +74,7 @@
 		if (!value) return [];
 		try {
 			const parsed = JSON.parse(value);
-			return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string' && item.trim()) : [value];
+			return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [value];
 		} catch {
 			return value.split(',').map((item) => item.trim()).filter(Boolean);
 		}
@@ -78,6 +82,55 @@
 
 	function summarizeAuthors(authors: string[]): string {
 		return authors.filter(Boolean).join(', ');
+	}
+
+	function normalizeSearchText(value: string): string {
+		return value.trim().toLowerCase().replace(/\s+/g, ' ');
+	}
+
+	function formatSearchError(status: number, detail?: string): string {
+		const code = `E${status}`;
+		const normalizedDetail = (detail || '').trim();
+		const fallback = (() => {
+			switch (status) {
+				case 400:
+					return 'bad request';
+				case 401:
+					return 'authentication required';
+				case 403:
+					return 'permission denied';
+				case 404:
+					return 'not found';
+				case 429:
+					return 'rate limited';
+				case 500:
+					return 'server error';
+				case 503:
+					return 'service unavailable';
+				default:
+					return 'request failed';
+			}
+		})();
+
+		return normalizedDetail ? `Search failed (${code}): ${normalizedDetail}` : `Search failed (${code}): ${fallback}.`;
+	}
+
+	async function readErrorDetail(res: Response): Promise<string | undefined> {
+		try {
+			const text = await res.text();
+			if (!text.trim()) return undefined;
+			try {
+				const parsed = JSON.parse(text);
+				if (parsed && typeof parsed === 'object' && 'error' in parsed && typeof parsed.error === 'string') {
+					return parsed.error;
+				}
+			} catch {
+				// Fall through to raw text.
+			}
+			return text.trim();
+		} catch {
+			return undefined;
+		}
 	}
 
 	function normalizeTarget(summary: BookSummary): LookupTarget {
@@ -88,12 +141,14 @@
 			title: titleValue,
 			authors,
 			isbn: summary.isbn?.trim() || '',
+			asin: summary.asin?.trim() || '',
 			series: summary.series?.trim() || '',
 			publisher: summary.publisher?.trim() || '',
 			description: summary.description?.trim() || '',
 			queryTitle: titleValue,
 			queryAuthors: summarizeAuthors(authors),
 			queryIsbn: summary.isbn?.trim() || '',
+			queryAsin: summary.asin?.trim() || '',
 			querySeries: summary.series?.trim() || '',
 			queryPublisher: summary.publisher?.trim() || '',
 			results: [],
@@ -107,6 +162,17 @@
 		return targets.find((target) => target.bookId === activeBookId) ?? null;
 	}
 
+	function activeTargetIndex(): number {
+		return targets.findIndex((target) => target.bookId === activeBookId);
+	}
+
+	function goToTarget(offset: number) {
+		if (targets.length === 0) return;
+		const currentIndex = activeTargetIndex();
+		const nextIndex = Math.min(Math.max(currentIndex + offset, 0), targets.length - 1);
+		activeBookId = targets[nextIndex]?.bookId ?? activeBookId;
+	}
+
 	function updateTarget(bookId: number, updater: (target: LookupTarget) => LookupTarget) {
 		targets = targets.map((target) => target.bookId === bookId ? updater({ ...target }) : target);
 	}
@@ -116,12 +182,33 @@
 			target.queryTitle,
 			target.queryAuthors,
 			target.queryIsbn,
+			target.queryAsin,
 			target.querySeries,
 			target.queryPublisher
 		]
 			.map((value) => value.trim())
 			.filter(Boolean)
 			.join(' ');
+	}
+
+	function resultSummaryForTarget(target: LookupTarget): string {
+		const title = target.queryTitle.trim();
+		const authors = target.queryAuthors.trim();
+		if (title && authors) return `${title} by ${authors}`;
+		if (title) return title;
+		if (authors) return authors;
+		return `Book ${target.bookId}`;
+	}
+
+	function hasEditedSearchFields(target: LookupTarget): boolean {
+		return (
+			normalizeSearchText(target.queryTitle) !== normalizeSearchText(target.title) ||
+			normalizeSearchText(target.queryAuthors) !== normalizeSearchText(summarizeAuthors(target.authors)) ||
+			normalizeSearchText(target.queryIsbn) !== normalizeSearchText(target.isbn) ||
+			normalizeSearchText(target.queryAsin) !== normalizeSearchText(target.asin || '') ||
+			normalizeSearchText(target.querySeries) !== normalizeSearchText(target.series) ||
+			normalizeSearchText(target.queryPublisher) !== normalizeSearchText(target.publisher)
+		);
 	}
 
 	async function fetchProviders() {
@@ -155,7 +242,6 @@
 			const summaries = await Promise.all(bookIds.map((bookId) => fetchBookSummary(bookId)));
 			targets = summaries.filter((summary): summary is BookSummary => !!summary).map((summary) => normalizeTarget(summary));
 			activeBookId = targets[0]?.bookId ?? null;
-			await searchAllTargets();
 		} finally {
 			loading = false;
 		}
@@ -167,7 +253,7 @@
 
 		const query = queryFromTarget(target);
 		if (!query) {
-			updateTarget(bookId, (item) => ({ ...item, error: 'Add a title, author, or ISBN before searching.' }));
+			updateTarget(bookId, (item) => ({ ...item, error: 'Add a title, author, ISBN, or ASIN before searching.' }));
 			return;
 		}
 
@@ -178,21 +264,25 @@
 			if (target.queryTitle.trim()) params.set('title', target.queryTitle.trim());
 			if (target.queryAuthors.trim()) params.set('author', target.queryAuthors.trim());
 			if (target.queryIsbn.trim()) params.set('isbn', target.queryIsbn.trim());
+			if (target.queryAsin.trim()) params.set('asin', target.queryAsin.trim());
 			if (target.querySeries.trim()) params.set('series', target.querySeries.trim());
 			if (target.queryPublisher.trim()) params.set('publisher', target.queryPublisher.trim());
 			if (selectedProvider) params.set('provider', selectedProvider);
+			if (hasEditedSearchFields(target)) params.set('strict', '1');
 			params.set('limit', '6');
 
 			const res = await fetch(`/api/metadata/search?${params.toString()}`);
 			if (!res.ok) {
-				throw new Error(`Search failed (${res.status})`);
+				const detail = await readErrorDetail(res);
+				throw new Error(formatSearchError(res.status, detail));
 			}
 
 			const results = await res.json();
+			const safeResults = Array.isArray(results) ? results : [];
 			updateTarget(bookId, (item) => ({
 				...item,
-				results,
-				selectedIndex: results.length > 0 ? 0 : -1,
+				results: safeResults,
+				selectedIndex: safeResults.length > 0 ? 0 : -1,
 				loading: false,
 				error: null
 			}));
@@ -201,7 +291,7 @@
 			updateTarget(bookId, (item) => ({
 				...item,
 				loading: false,
-				error: 'Unable to search metadata right now.'
+				error: error instanceof Error ? error.message : 'Search failed (E000): unable to reach the metadata service.'
 			}));
 		}
 	}
@@ -302,14 +392,19 @@
 	});
 </script>
 
-<div class="fixed inset-0 z-[120] flex items-center justify-center p-4">
-	<div class="absolute inset-0 bg-black/70" onclick={onClose}></div>
-	<div class="relative w-full max-w-6xl max-h-[92vh] overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
+<div class="fixed inset-0 z-[120] flex items-center justify-center p-4 relative">
+	<button
+		type="button"
+		aria-label="Close metadata lookup modal"
+		class="absolute inset-0 z-0 bg-black/70"
+		onclick={onClose}
+	></button>
+	<div class="relative z-10 w-full max-w-6xl max-h-[92vh] overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
 		<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-6 py-4">
 			<div>
 				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">{title}</h2>
 				<p class="text-sm text-[var(--color-surface-text-muted)]">
-					Search providers, compare results, then apply the best match.
+					Review selected books one at a time, search providers, then apply the best match.
 				</p>
 			</div>
 			<div class="flex items-center gap-2">
@@ -335,17 +430,34 @@
 			</div>
 		{:else if targets.length > 0}
 			{@const target = activeTarget()}
+			{@const targetIndex = activeTargetIndex()}
 			<div class="flex h-[calc(92vh-88px)] flex-col gap-4 overflow-hidden p-4 lg:p-6">
 				{#if targets.length > 1}
-					<div class="flex flex-wrap gap-2">
-						{#each targets as target}
-							<button
-								class="rounded-full border px-3 py-1.5 text-sm transition-colors {activeBookId === target.bookId ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/15 text-[var(--color-primary-300)]' : 'border-[var(--color-surface-border)] text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)]'}"
-								onclick={() => activeBookId = target.bookId}
-							>
-								{target.title || `Book ${target.bookId}`}
-							</button>
-						{/each}
+					<div class="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
+						<button
+							type="button"
+							class="rounded-md border border-[var(--color-surface-border)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-overlay)] disabled:opacity-40"
+							onclick={() => goToTarget(-1)}
+							disabled={targetIndex <= 0}
+						>
+							&lt;
+						</button>
+						<div class="min-w-0 text-center">
+							<div class="text-sm font-medium text-[var(--color-surface-text)]">
+								{targetIndex + 1} / {targets.length}
+							</div>
+							<div class="truncate text-xs text-[var(--color-surface-text-muted)]">
+								{target?.title || (target ? `Book ${target.bookId}` : 'Selected book')}
+							</div>
+						</div>
+						<button
+							type="button"
+							class="rounded-md border border-[var(--color-surface-border)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-overlay)] disabled:opacity-40"
+							onclick={() => goToTarget(1)}
+							disabled={targetIndex >= targets.length - 1}
+						>
+							&gt;
+						</button>
 					</div>
 				{/if}
 				{#if target}
@@ -355,50 +467,64 @@
 								<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Search Fields</h3>
 								<p class="text-sm text-[var(--color-surface-text-muted)]">Refine the query for this book.</p>
 							</div>
-							<div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-4">
-								<div>
-									<label class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">Title</label>
-									<input
-										value={target.queryTitle}
-										oninput={(event) => updateTarget(target.bookId, (item) => ({ ...item, queryTitle: (event.currentTarget as HTMLInputElement).value }))}
-										class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-									/>
-								</div>
-								<div>
-									<label class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">Authors</label>
-									<input
-										value={target.queryAuthors}
-										oninput={(event) => updateTarget(target.bookId, (item) => ({ ...item, queryAuthors: (event.currentTarget as HTMLInputElement).value }))}
-										class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-									/>
-								</div>
-								<div>
-									<label class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">ISBN</label>
-									<input
-										value={target.queryIsbn}
-										oninput={(event) => updateTarget(target.bookId, (item) => ({ ...item, queryIsbn: (event.currentTarget as HTMLInputElement).value }))}
-										class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-									/>
-								</div>
-								<div>
-									<label class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">Series</label>
-									<input
-										value={target.querySeries}
-										oninput={(event) => updateTarget(target.bookId, (item) => ({ ...item, querySeries: (event.currentTarget as HTMLInputElement).value }))}
-										class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-									/>
-								</div>
-								<div>
-									<label class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">Publisher</label>
-									<input
-										value={target.queryPublisher}
-										oninput={(event) => updateTarget(target.bookId, (item) => ({ ...item, queryPublisher: (event.currentTarget as HTMLInputElement).value }))}
-										class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-									/>
-								</div>
-								<div>
-									<label class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">Provider</label>
-									<select bind:value={selectedProvider} class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]">
+								<div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-4">
+									<div>
+										<label for={`lookup-title-${target.bookId}`} class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">Title</label>
+										<input
+											id={`lookup-title-${target.bookId}`}
+											value={target.queryTitle}
+											oninput={(event) => updateTarget(target.bookId, (item) => ({ ...item, queryTitle: (event.currentTarget as HTMLInputElement).value }))}
+											class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+										/>
+									</div>
+									<div>
+										<label for={`lookup-authors-${target.bookId}`} class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">Authors</label>
+										<input
+											id={`lookup-authors-${target.bookId}`}
+											value={target.queryAuthors}
+											oninput={(event) => updateTarget(target.bookId, (item) => ({ ...item, queryAuthors: (event.currentTarget as HTMLInputElement).value }))}
+											class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+										/>
+									</div>
+									<div>
+										<label for={`lookup-isbn-${target.bookId}`} class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">ISBN</label>
+										<input
+											id={`lookup-isbn-${target.bookId}`}
+											value={target.queryIsbn}
+											oninput={(event) => updateTarget(target.bookId, (item) => ({ ...item, queryIsbn: (event.currentTarget as HTMLInputElement).value }))}
+											class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+										/>
+									</div>
+									<div>
+										<label for={`lookup-asin-${target.bookId}`} class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">ASIN</label>
+										<input
+											id={`lookup-asin-${target.bookId}`}
+											value={target.queryAsin}
+											oninput={(event) => updateTarget(target.bookId, (item) => ({ ...item, queryAsin: (event.currentTarget as HTMLInputElement).value }))}
+											class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+										/>
+									</div>
+									<div>
+										<label for={`lookup-series-${target.bookId}`} class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">Series</label>
+										<input
+											id={`lookup-series-${target.bookId}`}
+											value={target.querySeries}
+											oninput={(event) => updateTarget(target.bookId, (item) => ({ ...item, querySeries: (event.currentTarget as HTMLInputElement).value }))}
+											class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+										/>
+									</div>
+									<div>
+										<label for={`lookup-publisher-${target.bookId}`} class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">Publisher</label>
+										<input
+											id={`lookup-publisher-${target.bookId}`}
+											value={target.queryPublisher}
+											oninput={(event) => updateTarget(target.bookId, (item) => ({ ...item, queryPublisher: (event.currentTarget as HTMLInputElement).value }))}
+											class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+										/>
+									</div>
+									<div>
+										<label for={`lookup-provider-${target.bookId}`} class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">Provider</label>
+										<select bind:value={selectedProvider} class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]">
 										<option value="">All providers</option>
 										{#each providers as provider}
 											<option value={provider.id}>{provider.name}</option>
@@ -448,7 +574,7 @@
 									<div>
 										<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Results</h3>
 										<p class="text-sm text-[var(--color-surface-text-muted)]">
-											{target.results.length} result{target.results.length === 1 ? '' : 's'} for {target.title || `Book ${target.bookId}`}
+											{target.results.length} result{target.results.length === 1 ? '' : 's'} for {resultSummaryForTarget(target)}
 										</p>
 									</div>
 									<div class="text-sm text-[var(--color-surface-text-muted)]">
@@ -498,6 +624,7 @@
 														<div><span class="text-[var(--color-surface-text)]">Publisher:</span> {result.publisher || '-'}</div>
 														<div><span class="text-[var(--color-surface-text)]">Published:</span> {result.pub_date || '-'}</div>
 														<div><span class="text-[var(--color-surface-text)]">ISBN:</span> {result.isbn || '-'}</div>
+														<div><span class="text-[var(--color-surface-text)]">ASIN:</span> {result.asin || '-'}</div>
 														<div><span class="text-[var(--color-surface-text)]">Pages:</span> {result.page_count || '-'}</div>
 													</div>
 													{#if result.description}

@@ -62,11 +62,11 @@ DELETE FROM book_file WHERE book_id = ?;
 SELECT * FROM book_metadata WHERE book_id = ?;
 
 -- name: CreateBookMetadata :exec
-INSERT INTO book_metadata (book_id, title, authors, series, series_number, publisher, pub_date, description, rating, genres, isbn, cover_path, cover_updated_on, page_count, language, locked_fields) 
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO book_metadata (book_id, title, authors, series, series_number, publisher, pub_date, description, rating, genres, isbn, asin, cover_path, cover_updated_on, page_count, language, locked_fields)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: UpdateBookMetadata :exec
-UPDATE book_metadata SET title = ?, authors = ?, series = ?, series_number = ?, publisher = ?, pub_date = ?, description = ?, rating = ?, genres = ?, isbn = ?, cover_path = ?, cover_updated_on = ?, page_count = ?, language = ?, locked_fields = ? 
+UPDATE book_metadata SET title = ?, authors = ?, series = ?, series_number = ?, publisher = ?, pub_date = ?, description = ?, rating = ?, genres = ?, isbn = ?, asin = ?, cover_path = ?, cover_updated_on = ?, page_count = ?, language = ?, locked_fields = ?
 WHERE book_id = ?;
 
 -- name: DeleteBookMetadata :exec

@@ -43,6 +43,7 @@ CREATE TABLE book_metadata (
     rating          REAL,
     genres          TEXT,          -- JSON array
     isbn            TEXT,
+    asin            TEXT,
     cover_path      TEXT,
     cover_updated_on INTEGER NOT NULL DEFAULT 0,
     page_count      INTEGER,

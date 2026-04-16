@@ -21,6 +21,7 @@ RUN apt-get update && \
     tzdata \
     wget \
     xz-utils \
+    ffmpeg \
     fonts-liberation \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
@@ -33,6 +34,7 @@ RUN mkdir -p /opt/calibre && \
     fi && \
     tar -xJf /tmp/calibre.txz -C /opt/calibre && \
     ln -sf "$(find /opt/calibre -type f -name ebook-convert | head -n 1)" /usr/local/bin/ebook-convert && \
+    ln -sf "$(find /opt/calibre -type f -name ebook-meta | head -n 1)" /usr/local/bin/ebook-meta && \
     rm -f /tmp/calibre.txz
 WORKDIR /app
 COPY --from=ui-build /app/build ./static

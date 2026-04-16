@@ -6,6 +6,7 @@
 	import { readerSettings, epubThemes, fontFamilies, fontWeightOptions, type EpubReaderSetting } from '$lib/stores/readerSettings';
 	import { currentTheme, resolveThemeColors, type FullTheme } from '$lib/stores/theme';
 	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
+	import { getPreferredTextFormat, getReaderRouteKind, normalizeBookFormat } from '$lib/utils/book-formats';
 	import {
 		getCachedBook,
 		cacheBook,
@@ -93,6 +94,7 @@
 	let currentProgress = $state(0);
 	let lastSavedProgress: number | null = null;
 	let progressSaveTimer: ReturnType<typeof setTimeout> | null = null;
+	let viewportResizeTimeout: ReturnType<typeof setTimeout> | null = null;
 	let pendingProgressCfi: string | undefined;
 	let lastWheelNavigationAt = 0;
 	let wheelNavigationTarget: Document | null = null;
@@ -120,9 +122,11 @@
 			}
 			if (filesRes.ok) {
 				const files = await filesRes.json();
-				if (files.length > 0) {
-					bookFormat = files[0].format?.toLowerCase() ?? 'epub';
-				}
+				const requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
+				const preferredFormat = getPreferredTextFormat(files);
+				bookFormat = requestedFormat && getReaderRouteKind(requestedFormat) === 'epub'
+					? requestedFormat
+					: preferredFormat || 'epub';
 			}
 		} catch (e) {
 			console.error('Failed to load book:', e);
@@ -148,8 +152,8 @@
 	async function preloadBookContent() {
 		if (!book || !book.id) return false;
 		
-		if (isBookCached(book.id)) {
-			const cached = getCachedBook(book.id);
+		if (isBookCached(book.id, bookFormat)) {
+			const cached = getCachedBook(book.id, bookFormat);
 			if (cached) {
 				continuousContent = cached;
 				await tick();
@@ -165,11 +169,11 @@
 		processingMessage = 'Extracting text content...';
 		
 		try {
-			const res = await fetch(`/api/books/${book.id}/continuous`);
+			const res = await fetch(`/api/books/${book.id}/continuous?format=${encodeURIComponent(bookFormat)}`);
 			if (res.ok) {
 				const content = await res.text();
 				continuousContent = content;
-				cacheBook(book.id, content);
+				cacheBook(book.id, content, bookFormat);
 				processingMessage = 'Applying styles...';
 				await tick();
 				applyContinuousContentStyles();
@@ -262,6 +266,11 @@
 		return font ? font.family : 'Georgia, serif';
 	}
 
+	function getPagedContainerWidth() {
+		const container = document.getElementById('epub-container');
+		return Math.max(320, Math.min(680, container?.clientWidth ?? 680));
+	}
+
 	function updateThemeOverrides() {
 		if (!rendition) return;
 		const theme = getReaderTheme(settings.theme);
@@ -295,7 +304,7 @@
 			const fontFamily = getFontFamily(settings.fontFamily);
 			const margin = settings.margin;
 			const colCount = settings.maxColumnCount;
-			const containerWidth = 680;
+			const containerWidth = getPagedContainerWidth();
 			const columnWidth = colCount > 1 ? Math.floor((containerWidth - margin * 2) / colCount) : containerWidth;
 			const gutter = colCount > 1 ? margin * 2 : 0;
 
@@ -368,7 +377,7 @@
 		const contrast = settings.contrast;
 
 		if (container) {
-			container.style.backgroundColor = theme.bg;
+			container.style.backgroundColor = theme.background;
 			container.style.filter = `brightness(${brightness}%) contrast(${contrast}%)`;
 		}
 
@@ -379,8 +388,8 @@
 		content.style.fontWeight = settings.fontWeight.toString();
 		content.style.fontStyle = settings.fontStyle;
 		content.style.textAlign = settings.justify ? 'justify' : 'left';
-		content.style.color = theme.text;
-		content.style.backgroundColor = theme.bg;
+		content.style.color = theme.foreground;
+		content.style.backgroundColor = theme.background;
 		content.style.maxWidth = maxWidth + 'px';
 		content.style.margin = '0 auto';
 		content.style.padding = `0 ${settings.margin}px`;
@@ -471,7 +480,7 @@
 		rendition.themes.override("padding", `0 ${margin}px`);
 
 		if (settings.maxColumnCount > 1) {
-			const containerWidth = 680;
+			const containerWidth = getPagedContainerWidth();
 			const totalGutter = margin * 2;
 			const columnWidth = Math.floor((containerWidth - totalGutter) / settings.maxColumnCount);
 			rendition.themes.override("max-width", containerWidth + 'px');
@@ -583,6 +592,17 @@
 		} else {
 			rightSidebarOpen = !rightSidebarOpen;
 		}
+	}
+
+	function toggleSearchSidebar() {
+		if (leftSidebarOpen && activeSidebarTab === 'search' && !rightSidebarOpen) {
+			leftSidebarOpen = false;
+			return;
+		}
+
+		activeSidebarTab = 'search';
+		leftSidebarOpen = true;
+		rightSidebarOpen = false;
 	}
 
 	function toggleBookmark() {
@@ -802,7 +822,7 @@
 			view?.document ||
 			view?.contents?.document ||
 			view?.contents?.contentDocument ||
-			document.querySelector('#epub-container iframe')?.contentDocument ||
+			(document.querySelector('#epub-container iframe') as HTMLIFrameElement | null)?.contentDocument ||
 			null;
 
 		if (!doc || doc === wheelNavigationTarget) return;
@@ -943,25 +963,25 @@
 	async function ensurePaginatedBookReady() {
 		if (!browser || !book || epubInstance) return;
 
-		let bookData = getCachedProcessedEpub(book.id);
+		let bookData = getCachedProcessedEpub(book.id, bookFormat);
 		if (!bookData) {
-			const response = await fetch(`/api/books/${book.id}/processed-file`);
+			const response = await fetch(`/api/books/${book.id}/processed-file?format=${encodeURIComponent(bookFormat)}`);
 			if (!response.ok) {
 				throw new Error(`Failed to fetch processed EPUB file: ${response.status}`);
 			}
 			bookData = await response.arrayBuffer();
-			cacheProcessedEpub(book.id, bookData);
+			cacheProcessedEpub(book.id, bookData, bookFormat);
 		}
 
 		epubInstance = ePub(bookData);
 		await epubInstance.ready;
 
-		const cachedLocations = getCachedEpubLocations(book.id);
+		const cachedLocations = getCachedEpubLocations(book.id, bookFormat);
 		if (cachedLocations) {
 			epubInstance.locations.load(cachedLocations);
 		} else {
 			await epubInstance.locations.generate(1200);
-			cacheEpubLocations(book.id, epubInstance.locations.save());
+			cacheEpubLocations(book.id, epubInstance.locations.save(), bookFormat);
 		}
 
 		epubToc = epubInstance.toc || [];
@@ -1224,7 +1244,7 @@
 	async function loadContinuousToc() {
 		if (!book) return;
 		try {
-			const res = await fetch(`/api/books/${book.id}/continuous/toc`);
+			const res = await fetch(`/api/books/${book.id}/continuous/toc?format=${encodeURIComponent(bookFormat)}`);
 			if (res.ok) {
 				continuousToc = await res.json();
 			}
@@ -1252,16 +1272,35 @@
 			flushProgressSave();
 			void endSession(true);
 		};
+		const handleResize = () => {
+			if (viewportResizeTimeout) {
+				clearTimeout(viewportResizeTimeout);
+			}
+			viewportResizeTimeout = setTimeout(() => {
+				if (settings.continuousMode && continuousContent) {
+					applyContinuousContentStyles();
+					return;
+				}
+				if (rendition) {
+					void reinitializeRendition();
+				}
+			}, 150);
+		};
 
 		window.addEventListener('pagehide', handlePageExit);
 		window.addEventListener('beforeunload', handlePageExit);
 		window.addEventListener('wheel', handleWheelNavigation, { passive: false });
+		window.addEventListener('resize', handleResize);
 
 		return () => {
 			window.removeEventListener('pagehide', handlePageExit);
 			window.removeEventListener('beforeunload', handlePageExit);
 			window.removeEventListener('wheel', handleWheelNavigation);
+			window.removeEventListener('resize', handleResize);
 			window.removeEventListener('keydown', handleKeydown);
+			if (viewportResizeTimeout) {
+				clearTimeout(viewportResizeTimeout);
+			}
 			cleanup();
 		};
 	});
@@ -1301,7 +1340,7 @@
 		const ip = initialProcessing;
 		// Only use cache when not initial processing
 		if (cm && b && bl && !loading2 && !cc && !ip) {
-			const cached = getCachedBook(b.id);
+			const cached = getCachedBook(b.id, bookFormat);
 			if (cached) {
 				continuousContent = cached;
 				tick().then(async () => {
@@ -1368,7 +1407,7 @@
 			</button>
 
 			<button
-				onclick={() => { activeSidebarTab = 'search'; leftSidebarOpen = true; rightSidebarOpen = false; }}
+				onclick={toggleSearchSidebar}
 				class="nav-btn"
 				title="Search (Ctrl+F)"
 			>
@@ -1597,7 +1636,10 @@
 				{#if continuousContent}
 					{@html continuousContent}
 				{:else if continuousLoading || initialProcessing}
-					<div class="loading-spinner"></div>
+					<div class="loading-state" aria-live="polite">
+						<div class="loading-spinner"></div>
+						<p>Loading reader content...</p>
+					</div>
 				{:else}
 					<p class="error-text">No content loaded. Please try refreshing.</p>
 				{/if}
@@ -1606,7 +1648,10 @@
 
 		<div id="epub-container" class="epub-container" class:hidden-mode={settings.continuousMode}>
 			{#if loading}
-				<div class="loading-spinner"></div>
+				<div class="loading-state" aria-live="polite">
+					<div class="loading-spinner"></div>
+					<p>Loading EPUB...</p>
+				</div>
 			{:else if error}
 				<div class="error-message">
 					<p>{error}</p>
@@ -1961,6 +2006,7 @@
 		flex-direction: column;
 		font-family: system-ui, -apple-system, sans-serif;
 		overflow: hidden;
+		min-width: 0;
 	}
 
 	.top-nav {
@@ -2243,6 +2289,7 @@
 	.continuous-content {
 		flex: 1;
 		overflow-y: scroll;
+		overflow-x: hidden;
 		scrollbar-width: none;
 		-ms-overflow-style: none;
 		width: 100%;
@@ -2258,6 +2305,9 @@
 		margin: 0;
 		padding: 0;
 		color: inherit;
+		overflow-x: hidden;
+		word-break: break-word;
+		overflow-wrap: anywhere;
 	}
 
 	.continuous-content :global(p) {
@@ -2276,6 +2326,28 @@
 		height: auto;
 	}
 
+	.continuous-content :global(video),
+	.continuous-content :global(iframe),
+	.continuous-content :global(svg) {
+		max-width: 100%;
+	}
+
+	.continuous-content :global(pre) {
+		max-width: 100%;
+		overflow-x: auto;
+	}
+
+	.continuous-content :global(code) {
+		word-break: break-word;
+	}
+
+	.continuous-content :global(table) {
+		display: block;
+		max-width: 100%;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+	}
+
 	.error-text {
 		color: #ef4444;
 		text-align: center;
@@ -2289,6 +2361,21 @@
 		justify-content: center;
 		overflow: auto;
 		position: relative;
+		min-width: 0;
+	}
+
+	.loading-state {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 12px;
+		text-align: center;
+		color: var(--color-surface-text-muted, #94a3b8);
+	}
+
+	.loading-state p {
+		margin: 0;
+		font-size: 14px;
 	}
 
 	.hidden-mode {
@@ -2640,5 +2727,96 @@
 		font-size: 14px;
 		color: var(--color-surface-text-muted, #94a3b8);
 		margin: 0;
+	}
+
+	@media (max-width: 768px) {
+		.top-nav {
+			height: 44px;
+			padding: 0 8px;
+		}
+
+		.nav-left,
+		.nav-right {
+			gap: 2px;
+			min-width: 0;
+		}
+
+		.nav-center {
+			display: none;
+		}
+
+		.nav-btn {
+			width: 32px;
+			height: 32px;
+		}
+
+		.icon,
+		.icon-lg {
+			width: 18px;
+			height: 18px;
+		}
+
+		.page-controls {
+			gap: 2px;
+		}
+
+			.progress-bar {
+				height: 10px;
+			}
+
+		.left-sidebar,
+		.right-sidebar {
+			width: 100vw;
+			max-width: 100vw;
+		}
+
+		.left-sidebar {
+			border-right: none;
+		}
+
+		.right-sidebar {
+			border-left: none;
+		}
+
+		.continuous-container,
+		.epub-container {
+			min-width: 0;
+		}
+
+		.continuous-content {
+			padding: 0 12px 24px;
+		}
+
+		.epub-container {
+			padding: 0 8px;
+		}
+
+		.tap-zone {
+			width: 30%;
+		}
+
+		.floating-nav {
+			width: 36px;
+			height: 56px;
+			border-radius: 999px;
+		}
+
+		.floating-prev {
+			left: 8px;
+		}
+
+		.floating-next {
+			right: 8px;
+		}
+
+		.initial-loading-content {
+			max-width: 240px;
+			padding: 0 16px;
+		}
+
+		.initial-loading-logo {
+			width: 52px;
+			height: 52px;
+		}
 	}
 </style>

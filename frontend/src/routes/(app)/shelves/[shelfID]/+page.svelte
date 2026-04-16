@@ -1,12 +1,20 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
+	import { showFormatOnCover, getFormatColor } from '$lib/stores';
 
 	let shelf = $state<any>(null);
 	let books = $state<any[]>([]);
 	let loading = $state(true);
+	let formatOnCover = $state(true);
+
+	$effect(() => {
+		const unsub = showFormatOnCover.subscribe((value: boolean) => formatOnCover = value);
+		return unsub;
+	});
 
 	onMount(async () => {
+		showFormatOnCover.init();
 		await fetchShelfBooks();
 	});
 
@@ -72,7 +80,7 @@
 			<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
 				{#each books as book}
 					<a href="/book/{book.id}" class="block group">
-						<div class="aspect-[2/3] bg-slate-800 rounded-lg overflow-hidden mb-2">
+						<div class="relative aspect-[2/3] bg-slate-800 rounded-lg overflow-hidden mb-2">
 							{#if book.cover_path}
 								<img src="/api/covers/{book.id}" alt={book.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform">
 							{:else}
@@ -80,8 +88,17 @@
 									<svg class="w-12 h-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
 									</svg>
-								</div>
-							{/if}
+									</div>
+								{/if}
+								{#if formatOnCover && book.format}
+									{@const formatColor = getFormatColor(book.format)}
+									<div
+										class="absolute bottom-2 left-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+										style="background-color: {formatColor.bg}; color: {formatColor.text};"
+									>
+										{book.format}
+									</div>
+								{/if}
 						</div>
 						<h3 class="text-sm font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
 						{#if book.authors && book.authors !== '[]'}

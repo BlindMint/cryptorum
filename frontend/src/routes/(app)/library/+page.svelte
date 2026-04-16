@@ -1,9 +1,11 @@
 <script lang="ts">
- 	import { onMount } from 'svelte';
+	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { gridSize, showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { getCoverThumbUrl, getLibraryCoverThumbSize } from '$lib/utils/covers';
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
+	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
 
 	type FilterMode = 'AND' | 'OR' | 'NOT';
 	const FILTER_MODES: FilterMode[] = ['AND', 'OR', 'NOT'];
@@ -22,6 +24,7 @@
   let localGridSize = $state(4);
   let sortBy = $state('added_at');
   let gridStyle = $derived(viewMode === 'grid' ? `grid-template-columns: repeat(${localGridSize}, minmax(0, 1fr))` : '');
+  let libraryCoverThumbSize = $derived(getLibraryCoverThumbSize(localGridSize));
   let showSettingsMenu = $state(false);
  	let formatOnCover = $state(true);
 
@@ -62,6 +65,10 @@
   	let selectedBooks = $state<Set<number>>(new Set());
   	let showBulkPanel = $state(false);
   	let showMetadataLookup = $state(false);
+	let showMetadataMenu = $state(false);
+	let metadataLookupQueueing = $state(false);
+	let metadataLookupJob = $state<any | null>(null);
+	let showBulkMetadataReview = $state(false);
   	let showShelfPicker = $state(false);
   	let shelves = $state<any[]>([]);
   	let actionInProgress = $state(false);
@@ -245,7 +252,7 @@
     		showBulkPanel = selectedBooks.size > 0;
    	});
 
-  	let loadMoreTrigger: HTMLDivElement;
+	let loadMoreTrigger = $state<HTMLDivElement | null>(null);
   	let observer: IntersectionObserver | null = null;
 
    	function setupObserver() {
@@ -257,7 +264,7 @@
    		}
 
    		// Only set up observer if we have more content to load
-   		if (loadMoreTrigger && hasMore) {
+		if (loadMoreTrigger && hasMore) {
    			console.log('Setting up intersection observer, hasMore:', hasMore, 'books count:', books.length);
    			observer = new IntersectionObserver(
    				(entries) => {
@@ -276,7 +283,7 @@
    				},
    				{ threshold: 0.3, rootMargin: '150px' }
    			);
-   			observer.observe(loadMoreTrigger);
+			observer.observe(loadMoreTrigger);
    			console.log('Observer connected to trigger element');
    		} else {
    			console.log('Not setting up observer - loadMoreTrigger:', !!loadMoreTrigger, 'hasMore:', hasMore);
@@ -285,7 +292,7 @@
 
    	$effect(() => {
    		// Re-setup observer when trigger element exists, books change, or loading state changes
-   		if (loadMoreTrigger !== undefined && books.length > 0) {
+		if (loadMoreTrigger && books.length > 0) {
    			// Small delay to ensure DOM has updated
    			setTimeout(() => setupObserver(), 100);
    		}
@@ -318,17 +325,17 @@
  		};
  	});
 
- 	async function scanLibrary() {
- 		if (!libraryFilter) return;
-
- 		scanning = true;
- 		scanMessage = 'Scanning...';
- 		try {
- 			const res = await fetch(`/api/libraries/${libraryFilter}/scan`, { method: 'POST' });
- 			const data = await res.json().catch(() => ({}));
- 			if (res.ok) {
- 				scanMessage = 'Scan started. Refreshing in 5s...';
- 				setTimeout(async () => {
+	async function scanLibrary() {
+		scanning = true;
+		scanMessage = 'Scanning...';
+		try {
+			const res = libraryFilter
+				? await fetch(`/api/libraries/${libraryFilter}/scan`, { method: 'POST' })
+				: await fetch('/api/scan', { method: 'POST' });
+			const data = await res.json().catch(() => ({}));
+			if (res.ok) {
+				scanMessage = 'Scan started. Refreshing in 5s...';
+				setTimeout(async () => {
  					await fetchBooks(true);
  					scanMessage = '';
  					scanning = false;
@@ -583,7 +590,30 @@
 
 	function openMetadataLookup() {
 		if (selectedBooks.size === 0) return;
+		showMetadataMenu = false;
 		showMetadataLookup = true;
+	}
+
+	async function queueBulkMetadataLookup() {
+		if (selectedBooks.size === 0 || metadataLookupQueueing) return;
+		showMetadataMenu = false;
+		metadataLookupQueueing = true;
+		try {
+			const res = await fetch('/api/jobs/metadata-lookup', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ book_ids: Array.from(selectedBooks) })
+			});
+			if (!res.ok) {
+				throw new Error(await res.text());
+			}
+			metadataLookupJob = await res.json();
+			showBulkMetadataReview = true;
+		} catch (error) {
+			console.error('Failed to queue metadata lookup:', error);
+		} finally {
+			metadataLookupQueueing = false;
+		}
 	}
 
 	async function refreshAfterMetadataLookup() {
@@ -738,11 +768,11 @@
   </script>
 
 <div class="pb-20 transition-all duration-300">
-	<div class="sticky top-0 z-30 px-6 py-4 bg-[var(--color-surface-base)]/95 backdrop-blur border-b border-[var(--color-surface-border)] shadow-[0_1px_0_rgba(255,255,255,0.04)] transition-all duration-300 {showFilterPanel ? 'lg:pr-[21.5rem]' : ''}">
-		<div class="flex items-center justify-between gap-4 min-w-0">
+	<div class="sticky top-0 z-30 px-3 py-3 sm:px-6 sm:py-4 bg-[var(--color-surface-base)]/95 backdrop-blur border-b border-[var(--color-surface-border)] shadow-[0_1px_0_rgba(255,255,255,0.04)] transition-all duration-300 {showFilterPanel ? 'lg:pr-[21.5rem]' : ''}">
+		<div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between min-w-0">
 			<div class="min-w-0 flex-1">
-				<div class="flex items-baseline gap-3 min-w-0">
-					<h1 class="text-2xl font-bold text-[var(--color-surface-text)] truncate">
+				<div class="flex items-baseline gap-2 sm:gap-3 min-w-0">
+					<h1 class="text-xl sm:text-2xl font-bold text-[var(--color-surface-text)] truncate">
 						{libraryFilter ? libraryName || 'Library' : 'All Books'}
 					</h1>
 					{#if totalBooks > 0}
@@ -750,9 +780,6 @@
 							{totalBooks} books
 						</p>
 					{/if}
-					<p class="text-sm text-[var(--color-surface-text-muted)] whitespace-nowrap">
-						{books.length} / {totalBooks} shown
-					</p>
 				</div>
 				{#if scanMessage}
 					<div class="mt-2 inline-flex items-center gap-2 rounded-lg border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/15 px-3 py-1.5 text-sm text-[var(--color-primary-300)]">
@@ -761,10 +788,10 @@
 				{/if}
 			</div>
 
-			<div class="flex items-center justify-end gap-2 flex-wrap flex-shrink-0">
+			<div class="flex items-center justify-start lg:justify-end gap-2 flex-wrap flex-shrink-0">
 				<button
 					onclick={() => viewMode = 'grid'}
-					class="p-2 rounded-lg {viewMode === 'grid' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'} transition-colors"
+					class="p-2.5 rounded-lg {viewMode === 'grid' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'} transition-colors"
 					aria-label="Grid view"
 				>
 					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -773,7 +800,7 @@
 				</button>
 				<button
 					onclick={() => viewMode = 'list'}
-					class="p-2 rounded-lg {viewMode === 'list' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'} transition-colors"
+					class="p-2.5 rounded-lg {viewMode === 'list' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'} transition-colors"
 					aria-label="List view"
 				>
 					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -793,13 +820,13 @@
 					<button
 						onclick={() => showSettingsMenu = !showSettingsMenu}
 						aria-label="Library settings"
-						class="inline-flex items-center px-4 py-2 rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors"
+						class="inline-flex h-10 items-center px-3 sm:px-4 rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors"
 					>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
 						</svg>
-						<svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<svg class="hidden sm:block w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 						</svg>
 					</button>
@@ -831,6 +858,26 @@
 									<span class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform {formatOnCover ? 'left-5' : 'left-1'}"></span>
 								</span>
 							</button>
+							<div class="border-t border-[var(--color-surface-border)] mt-1 pt-1">
+								<button
+									onclick={scanLibrary}
+									disabled={scanning}
+									class="w-full text-left px-4 py-2 hover:bg-[var(--color-surface-700)] text-[var(--color-surface-text)] flex items-center disabled:opacity-50"
+								>
+									{#if scanning}
+										<svg class="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
+											<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+											<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+										</svg>
+										Scanning...
+									{:else}
+										<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+										</svg>
+										{libraryFilter ? 'Scan Library' : 'Scan All Libraries'}
+									{/if}
+								</button>
+							</div>
 						</div>
 					{/if}
 				</div>
@@ -847,9 +894,9 @@
 					<button
 						onclick={() => showSortMenu = !showSortMenu}
 						aria-label="Sort books"
-						class="inline-flex items-center px-4 py-2 rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors"
+						class="inline-flex h-10 items-center px-3 sm:px-4 rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors"
 					>
-						Sort
+						<span class="hidden sm:inline">Sort</span>
 						<svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 						</svg>
@@ -886,12 +933,12 @@
 
 				<button
 					onclick={() => showFilterPanel = !showFilterPanel}
-					class="inline-flex items-center px-4 py-2 rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors"
+					class="inline-flex h-10 items-center px-3 sm:px-4 rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors"
 				>
 					<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
 					</svg>
-					Filter
+					<span class="hidden sm:inline">Filter</span>
 					{#if getActiveFilters().length > 0}
 						<span class="ml-2 px-2 py-0.5 text-xs rounded-full bg-[var(--color-primary-500)] text-white">
 							{getActiveFilters().length}
@@ -899,26 +946,6 @@
 					{/if}
 				</button>
 
-				{#if libraryFilter}
-					<button
-						onclick={scanLibrary}
-						disabled={scanning}
-						class="inline-flex items-center px-4 py-2 rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white font-medium transition-colors disabled:opacity-50"
-					>
-						{#if scanning}
-							<svg class="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-							</svg>
-							Scanning...
-						{:else}
-							<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-							</svg>
-							Scan Library
-						{/if}
-					</button>
-				{/if}
 			</div>
 		</div>
 
@@ -1218,7 +1245,8 @@
     							{/if}
     							<div class="aspect-[2/3] bg-slate-800 rounded-lg overflow-hidden mb-2 relative">
     								{#if book.cover_path}
-    									<img src="/api/covers/{book.id}" alt={book.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform">
+									{@const coverUrl = getCoverThumbUrl(book.id, libraryCoverThumbSize, book.cover_updated_on)}
+									<img src={coverUrl} alt={book.title} loading="lazy" decoding="async" class="w-full h-full object-cover group-hover:scale-105 transition-transform">
     								{:else}
     									<div class="w-full h-full flex items-center justify-center">
     										<svg class="w-12 h-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1234,7 +1262,7 @@
      							{#if formatOnCover && book.format}
      								{@const formatColor = getFormatColor(book.format)}
      								<div 
-     									class="absolute bottom-1 left-1 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase"
+									class="absolute bottom-2 left-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
      									style="background-color: {formatColor.bg}; color: {formatColor.text};"
      								>
      									{book.format}
@@ -1277,7 +1305,8 @@
   							<div class="flex items-center space-x-4">
   								<div class="w-12 h-16 bg-[var(--color-surface-800)] rounded overflow-hidden flex-shrink-0">
   									{#if book.cover_path}
-  										<img src="/api/covers/{book.id}" alt={book.title} class="w-full h-full object-cover">
+										{@const coverUrl = getCoverThumbUrl(book.id, 'small', book.cover_updated_on)}
+										<img src={coverUrl} alt={book.title} loading="lazy" decoding="async" class="w-full h-full object-cover">
   									{:else}
   										<div class="w-full h-full flex items-center justify-center">
   											<svg class="w-6 h-6 text-[var(--color-surface-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1384,18 +1413,40 @@
  								Deselect
  							</button>
  						</div>
- 					</div>
+					</div>
 					<div class="flex items-center space-x-2">
-						<button
-							onclick={openMetadataLookup}
-							disabled={selectedBooks.size === 0}
-							class="px-4 py-2 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] font-medium transition-colors disabled:opacity-50 flex items-center space-x-2"
-						>
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-							</svg>
-							<span>Metadata</span>
-						</button>
+						<div class="relative">
+							<button
+								onclick={() => showMetadataMenu = !showMetadataMenu}
+								disabled={selectedBooks.size === 0 || metadataLookupQueueing}
+								class="px-4 py-2 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] font-medium transition-colors disabled:opacity-50 flex items-center space-x-2"
+							>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+								</svg>
+								<span>{metadataLookupQueueing ? 'Queueing...' : 'Metadata'}</span>
+							</button>
+							{#if showMetadataMenu}
+								<div class="absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
+									<button
+										type="button"
+										class="block w-full px-4 py-3 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+										onclick={openMetadataLookup}
+									>
+										<div class="font-medium">Lookup selected books</div>
+										<div class="mt-0.5 text-xs text-[var(--color-surface-text-muted)]">Review and search one book at a time.</div>
+									</button>
+									<button
+										type="button"
+										class="block w-full border-t border-[var(--color-surface-border)] px-4 py-3 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+										onclick={queueBulkMetadataLookup}
+									>
+										<div class="font-medium">Queue bulk metadata lookup</div>
+										<div class="mt-0.5 text-xs text-[var(--color-surface-text-muted)]">Find the top match for every selected book.</div>
+									</button>
+								</div>
+							{/if}
+						</div>
 						<button
 							onclick={openShelfPicker}
 							disabled={actionInProgress}
@@ -1472,9 +1523,18 @@
 	{#if showMetadataLookup}
 		<MetadataLookupModal
 			bookIds={Array.from(selectedBooks)}
-			title="Bulk Metadata Lookup"
+			title="Lookup Selected Books"
 			onClose={() => showMetadataLookup = false}
 			onApplied={refreshAfterMetadataLookup}
+		/>
+	{/if}
+
+	{#if showBulkMetadataReview && metadataLookupJob?.id}
+		<BulkMetadataReviewModal
+			jobId={metadataLookupJob.id}
+			initialJob={metadataLookupJob}
+			onClose={() => showBulkMetadataReview = false}
+			onApplied={async () => fetchBooks(true)}
 		/>
 	{/if}
 
