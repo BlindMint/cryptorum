@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { readerSettings, epubThemes, fontFamilies, pdfZoomModes, cbxFitModes, cbxScrollModes, skipIntervalOptions, sleepTimerOptions, waveformStyles, type ReaderSettings } from '$lib/stores/readerSettings';
-	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, updateCustomTheme, removeCustomTheme, generateId, updateGlowEnabled, updateGlowAutoMode, updateGlowColor, updateGlowIntensity, updateBgImageEnabled, updateBgImageTransparency, updateSelectedBgImage, addBackgroundImage, removeBackgroundImage } from '$lib/stores/theme';
+	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, updateCustomTheme, removeCustomTheme, resetPrimaryToDefault, resetSurfaceToDefault, generateId, updateGlowEnabled, updateGlowAutoMode, updateGlowColor, updateGlowIntensity, updateBgImageEnabled, updateBgImageTransparency, updateSelectedBgImage, addBackgroundImage, removeBackgroundImage, DEFAULT_THEME_PRIMARY, DEFAULT_THEME_SURFACE } from '$lib/stores/theme';
 import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 import AdminPanel from './AdminPanel.svelte';
 import MetadataManagerContent from '$lib/components/MetadataManagerContent.svelte';
@@ -55,7 +55,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	});
 	let currentLibraryIcon = $derived(parseLibraryIcon(libraryForm.icon));
 
-	let themeState = $state<{ primary: string; surface: string; appearance: { glowEnabled: boolean; glowAutoMode: boolean; glowColor: string; glowIntensity: number; bgImageEnabled: boolean; bgImageTransparency: number; backgroundImages: string[]; selectedBgImageIndex: number; customThemes: any[]; selectedCustomThemeId: string | null } }>({ primary: 'green', surface: 'dark', appearance: { glowEnabled: true, glowAutoMode: true, glowColor: '#22c55e', glowIntensity: 10, bgImageEnabled: false, bgImageTransparency: 50, backgroundImages: [], selectedBgImageIndex: 0, customThemes: [], selectedCustomThemeId: null } });
+	let themeState = $state<{ primary: string; surface: string; appearance: { glowEnabled: boolean; glowAutoMode: boolean; glowColor: string; glowIntensity: number; bgImageEnabled: boolean; bgImageTransparency: number; backgroundImages: string[]; selectedBgImageIndex: number; customThemes: any[]; selectedCustomThemeId: string | null } }>({ primary: DEFAULT_THEME_PRIMARY, surface: DEFAULT_THEME_SURFACE, appearance: { glowEnabled: true, glowAutoMode: true, glowColor: '#f97316', glowIntensity: 10, bgImageEnabled: false, bgImageTransparency: 50, backgroundImages: [], selectedBgImageIndex: 0, customThemes: [], selectedCustomThemeId: null } });
 	let showCustomThemeEditor = $state(false);
 	let editingCustomTheme = $state<any>(null);
 	let customThemeName = $state('');
@@ -679,7 +679,21 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 				
 				<!-- Primary Color -->
 				<div class="mb-6">
-					<div class="text-sm font-medium text-[var(--color-surface-text-muted)] mb-3">Primary Color</div>
+					<div class="mb-3 flex items-center justify-between">
+						<div class="text-sm font-medium text-[var(--color-surface-text-muted)]">Primary Color</div>
+						<button
+							type="button"
+							onclick={resetPrimaryToDefault}
+							class="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+							title="Reset to default colors"
+							aria-label="Reset primary color to default"
+						>
+								<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12a8 8 0 1 1-2.343-5.657"></path>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 4v4h-4"></path>
+								</svg>
+						</button>
+					</div>
 					<div class="flex flex-wrap gap-2">
 						{#each primaryColors as color}
 							<button
@@ -703,7 +717,21 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 
 				<!-- Surface Color -->
 				<div>
-					<div class="text-sm font-medium text-[var(--color-surface-text-muted)] mb-3">Surface Color</div>
+					<div class="mb-3 flex items-center justify-between">
+						<div class="text-sm font-medium text-[var(--color-surface-text-muted)]">Surface Color</div>
+						<button
+							type="button"
+							onclick={resetSurfaceToDefault}
+							class="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+							title="Reset to default colors"
+							aria-label="Reset surface color to default"
+						>
+								<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12a8 8 0 1 1-2.343-5.657"></path>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 4v4h-4"></path>
+								</svg>
+						</button>
+					</div>
 					<div class="flex flex-wrap gap-2">
 						{#each surfaceColors as color}
 							<button

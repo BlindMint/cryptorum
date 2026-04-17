@@ -560,21 +560,21 @@
 	}
 </script>
 
-<div class="space-y-6 pb-20">
-	{#if editing}
-		<button onclick={cancelEditing} class="inline-flex items-center text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] transition-colors">
-			<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-			</svg>
-			Back to Book Details
-		</button>
-	{:else}
-		<a href="/library" class="inline-flex items-center text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] transition-colors">
-			<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-			</svg>
-			Back to Library
-		</a>
+	<div class="space-y-6 pb-20">
+		{#if editing}
+			<button onclick={cancelEditing} class="group inline-flex items-center text-[var(--color-surface-text-muted)] transition-colors duration-200 ease-out hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
+				<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-surface-text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+				</svg>
+				Back to Book Details
+			</button>
+		{:else}
+			<a href="/library" class="group inline-flex items-center text-[var(--color-surface-text-muted)] transition-colors duration-200 ease-out hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
+				<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-surface-text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+				</svg>
+				Back to Library
+			</a>
 	{/if}
 
 	{#if loading}
@@ -587,35 +587,35 @@
 				<div class="flex items-center justify-between mb-4">
 					<h3 class="text-lg font-medium text-[var(--color-surface-text)]">Edit Metadata</h3>
 					<div class="flex flex-wrap items-center gap-2">
-						<button
-							onclick={regenerateCover}
-							type="button"
-							disabled={regeneratingCover}
-							class="inline-flex items-center px-3 py-1.5 text-sm bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] rounded transition-colors border border-[var(--color-surface-border)] disabled:opacity-50"
-						>
-							{#if regeneratingCover}
-								<svg class="animate-spin -ml-0.5 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-									<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-									<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+							<button
+								onclick={regenerateCover}
+								type="button"
+								disabled={regeneratingCover}
+								class="group inline-flex items-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-surface-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+							>
+								{#if regeneratingCover}
+									<svg class="animate-spin -ml-0.5 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
+										<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+									</svg>
+									Regenerating...
+								{:else}
+									<svg class="mr-2 h-4 w-4 transition-transform duration-200 ease-out group-hover:rotate-45 group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+									</svg>
+									Regenerate Cover
+								{/if}
+							</button>
+							<button
+								onclick={() => showMetadataLookup = true}
+								type="button"
+								class="group inline-flex items-center rounded-lg bg-[var(--color-primary-500)] px-3 py-1.5 text-sm text-white transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+							>
+								<svg class="mr-2 h-4 w-4 transition-transform duration-200 ease-out group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
 								</svg>
-								Regenerating...
-							{:else}
-								<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-								</svg>
-								Regenerate Cover
-							{/if}
-						</button>
-						<button
-							onclick={() => showMetadataLookup = true}
-							type="button"
-							class="inline-flex items-center px-3 py-1.5 text-sm bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white rounded transition-colors"
-						>
-							<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-							</svg>
-							Lookup Metadata
-						</button>
+								Lookup Metadata
+							</button>
 					</div>
 				</div>
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -634,26 +634,26 @@
 										placeholder="Author name"
 										class="flex-1 bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 									/>
-									<button
-										onclick={() => authorsList.splice(i, 1)}
-										class="p-2 text-red-400 hover:text-red-300 transition-colors"
-										title="Remove author"
-									>
-										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-										</svg>
-									</button>
-								</div>
-							{/each}
-							<button
-								onclick={() => authorsList.push('')}
-								class="inline-flex items-center px-3 py-2 text-sm text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)] border border-dashed border-[var(--color-surface-border)] rounded hover:border-[var(--color-primary-500)] transition-colors"
-							>
-								<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-								</svg>
-								Add Author
-							</button>
+										<button
+											onclick={() => authorsList.splice(i, 1)}
+											class="group rounded-md p-2 text-red-400 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40"
+											title="Remove author"
+										>
+											<svg class="h-4 w-4 transition-transform duration-200 ease-out group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+											</svg>
+										</button>
+									</div>
+								{/each}
+								<button
+									onclick={() => authorsList.push('')}
+									class="group inline-flex items-center rounded-lg border border-dashed border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-primary-400)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-primary-300)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+								>
+									<svg class="mr-2 h-4 w-4 transition-transform duration-200 ease-out group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+									</svg>
+									Add Author
+								</button>
 						</div>
 					</div>
 					<div>
@@ -684,28 +684,28 @@
 						<div class="block text-sm text-[var(--color-surface-text-muted)] mb-2">Status</div>
 						<div class="flex gap-2">
 							{#each statusOptions as option}
-								<button
-									type="button"
-									onclick={() => editForm.status = option.value}
-									class="flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-all {editForm.status === option.value ? 'bg-[var(--color-primary-500)] border-[var(--color-primary-500)] text-white' : 'bg-[var(--color-surface-700)] border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-600)]'}"
-								>
-									{option.label}
-								</button>
-							{/each}
+									<button
+										type="button"
+										onclick={() => editForm.status = option.value}
+										class="flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all duration-200 ease-out {editForm.status === option.value ? 'bg-[var(--color-primary-500)] border-[var(--color-primary-500)] text-white shadow-sm' : 'bg-[var(--color-surface-700)] border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:-translate-y-0.5 hover:bg-[var(--color-surface-600)] hover:shadow-sm'}"
+									>
+										{option.label}
+									</button>
+								{/each}
 						</div>
 					</div>
 					<div class="md:col-span-2">
 						<div class="block text-sm text-[var(--color-surface-text-muted)] mb-1">Rating</div>
 						<div class="flex items-center gap-1">
 							{#each [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as star}
-								<button
-									type="button"
-									onclick={() => setRating(star)}
-									class="text-2xl focus:outline-none transition-colors {star <= editForm.rating ? 'text-yellow-400' : 'text-[var(--color-surface-600)]'} hover:text-yellow-400"
-								>
-									★
-								</button>
-							{/each}
+									<button
+										type="button"
+										onclick={() => setRating(star)}
+										class="text-2xl transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] {star <= editForm.rating ? 'text-yellow-400' : 'text-[var(--color-surface-600)]'} hover:-translate-y-0.5 hover:scale-110 hover:text-yellow-400"
+									>
+										★
+									</button>
+								{/each}
 							<span class="ml-2 text-sm text-[var(--color-surface-text-muted)]">({editForm.rating}/10)</span>
 						</div>
 					</div>
@@ -743,12 +743,12 @@
 						<textarea id="book-description" bind:value={editForm.description} rows="4" class="w-full bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)] resize-y"></textarea>
 					</div>
 				</div>
-				<div class="flex justify-end gap-3 mt-6">
-					<button onclick={cancelEditing} disabled={saving} class="px-4 py-2 rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] disabled:opacity-50 text-[var(--color-surface-text)] font-medium transition-colors">Cancel</button>
-					<button onclick={saveMetadata} disabled={saving} class="px-4 py-2 rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] disabled:opacity-50 text-white font-medium transition-colors">
-						{saving ? 'Saving...' : 'Save Changes'}
-					</button>
-				</div>
+					<div class="flex justify-end gap-3 mt-6">
+						<button onclick={cancelEditing} disabled={saving} class="rounded-lg bg-[var(--color-surface-700)] px-4 py-2 font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none">Cancel</button>
+						<button onclick={saveMetadata} disabled={saving} class="rounded-lg bg-[var(--color-primary-500)] px-4 py-2 font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none">
+							{saving ? 'Saving...' : 'Save Changes'}
+						</button>
+					</div>
 				{#if saveError}
 					<div class="mt-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-400 text-sm">
 						{saveError}
@@ -759,46 +759,46 @@
 				<div class="flex items-start justify-between gap-4">
 					<div class="flex-1 min-w-0">
 						<h1 class="text-2xl xl:text-3xl font-bold text-[var(--color-surface-text)] break-words">{book.title || 'Untitled'}</h1>
-						<div class="flex flex-wrap items-center gap-x-2 gap-y-1 mt-3">
-							{#each parseAuthors(book.authors || '[]') as author, i}
-								{#if i > 0}<span class="text-[var(--color-surface-text-muted)]">,</span>{/if}
-								<button
-									onclick={() => navigateWithFilter('author', author)}
-									class="text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)] hover:underline"
-								>
-									{author}
-								</button>
-							{/each}
+								<div class="flex flex-wrap items-center gap-x-2 gap-y-1 mt-3">
+								{#each parseAuthors(book.authors || '[]') as author, i}
+									{#if i > 0}<span class="text-[var(--color-surface-text-muted)]">,</span>{/if}
+									<button
+										onclick={() => navigateWithFilter('author', author)}
+										class="inline-flex items-center rounded-md px-1.5 py-0.5 text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:bg-[var(--color-primary-500)]/12 hover:text-[var(--color-primary-200)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+									>
+										{author}
+									</button>
+								{/each}
 						</div>
 					</div>
-				<button
-					onclick={startEditing}
-					class="p-2 rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] transition-colors flex-shrink-0"
-					title="Edit Metadata"
-				>
-					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
-					</svg>
-				</button>
+						<button
+							onclick={startEditing}
+							class="group flex-shrink-0 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] p-2 text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:bg-[var(--color-surface-600)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+							title="Edit Metadata"
+						>
+							<svg class="h-5 w-5 transition-colors duration-200 ease-out group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+							</svg>
+						</button>
 			</div>
 
 				<div class="flex flex-col md:flex-row gap-6 md:items-start">
 					<div class="w-full max-w-[13rem] mx-auto md:mx-0 flex-shrink-0 flex flex-col">
-						<button
-							type="button"
-							onclick={openCoverModal}
-							class="block w-full text-left {book.cover_path ? 'cursor-zoom-in' : 'cursor-default'}"
-							disabled={!book.cover_path}
-							title={book.cover_path ? 'Open cover preview' : undefined}
-						>
-						<BookCoverFrame
-							src={book.cover_path ? `/api/covers/${book.id}` : null}
-							alt={book.title}
-							mode="contain"
-							frameClass="aspect-[2/3] w-full"
-							imageClass="transition-transform duration-200"
-						/>
-					</button>
+							<button
+								type="button"
+								onclick={openCoverModal}
+								class="group block w-full text-left transition-all duration-200 ease-out {book.cover_path ? 'cursor-zoom-in hover:-translate-y-0.5 hover:shadow-lg' : 'cursor-default'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+								disabled={!book.cover_path}
+								title={book.cover_path ? 'Open cover preview' : undefined}
+							>
+							<BookCoverFrame
+								src={book.cover_path ? `/api/covers/${book.id}` : null}
+								alt={book.title}
+								mode="contain"
+								frameClass="aspect-[2/3] w-full"
+								imageClass="transition-transform duration-200 ease-out group-hover:scale-[1.02]"
+							/>
+						</button>
 
 					<div class="mt-4">
 						<div class="flex items-center justify-between mb-2">
@@ -829,35 +829,35 @@
 						{#if primaryReadFormat}
 							<div class="relative">
 								<div class="flex w-full overflow-hidden rounded-lg">
-									<a
-										href={getBookReaderHref(book.id, primaryReadFormat)}
-										class="flex min-w-0 flex-1 items-center justify-between gap-3 bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] px-3 sm:px-4 py-2 text-sm font-medium text-white transition-colors"
-									>
-										<span class="truncate">{book.opened && book.percent > 0 ? 'Continue Reading' : 'Read Now'}</span>
-										<span class="text-[10px] uppercase tracking-[0.14em] text-white/80">{getFormatDisplayLabel(primaryReadFormat)}</span>
-									</a>
-									{#if readableFormats.length > 1}
-										<button
-											type="button"
-											onclick={() => formatMenuOpen = !formatMenuOpen}
-											class="inline-flex items-center justify-center border-l border-white/20 bg-[var(--color-primary-500)] px-3 text-white transition-colors hover:bg-[var(--color-primary-600)]"
-											aria-label="Choose reader format"
-											aria-expanded={formatMenuOpen}
+										<a
+											href={getBookReaderHref(book.id, primaryReadFormat)}
+											class="flex min-w-0 flex-1 items-center justify-between gap-3 bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-colors duration-200 ease-out hover:bg-[var(--color-primary-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
 										>
-											<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-											</svg>
-										</button>
-									{/if}
+											<span class="truncate">{book.opened && book.percent > 0 ? 'Continue Reading' : 'Read Now'}</span>
+											<span class="text-[10px] uppercase tracking-[0.14em] text-white/80">{getFormatDisplayLabel(primaryReadFormat)}</span>
+										</a>
+										{#if readableFormats.length > 1}
+											<button
+												type="button"
+												onclick={() => formatMenuOpen = !formatMenuOpen}
+												class="inline-flex items-center justify-center border-l border-white/20 bg-[var(--color-primary-500)] px-3 text-white transition-colors duration-200 ease-out hover:bg-[var(--color-primary-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+												aria-label="Choose reader format"
+												aria-expanded={formatMenuOpen}
+											>
+												<svg class="h-4 w-4 transition-transform duration-200 ease-out {formatMenuOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+												</svg>
+											</button>
+										{/if}
 								</div>
 								{#if formatMenuOpen && readableFormats.length > 1}
 									<div class="absolute right-0 top-full z-20 mt-2 w-56 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-800)] shadow-lg">
-										{#each readableFormats.filter((format) => format !== primaryReadFormat) as format}
-											<a
-												href={getBookReaderHref(book.id, format)}
-												onclick={() => formatMenuOpen = false}
-												class="flex items-center justify-between px-3 py-2 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)]"
-											>
+											{#each readableFormats.filter((format) => format !== primaryReadFormat) as format}
+												<a
+													href={getBookReaderHref(book.id, format)}
+													onclick={() => formatMenuOpen = false}
+													class="flex items-center justify-between px-3 py-2 text-sm text-[var(--color-surface-text)] transition-colors duration-200 hover:bg-[var(--color-surface-700)]"
+												>
 												<span>{getFormatDisplayLabel(format)}</span>
 												<span class="text-xs uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">
 													{getReaderRouteKind(format) || 'reader'}
@@ -868,28 +868,28 @@
 								{/if}
 							</div>
 						{/if}
-						{#if primarySpeedReadFormat}
-							<a
-								href={getSpeedReaderHref(book.id, primarySpeedReadFormat)}
-								class="flex items-center justify-center w-full px-3 sm:px-4 py-2 bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] font-medium rounded-lg transition-colors text-sm border border-[var(--color-surface-border)]"
-							>
-								<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-								</svg>
-								Speed Read
-							</a>
-						{/if}
-						<button
-							type="button"
-							onclick={openShelfPicker}
-							class="flex items-center justify-center w-full px-3 sm:px-4 py-2 bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] font-medium rounded-lg transition-colors text-sm border border-[var(--color-surface-border)]"
-						>
-							<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
-							</svg>
-							Add to Shelf
-						</button>
-					</div>
+							{#if primarySpeedReadFormat}
+									<a
+										href={getSpeedReaderHref(book.id, primarySpeedReadFormat)}
+										class="group flex w-full items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
+									>
+										<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-primary-300)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+										</svg>
+										Speed Read
+									</a>
+								{/if}
+								<button
+									type="button"
+									onclick={openShelfPicker}
+									class="group flex w-full items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
+								>
+									<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-primary-300)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
+									</svg>
+									Add to Shelf
+								</button>
+						</div>
 				</div>
 
 				<div class="flex-1 min-w-0">
@@ -900,7 +900,7 @@
 								{#if book.library_name}
 									<button
 										onclick={navigateToLibrary}
-										class="text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)] hover:underline"
+											class="text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline"
 									>
 										{book.library_name}
 									</button>
@@ -915,7 +915,7 @@
 								{#if book.publisher}
 									<button
 										onclick={() => navigateWithFilter('publisher', book.publisher)}
-										class="text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)] hover:underline"
+											class="text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline"
 									>
 										{book.publisher}
 									</button>
@@ -930,7 +930,7 @@
 								{#if book.pub_date}
 									<button
 										onclick={() => navigateWithFilter('pub_date', book.pub_date)}
-										class="text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)] hover:underline"
+											class="text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline"
 									>
 										{book.pub_date}
 									</button>
@@ -945,7 +945,7 @@
 								{#if book.language}
 									<button
 										onclick={() => navigateWithFilter('language', book.language)}
-										class="text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)] hover:underline"
+											class="text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline"
 									>
 										{book.language}
 									</button>
@@ -981,13 +981,13 @@
 						</div>
 						<div class="flex items-start gap-2">
 							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Status</dt>
-							<dd class="text-sm">
-								<button
-									onclick={() => navigateWithFilter('status', book.status || 'reading')}
-									class="px-2 py-0.5 rounded-full text-xs font-medium {book.status === 'reading' ? 'bg-blue-500/20 text-blue-400' : book.status === 'finished' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-[var(--color-surface-700)] text-[var(--color-surface-text)]'} hover:opacity-80 transition-opacity"
-								>
-									{book.status === 'reading' ? 'Currently Reading' : book.status === 'finished' ? 'Already Read' : 'Unread'}
-								</button>
+								<dd class="text-sm">
+									<button
+										onclick={() => navigateWithFilter('status', book.status || 'reading')}
+										class="rounded-full px-2 py-0.5 text-xs font-medium transition-colors duration-200 ease-out {book.status === 'reading' ? 'bg-blue-500/20 text-blue-400' : book.status === 'finished' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-[var(--color-surface-700)] text-[var(--color-surface-text)]'} hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+									>
+										{book.status === 'reading' ? 'Currently Reading' : book.status === 'finished' ? 'Already Read' : 'Unread'}
+									</button>
 							</dd>
 						</div>
 						{#if uniqueBookFormats(files).length > 0}
@@ -1002,16 +1002,16 @@
 								</dd>
 							</div>
 						{/if}
-						{#if book.series}
-							<div class="flex items-start gap-2 col-span-2">
-								<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Series</dt>
-								<dd class="text-sm text-[var(--color-surface-text)]">
-									<button
-										onclick={() => navigateWithFilter('series', book.series)}
-										class="text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)] hover:underline"
-									>
-										{book.series}
-									</button>
+								{#if book.series}
+									<div class="flex items-start gap-2 col-span-2">
+										<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Series</dt>
+										<dd class="text-sm text-[var(--color-surface-text)]">
+											<button
+												onclick={() => navigateWithFilter('series', book.series)}
+												class="text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline"
+											>
+												{book.series}
+											</button>
 									{#if book.series_number}
 										<span class="text-[var(--color-surface-text-muted)]"> #{book.series_number}</span>
 									{/if}
@@ -1029,15 +1029,15 @@
 										{#each parseJsonArray(book.genres) as genre}
 											{@const parts = parseHierarchicalGenre(genre)}
 											<div class="relative group">
-												<div class="inline-flex items-center rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-600)]">
-													{#each parts as part, i}
-														<button
-															onclick={() => navigateWithFilter('genre', part.fullPath)}
-															class="transition-colors hover:underline {isHierarchyPartActive(hoveredGenrePath, part.fullPath) ? 'text-[var(--color-primary-400)]' : ''}"
-															onmouseenter={() => hoveredGenrePath = part.fullPath}
-															onmouseleave={() => hoveredGenrePath = null}
-														>{part.text}</button>{#if i < parts.length - 1}<span class="{isHierarchyPartActive(hoveredGenrePath, parts[i + 1].fullPath) ? 'text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)]'}">.</span>{/if}
-													{/each}
+													<div class="inline-flex items-center rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1 text-sm text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)]">
+														{#each parts as part, i}
+															<button
+																onclick={() => navigateWithFilter('genre', part.fullPath)}
+																class="transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline {isHierarchyPartActive(hoveredGenrePath, part.fullPath) ? 'text-[var(--color-primary-300)]' : 'text-[var(--color-primary-400)]'}"
+																onmouseenter={() => hoveredGenrePath = part.fullPath}
+																onmouseleave={() => hoveredGenrePath = null}
+															>{part.text}</button>{#if i < parts.length - 1}<span class="{isHierarchyPartActive(hoveredGenrePath, parts[i + 1].fullPath) ? 'text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)]'}">.</span>{/if}
+														{/each}
 												</div>
 												{#if isHoveredPathInHierarchy(hoveredGenrePath, genre)}
 													<div class="absolute bottom-full left-0 mb-1 px-2 py-1 bg-[var(--color-surface-800)] text-[var(--color-surface-text)] text-xs rounded shadow-lg whitespace-nowrap z-10">
@@ -1057,15 +1057,15 @@
 										{#each parseJsonArray(book.tags) as tag}
 											{@const parts = parseHierarchicalGenre(tag)}
 											<div class="relative group">
-												<div class="inline-flex items-center rounded-full border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/20 px-3 py-1 text-sm text-[var(--color-primary-400)] transition-colors hover:bg-[var(--color-primary-500)]/30">
-													{#each parts as part, i}
-														<button
-															onclick={() => navigateWithFilter('tags', part.fullPath)}
-															class="transition-colors hover:underline {isHierarchyPartActive(hoveredTagPath, part.fullPath) ? 'text-[var(--color-primary-200)]' : ''}"
-															onmouseenter={() => hoveredTagPath = part.fullPath}
-															onmouseleave={() => hoveredTagPath = null}
-														>{part.text}</button>{#if i < parts.length - 1}<span class="{isHierarchyPartActive(hoveredTagPath, parts[i + 1].fullPath) ? 'text-[var(--color-primary-200)]' : 'text-[var(--color-primary-500)]'}">.</span>{/if}
-													{/each}
+													<div class="inline-flex items-center rounded-full border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/20 px-3 py-1 text-sm text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:border-[var(--color-primary-500)]/60 hover:bg-[var(--color-primary-500)]/30">
+														{#each parts as part, i}
+															<button
+																onclick={() => navigateWithFilter('tags', part.fullPath)}
+																class="transition-colors duration-200 ease-out hover:text-[var(--color-primary-200)] hover:underline focus-visible:outline-none focus-visible:underline {isHierarchyPartActive(hoveredTagPath, part.fullPath) ? 'text-[var(--color-primary-200)]' : 'text-[var(--color-primary-400)]'}"
+																onmouseenter={() => hoveredTagPath = part.fullPath}
+																onmouseleave={() => hoveredTagPath = null}
+															>{part.text}</button>{#if i < parts.length - 1}<span class="{isHierarchyPartActive(hoveredTagPath, parts[i + 1].fullPath) ? 'text-[var(--color-primary-200)]' : 'text-[var(--color-primary-500)]'}">.</span>{/if}
+														{/each}
 												</div>
 												{#if isHoveredPathInHierarchy(hoveredTagPath, tag)}
 													<div class="absolute bottom-full left-0 mb-1 px-2 py-1 bg-[var(--color-surface-800)] text-[var(--color-surface-text)] text-xs rounded shadow-lg whitespace-nowrap z-10">
@@ -1089,31 +1089,31 @@
 			</div>
 
 			<div class="border-t border-[var(--color-surface-border)] pt-6">
-				<div class="flex gap-6">
-					<button
-						onclick={() => handleTabChange('similar')}
-						class="px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-2 {activeTab === 'similar' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
-					>
-						Similar Books
+					<div class="flex gap-6">
+						<button
+							onclick={() => handleTabChange('similar')}
+							class="flex items-center gap-2 -mb-px border-b-2 px-4 py-2 text-sm font-medium transition-all duration-200 ease-out {activeTab === 'similar' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:-translate-y-px hover:border-[var(--color-surface-border)] hover:text-[var(--color-surface-text)]'}"
+						>
+							Similar Books
 						{#if activeTab === 'similar' && similarLoading}
 							<svg class="h-4 w-4 animate-spin text-[var(--color-primary-500)]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
 								<circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"></circle>
 								<path class="opacity-75" fill="currentColor" d="M12 3a9 9 0 0 1 9 9h-2.5a6.5 6.5 0 0 0-6.5-6.5V3z"></path>
 							</svg>
 						{/if}
-					</button>
-					<button
-						onclick={() => handleTabChange('sessions')}
-						class="px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px {activeTab === 'sessions' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
-					>
-						Reading Sessions
-					</button>
-					<button
-						onclick={() => handleTabChange('files')}
-						class="px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px {activeTab === 'files' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
-					>
-						Files
-					</button>
+						</button>
+						<button
+							onclick={() => handleTabChange('sessions')}
+							class="border-b-2 -mb-px px-4 py-2 text-sm font-medium transition-all duration-200 ease-out {activeTab === 'sessions' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:-translate-y-px hover:border-[var(--color-surface-border)] hover:text-[var(--color-surface-text)]'}"
+						>
+							Reading Sessions
+						</button>
+						<button
+							onclick={() => handleTabChange('files')}
+							class="border-b-2 -mb-px px-4 py-2 text-sm font-medium transition-all duration-200 ease-out {activeTab === 'files' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:-translate-y-px hover:border-[var(--color-surface-border)] hover:text-[var(--color-surface-text)]'}"
+						>
+							Files
+						</button>
 				</div>
 
 				<div class="mt-4">
@@ -1128,9 +1128,9 @@
 							</div>
 						{:else}
 							<div class="space-y-3">
-								{#each sessions as session}
-									<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 hover:border-[var(--color-surface-500)] transition-colors">
-										<div class="flex items-start justify-between gap-4">
+									{#each sessions as session}
+										<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-[var(--color-surface-500)] hover:shadow-sm">
+											<div class="flex items-start justify-between gap-4">
 											<div class="min-w-0">
 												<div class="text-sm font-medium text-[var(--color-surface-text)]">{formatSessionDay(session.started_at)}</div>
 												<div class="mt-1 text-xs text-[var(--color-surface-text-muted)]">
@@ -1141,18 +1141,18 @@
 												</div>
 											</div>
 											<div class="flex items-center gap-2 flex-shrink-0">
-												<span class="px-2 py-1 rounded-full text-xs font-medium bg-[var(--color-primary-500)]/20 text-[var(--color-primary-300)]">
-													{getReaderTypeLabel(session.reader_type)}
-												</span>
-												<button
-													onclick={() => deleteSession(session.id)}
-													class="p-2 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
-													title="Delete session"
-												>
-													<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-													</svg>
-												</button>
+													<span class="px-2 py-1 rounded-full text-xs font-medium bg-[var(--color-primary-500)]/20 text-[var(--color-primary-300)]">
+														{getReaderTypeLabel(session.reader_type)}
+													</span>
+													<button
+														onclick={() => deleteSession(session.id)}
+														class="group rounded-lg bg-red-500/10 p-2 text-red-400 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-red-500/20 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40"
+														title="Delete session"
+													>
+														<svg class="h-4 w-4 transition-transform duration-200 ease-out group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+															<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+														</svg>
+													</button>
 											</div>
 										</div>
 									</div>
@@ -1166,13 +1166,13 @@
 									<p class="text-[var(--color-surface-text-muted)]">No files found</p>
 								</div>
 							{:else}
-								<div class="divide-y divide-[var(--color-surface-border)]">
-									{#each files as file}
-										<div class="p-4 flex items-center justify-between hover:bg-[var(--color-surface-700)]/50 transition-colors">
-											<div class="flex items-center space-x-3 min-w-0">
-												<svg class="w-5 h-5 text-[var(--color-primary-500)] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-												</svg>
+									<div class="divide-y divide-[var(--color-surface-border)]">
+										{#each files as file}
+											<div class="group flex items-center justify-between p-4 transition-all duration-200 ease-out hover:bg-[var(--color-surface-700)]/50">
+												<div class="flex items-center space-x-3 min-w-0">
+													<svg class="h-5 w-5 flex-shrink-0 text-[var(--color-primary-500)] transition-transform duration-200 ease-out group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+													</svg>
 												<div class="min-w-0">
 													<p class="text-sm font-medium text-[var(--color-surface-text)] truncate">{getFileName(file.path)}</p>
 													<div class="mt-1 flex items-center gap-2 text-xs text-[var(--color-surface-text-muted)]">
@@ -1180,21 +1180,21 @@
 														<span>{formatSize(file.size)}</span>
 													</div>
 												</div>
-											</div>
-											<div class="flex items-center gap-2">
-												<button
-													onclick={() => downloadFile(file)}
-													class="px-3 py-1 text-sm bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white rounded transition-colors"
-												>
-													Download
-												</button>
-												<div class="relative">
+												</div>
+												<div class="flex items-center gap-2">
 													<button
-														onclick={() => toggleConvertMenu(file.id)}
-														class="px-3 py-1 text-sm border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] rounded transition-colors"
+														onclick={() => downloadFile(file)}
+														class="rounded-lg bg-[var(--color-primary-500)] px-3 py-1.5 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 													>
-														Convert
+														Download
 													</button>
+													<div class="relative">
+														<button
+															onclick={() => toggleConvertMenu(file.id)}
+															class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-surface-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+														>
+															Convert
+														</button>
 													{#if convertMenuFileId === file.id}
 														<div class="absolute right-0 mt-2 w-64 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-xl z-20 p-3 space-y-3">
 															<div>
@@ -1213,19 +1213,19 @@
 																	<option value="rtf">RTF</option>
 																</select>
 															</label>
-															<div class="flex items-center justify-end gap-2">
-																<button
-																	onclick={() => convertMenuFileId = null}
-																	class="px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]"
-																>
-																	Cancel
-																</button>
-																<button
-																	onclick={() => downloadConvertedFile(file)}
-																	class="px-3 py-2 text-sm bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white rounded transition-colors"
-																>
-																	Download Converted
-																</button>
+																<div class="flex items-center justify-end gap-2">
+																	<button
+																		onclick={() => convertMenuFileId = null}
+																		class="rounded-lg px-3 py-2 text-sm text-[var(--color-surface-text-muted)] transition-all duration-200 ease-out hover:-translate-y-px hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-overlay)]"
+																	>
+																		Cancel
+																	</button>
+																	<button
+																		onclick={() => downloadConvertedFile(file)}
+																		class="rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-overlay)]"
+																	>
+																		Download Converted
+																	</button>
 															</div>
 														</div>
 													{/if}
@@ -1251,27 +1251,20 @@
 							</div>
 						{:else}
 							<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-								{#each similarBooks as similar}
-									<a href="/book/{similar.id}" class="group">
-										<div class="aspect-[2/3] rounded-lg overflow-hidden bg-[var(--color-surface-700)] mb-2">
-											{#if similar.cover_path}
-												<img
-													src="/api/covers/{similar.id}"
-													alt={similar.title}
-													class="w-full h-full object-cover group-hover:opacity-80 transition-opacity"
-												/>
-											{:else}
-												<div class="w-full h-full flex items-center justify-center text-[var(--color-surface-text-muted)]">
-													<svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-													</svg>
-												</div>
-											{/if}
-										</div>
-										<h4 class="text-sm font-medium text-[var(--color-surface-text)] truncate group-hover:text-[var(--color-primary-400)] transition-colors">{similar.title}</h4>
-										<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{parseAuthors(similar.authors).join(', ')}</p>
-									</a>
-								{/each}
+										{#each similarBooks as similar}
+										<a href="/book/{similar.id}" class="group block rounded-xl p-2 transition-all duration-200 ease-out hover:-translate-y-1 hover:bg-[var(--color-surface-overlay)] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
+											<BookCoverFrame
+												src={similar.cover_path ? `/api/covers/${similar.id}` : null}
+												alt={similar.title}
+												mode="contain"
+												frameClass="aspect-[2/3] w-full mb-2"
+												imageClass="transition-all duration-200 ease-out group-hover:scale-[1.02] group-hover:opacity-80"
+												placeholderSize="md"
+											/>
+											<h4 class="truncate text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 group-hover:text-[var(--color-primary-400)]">{similar.title}</h4>
+											<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{parseAuthors(similar.authors).join(', ')}</p>
+										</a>
+									{/each}
 							</div>
 						{/if}
 					{:else}
@@ -1312,54 +1305,54 @@
 				<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">{book.title || 'This book'}</p>
 			</div>
 			<div class="max-h-[60vh] overflow-y-auto p-4">
-				{#if shelves.length === 0}
-					<div class="py-6 text-center text-sm text-[var(--color-surface-text-muted)]">
-						No shelves yet.
-					</div>
-				{:else}
-					<div class="space-y-2">
-						{#each shelves as shelf}
+							{#if shelves.length === 0}
+								<div class="py-6 text-center text-sm text-[var(--color-surface-text-muted)]">
+									No shelves yet.
+								</div>
+							{:else}
+								<div class="space-y-2">
+									{#each shelves as shelf}
+										<button
+											type="button"
+											onclick={() => addBookToShelf(shelf.id)}
+											disabled={shelfActionInProgress}
+											class="group flex w-full items-center justify-between rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3 text-left transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-surface-700)] hover:shadow-sm disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+										>
+											<span class="flex min-w-0 items-center gap-3">
+												<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-transform duration-200 ease-out {shelf.is_magic === 1 ? 'bg-purple-500/20 text-purple-300' : 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-400)]'} group-hover:scale-105">
+													<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
+													</svg>
+												</span>
+												<span class="min-w-0">
+													<span class="block truncate text-sm font-medium text-[var(--color-surface-text)]">{shelf.name}</span>
+													<span class="block text-xs text-[var(--color-surface-text-muted)]">{shelf.book_count} books{#if shelf.is_magic === 1} · Magic{/if}</span>
+												</span>
+											</span>
+											<span class="text-xs font-medium text-[var(--color-primary-400)] transition-transform duration-200 ease-out group-hover:translate-x-0.5">Add</span>
+										</button>
+									{/each}
+								</div>
+							{/if}
+			</div>
+					<div class="flex items-center justify-between gap-3 border-t border-[var(--color-surface-border)] px-5 py-4">
+						{#if shelfActionMessage}
+							<p class="text-sm text-[var(--color-surface-text-muted)]">{shelfActionMessage}</p>
+						{:else}
+							<span class="text-sm text-[var(--color-surface-text-muted)]">Choose a shelf to add this book.</span>
+						{/if}
+						<div class="flex items-center gap-3">
+							<a href="/shelves/new" class="text-sm text-[var(--color-primary-400)] transition-colors duration-200 hover:text-[var(--color-primary-300)] focus-visible:outline-none focus-visible:underline">
+								New shelf
+							</a>
 							<button
 								type="button"
-								onclick={() => addBookToShelf(shelf.id)}
-								disabled={shelfActionInProgress}
-								class="flex w-full items-center justify-between rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-700)] disabled:opacity-50"
+								onclick={() => showShelfPicker = false}
+								class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-700)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-overlay)]"
 							>
-								<span class="flex min-w-0 items-center gap-3">
-									<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg {shelf.is_magic === 1 ? 'bg-purple-500/20 text-purple-300' : 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-400)]'}">
-										<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
-										</svg>
-									</span>
-									<span class="min-w-0">
-										<span class="block truncate text-sm font-medium text-[var(--color-surface-text)]">{shelf.name}</span>
-										<span class="block text-xs text-[var(--color-surface-text-muted)]">{shelf.book_count} books{#if shelf.is_magic === 1} · Magic{/if}</span>
-									</span>
-								</span>
-								<span class="text-xs font-medium text-[var(--color-primary-400)]">Add</span>
+								Close
 							</button>
-						{/each}
-					</div>
-				{/if}
-			</div>
-			<div class="flex items-center justify-between gap-3 border-t border-[var(--color-surface-border)] px-5 py-4">
-				{#if shelfActionMessage}
-					<p class="text-sm text-[var(--color-surface-text-muted)]">{shelfActionMessage}</p>
-				{:else}
-					<span class="text-sm text-[var(--color-surface-text-muted)]">Choose a shelf to add this book.</span>
-				{/if}
-				<div class="flex items-center gap-3">
-					<a href="/shelves/new" class="text-sm text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">
-						New shelf
-					</a>
-					<button
-						type="button"
-						onclick={() => showShelfPicker = false}
-						class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)]"
-					>
-						Close
-					</button>
-				</div>
+						</div>
 			</div>
 		</div>
 	</div>
@@ -1379,13 +1372,13 @@
 					<p class="text-sm font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Cover Preview'}</p>
 					<p class="text-xs text-[var(--color-surface-text-muted)]">Cover preview</p>
 				</div>
-				<button
-					type="button"
-					onclick={closeCoverModal}
-					class="rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-600)]"
-				>
-					Close
-				</button>
+					<button
+						type="button"
+						onclick={closeCoverModal}
+						class="rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-overlay)]"
+					>
+						Close
+					</button>
 			</div>
 			<div class="flex justify-center p-4">
 				<div class="w-full max-w-[24rem]">

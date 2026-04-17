@@ -1,8 +1,9 @@
 <script lang="ts">
- 	import { onMount, tick } from 'svelte';
- 	import { flip } from 'svelte/animate';
- 	import { cubicOut } from 'svelte/easing';
- 	import { showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { onMount, tick } from 'svelte';
+	import { flip } from 'svelte/animate';
+	import { cubicOut } from 'svelte/easing';
+	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
+	import { showFormatOnCover, getFormatColor } from '$lib/stores';
 
  	let stats = $state({
  		books: 0,
@@ -242,34 +243,33 @@
 						})()}
 						<div class="dashboard-book-item relative group min-w-0 self-start" animate:flip={{ duration: 90, easing: cubicOut }}>
 							<a href="/book/{book.id}" class="flex min-w-0 flex-col">
-								<div class="aspect-[2/3] bg-slate-800 rounded-lg overflow-hidden mb-1.5 relative">
+								<div class="relative">
+									<BookCoverFrame
+										src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
+										alt={book.title}
+										mode="contain"
+										frameClass="aspect-[2/3] mb-1.5"
+										imageClass="group-hover:scale-105 transition-transform"
+										placeholderSize="md"
+									/>
 									{#if book.status === 'reading'}
-										<div class="absolute top-1 right-1 w-3 h-3 bg-blue-500 rounded-full z-10"></div>
-									{/if}
-									{#if book.cover_path}
-										<img src="/api/covers/{book.id}/thumb" alt={book.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform" loading="lazy" decoding="async">
-									{:else}
-										<div class="w-full h-full flex items-center justify-center">
-											<svg class="w-12 h-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-											</svg>
-										</div>
+										<div class="absolute top-1 right-1 z-10 w-3 h-3 bg-blue-500 rounded-full"></div>
 									{/if}
 									{#if book.opened && book.percent > 0}
- 										<div class="absolute bottom-0 left-0 right-0 h-1 bg-slate-700">
- 											<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
- 										</div>
- 									{/if}
-								{#if formatOnCover && book.format}
-									{@const formatColor = getFormatColor(book.format)}
-									<div
-										class="absolute bottom-2 left-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
-										style="background-color: {formatColor.bg}; color: {formatColor.text};"
-									>
-										{book.format}
-									</div>
-								{/if}
- 								</div>
+										<div class="absolute bottom-1.5 left-0 right-0 z-10 h-1 bg-slate-700">
+											<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
+										</div>
+									{/if}
+									{#if formatOnCover && book.format}
+										{@const formatColor = getFormatColor(book.format)}
+										<div
+											class="absolute bottom-2 left-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+											style="background-color: {formatColor.bg}; color: {formatColor.text};"
+										>
+											{book.format}
+										</div>
+									{/if}
+								</div>
 								<div class="shrink-0">
 									<h3 class="text-xs font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
 									{#if book.authors && book.authors !== '[]'}
@@ -314,31 +314,14 @@
 				>
 					{#each recentBooks.slice(0, visibleRecentBooksCount || 1) as book (book.id)}
 						<a href="/book/{book.id}" class="dashboard-book-item group flex min-w-0 flex-col self-start" animate:flip={{ duration: 90, easing: cubicOut }}>
-							<div class="aspect-[2/3] bg-slate-800 rounded-lg overflow-hidden mb-1.5 relative">
-								{#if book.cover_path}
-									<img src="/api/covers/{book.id}/thumb" alt={book.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform" loading="lazy" decoding="async">
-								{:else}
-									<div class="w-full h-full flex items-center justify-center">
-										<svg class="w-12 h-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-										</svg>
-									</div>
-								{/if}
-								{#if book.opened && book.percent > 0}
- 									<div class="absolute bottom-0 left-0 right-0 h-1 bg-slate-700">
- 										<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
- 									</div>
- 								{/if}
-								{#if formatOnCover && book.format}
-									{@const formatColor = getFormatColor(book.format)}
-									<div
-										class="absolute bottom-2 left-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
-										style="background-color: {formatColor.bg}; color: {formatColor.text};"
-									>
-										{book.format}
-									</div>
-								{/if}
- 							</div>
+							<BookCoverFrame
+								src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
+								alt={book.title}
+								mode="contain"
+								frameClass="aspect-[2/3] mb-1.5"
+								imageClass="group-hover:scale-105 transition-transform"
+								placeholderSize="md"
+							/>
 							<div class="shrink-0">
 								<h3 class="text-xs font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
 								{#if book.authors && book.authors !== '[]'}
@@ -385,31 +368,14 @@
 				>
 					{#each discoverBooks.slice(0, visibleDiscoverBooksCount || 1) as book (book.id)}
 						<a href="/book/{book.id}" class="dashboard-book-item group flex min-w-0 flex-col self-start" animate:flip={{ duration: 90, easing: cubicOut }}>
-							<div class="aspect-[2/3] bg-slate-800 rounded-lg overflow-hidden mb-1.5 relative">
-								{#if book.cover_path}
-									<img src="/api/covers/{book.id}/thumb" alt={book.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform" loading="lazy" decoding="async">
-								{:else}
-									<div class="w-full h-full flex items-center justify-center">
-										<svg class="w-12 h-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-										</svg>
-									</div>
-								{/if}
-								{#if book.opened && book.percent > 0}
- 									<div class="absolute bottom-0 left-0 right-0 h-1 bg-slate-700">
- 										<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
- 									</div>
- 								{/if}
-								{#if formatOnCover && book.format}
-									{@const formatColor = getFormatColor(book.format)}
-									<div
-										class="absolute bottom-2 left-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
-										style="background-color: {formatColor.bg}; color: {formatColor.text};"
-									>
-										{book.format}
-									</div>
-								{/if}
- 							</div>
+							<BookCoverFrame
+								src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
+								alt={book.title}
+								mode="contain"
+								frameClass="aspect-[2/3] mb-1.5"
+								imageClass="group-hover:scale-105 transition-transform"
+								placeholderSize="md"
+							/>
 							<div class="shrink-0">
 								<h3 class="text-xs font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
 								{#if book.authors && book.authors !== '[]'}

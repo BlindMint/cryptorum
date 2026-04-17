@@ -34,6 +34,9 @@ export interface FullTheme extends Theme {
   appearance: AppearanceSettings;
 }
 
+export const DEFAULT_THEME_PRIMARY = 'orange';
+export const DEFAULT_THEME_SURFACE = 'dark';
+
 // Primary colors (40 options like Booklore)
 export const primaryColors = [
 	'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'indigo', 'purple', 'pink', 'rose',
@@ -50,25 +53,33 @@ export const surfaceColors = [
 ];
 
 export const themes: Theme[] = [
-	{ primary: 'green', surface: 'dark' }
+	{ primary: DEFAULT_THEME_PRIMARY, surface: DEFAULT_THEME_SURFACE }
 ];
 
-const defaultTheme: FullTheme = { 
-  primary: 'green', 
-  surface: 'dark',
-  appearance: {
-    glowEnabled: true,
-    glowAutoMode: true,
-    glowColor: '#22c55e',
-    glowIntensity: 10,
-    bgImageEnabled: false,
-    bgImageTransparency: 50,
-    backgroundImages: [],
-    selectedBgImageIndex: 0,
-    customThemes: [],
-    selectedCustomThemeId: null
-  }
-};
+function createDefaultAppearance(): AppearanceSettings {
+	return {
+		glowEnabled: true,
+		glowAutoMode: true,
+		glowColor: '#f97316',
+		glowIntensity: 10,
+		bgImageEnabled: false,
+		bgImageTransparency: 50,
+		backgroundImages: [],
+		selectedBgImageIndex: 0,
+		customThemes: [],
+		selectedCustomThemeId: null
+	};
+}
+
+export function createDefaultTheme(): FullTheme {
+	return {
+		primary: DEFAULT_THEME_PRIMARY,
+		surface: DEFAULT_THEME_SURFACE,
+		appearance: createDefaultAppearance()
+	};
+}
+
+const defaultTheme: FullTheme = createDefaultTheme();
 
 // Load from localStorage if available
 let initialTheme = defaultTheme;
@@ -104,6 +115,20 @@ currentTheme.subscribe((theme) => {
 	// Update CSS variables
 	updateThemeColors(theme);
 });
+
+export function resetPrimaryToDefault() {
+	currentTheme.update((theme) => ({
+		...theme,
+		primary: DEFAULT_THEME_PRIMARY
+	}));
+}
+
+export function resetSurfaceToDefault() {
+	currentTheme.update((theme) => ({
+		...theme,
+		surface: DEFAULT_THEME_SURFACE
+	}));
+}
 
 function updateThemeColors(theme: FullTheme) {
 	if (typeof document !== 'undefined') {
@@ -321,14 +346,31 @@ function updateThemeColors(theme: FullTheme) {
 		root.style.setProperty('--color-primary-400', primary[400]);
 
 		// Set surface colors for transparent overlays
-		root.style.setProperty('--color-surface-base', surface.base);
-		root.style.setProperty('--color-surface-overlay', surface.overlay);
-		root.style.setProperty('--color-surface-border', surface.border);
-		root.style.setProperty('--color-surface-text', surface.text);
-		root.style.setProperty('--color-surface-text-muted', surface.textMuted);
+			root.style.setProperty('--color-surface-base', surface.base);
+			root.style.setProperty('--color-surface-overlay', surface.overlay);
+			root.style.setProperty('--color-surface-border', surface.border);
+			root.style.setProperty('--color-surface-text', surface.text);
+			root.style.setProperty('--color-surface-text-muted', surface.textMuted);
 
-		// Set RGB values for gradients (now using surface glow color)
-		const surfaceGlowRgb = hexToRgb(surface.glow);
+			const surfaceIsLight = (luminanceFromHex(surface.base) ?? 0) > 0.6;
+			const placeholderBase = mixHexColors(
+				surface.base,
+				primary[500],
+				surfaceIsLight ? 0.08 : 0.18
+			) ?? surface.base;
+			const placeholderAccent = mixHexColors(
+				surface.base,
+				primary[400],
+				surfaceIsLight ? 0.14 : 0.28
+			) ?? placeholderBase;
+
+			root.style.setProperty('--color-cover-placeholder-base', placeholderBase);
+			root.style.setProperty('--color-cover-placeholder-accent', placeholderAccent);
+			root.style.setProperty('--color-cover-placeholder-border', surface.border);
+			root.style.setProperty('--color-cover-placeholder-icon', surface.textMuted);
+
+			// Set RGB values for gradients (now using surface glow color)
+			const surfaceGlowRgb = hexToRgb(surface.glow);
 
 		if (surfaceGlowRgb) root.style.setProperty('--color-surface-glow-rgb', surfaceGlowRgb);
 
@@ -371,6 +413,46 @@ function updateThemeColors(theme: FullTheme) {
 function hexToRgb(hex: string): string | null {
 	const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
 	return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : null;
+}
+
+function hexToRgbTuple(hex: string): [number, number, number] | null {
+	const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+	if (!result) return null;
+	return [
+		parseInt(result[1], 16),
+		parseInt(result[2], 16),
+		parseInt(result[3], 16)
+	];
+}
+
+function luminanceFromHex(hex: string): number | null {
+	const rgb = hexToRgbTuple(hex);
+	if (!rgb) return null;
+
+	const transform = (value: number) => (
+		value <= 0.03928 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4)
+	);
+
+	const [r8, g8, b8] = rgb.map((value) => value / 255);
+	const r = transform(r8);
+	const g = transform(g8);
+	const b = transform(b8);
+	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function mixHexColors(baseHex: string, accentHex: string, accentWeight: number): string | null {
+	const base = hexToRgbTuple(baseHex);
+	const accent = hexToRgbTuple(accentHex);
+	if (!base || !accent) return null;
+
+	const weight = Math.max(0, Math.min(1, accentWeight));
+	const mix = (baseValue: number, accentValue: number) => Math.round(
+		baseValue * (1 - weight) + accentValue * weight
+	);
+
+	return `#${[mix(base[0], accent[0]), mix(base[1], accent[1]), mix(base[2], accent[2])]
+		.map((value) => value.toString(16).padStart(2, '0'))
+		.join('')}`;
 }
 
 // Helper functions to update appearance settings

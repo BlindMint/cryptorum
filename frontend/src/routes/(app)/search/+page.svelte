@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
+	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 
   let query = $state($page.url.searchParams.get('q') || '');
   let results = $state<any[]>([]);
@@ -111,51 +112,47 @@
   			</div>
 
   			<div class={viewMode === 'grid' ? `grid gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-${Math.min(gridSize, 6)} xl:grid-cols-${Math.min(gridSize, 8)}` : 'space-y-4'}>
-  				{#each results as book}
-  					{#if viewMode === 'grid'}
-  						<a href="/book/{book.id}" class="block group">
-  							{#if book.status === 'reading' || book.status === 'finished'}
-  								<span class="absolute top-1 right-1 z-10 w-2.5 h-2.5 rounded-full {book.status === 'reading' ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-primary-500)]'}"></span>
-  							{/if}
-  							<div class="aspect-[2/3] bg-slate-800 rounded-lg overflow-hidden mb-2 relative">
-  								{#if book.cover_path}
-  									<img src="/api/covers/{book.id}" alt={book.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform">
-  								{:else}
-  									<div class="w-full h-full flex items-center justify-center">
-  										<svg class="w-12 h-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-  											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-  										</svg>
-  									</div>
-  								{/if}
-  								{#if book.opened && book.percent > 0}
-  									<div class="absolute bottom-0 left-0 right-0 h-1 bg-slate-700">
-  										<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
-  									</div>
-  								{/if}
-  							</div>
-  							<h3 class="text-sm font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
-  							{#if book.authors && book.authors !== '[]'}
-  								<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{parseAuthors(book.authors)}</p>
-  							{/if}
-  						</a>
-  					{:else}
-  						<!-- List view -->
-  						<a href="/book/{book.id}" class="block bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-4 hover:border-[var(--color-primary-500)]/50 transition-colors">
-  							<div class="flex items-center space-x-4">
-  								<div class="w-12 h-16 bg-[var(--color-surface-800)] rounded overflow-hidden flex-shrink-0">
-  									{#if book.cover_path}
-  										<img src="/api/covers/{book.id}" alt={book.title} class="w-full h-full object-cover">
-  									{:else}
-  										<div class="w-full h-full flex items-center justify-center">
-  											<svg class="w-6 h-6 text-[var(--color-surface-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-  												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-  											</svg>
-  										</div>
-  									{/if}
-  								</div>
-  								<div class="flex-1 min-w-0">
-  									<div class="flex items-center space-x-2 mb-1">
-  										<h3 class="text-lg font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
+				{#each results as book}
+					{#if viewMode === 'grid'}
+						<a href="/book/{book.id}" class="block group">
+							<div class="relative">
+								<BookCoverFrame
+									src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
+									alt={book.title}
+									mode="contain"
+									frameClass="aspect-[2/3] mb-2"
+									imageClass="group-hover:scale-105 transition-transform"
+									placeholderSize="md"
+								/>
+								{#if book.status === 'reading' || book.status === 'finished'}
+									<span class="absolute top-1 right-1 z-10 w-2.5 h-2.5 rounded-full bg-[var(--color-primary-500)]"></span>
+								{/if}
+								{#if book.opened && book.percent > 0}
+									<div class="absolute bottom-1.5 left-0 right-0 z-10 h-1 bg-slate-700">
+										<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
+									</div>
+								{/if}
+							</div>
+							<h3 class="text-sm font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
+							{#if book.authors && book.authors !== '[]'}
+								<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{parseAuthors(book.authors)}</p>
+							{/if}
+						</a>
+					{:else}
+						<!-- List view -->
+						<a href="/book/{book.id}" class="block bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-4 hover:border-[var(--color-primary-500)]/50 transition-colors">
+							<div class="flex items-center space-x-4">
+								<BookCoverFrame
+									src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
+									alt={book.title}
+									mode="contain"
+									frameClass="w-12 h-16 flex-shrink-0"
+									imageClass="object-cover"
+									placeholderSize="sm"
+								/>
+								<div class="flex-1 min-w-0">
+									<div class="flex items-center space-x-2 mb-1">
+										<h3 class="text-lg font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
   										{#if book.status === 'reading' || book.status === 'finished'}
   											<span class="w-2.5 h-2.5 rounded-full {book.status === 'reading' ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-primary-500)]'} flex-shrink-0"></span>
   										{/if}

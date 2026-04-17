@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, removeCustomTheme, selectCustomTheme, generateId, type CustomTheme } from '$lib/stores/theme';
+	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, removeCustomTheme, resetPrimaryToDefault, resetSurfaceToDefault, selectCustomTheme, generateId, type CustomTheme } from '$lib/stores/theme';
 	import ThemePreviewSwatch from './ThemePreviewSwatch.svelte';
 
 	let {
@@ -483,11 +483,25 @@
 						</div>
 					{/if}
 
-					<div>
-						<div class="text-xs font-medium text-[var(--color-surface-text-muted)] mb-3 uppercase tracking-wider">Primary</div>
-							<div class="grid grid-cols-10 gap-2">
-								{#each primaryColors as color}
-									<button
+		<div>
+			<div class="mb-3 flex items-center justify-between">
+				<div class="text-xs font-medium text-[var(--color-surface-text-muted)] uppercase tracking-wider">Primary</div>
+				<button
+					type="button"
+					onclick={resetPrimaryToDefault}
+					class="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+					title="Reset to default colors"
+					aria-label="Reset primary color to default"
+				>
+					<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12a8 8 0 1 1-2.343-5.657"></path>
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 4v4h-4"></path>
+					</svg>
+				</button>
+			</div>
+				<div class="grid grid-cols-10 gap-2">
+					{#each primaryColors as color}
+						<button
 										type="button"
 										onclick={(e) => { handleButtonClick(e); selectPrimary(color); }}
 										class="w-6 h-6 rounded-full border border-[var(--color-surface-border)] {getPrimaryColorClass(color)} {$currentTheme.primary === color ? 'ring-2 ring-[var(--color-surface-text)]' : ''} transition-all hover:scale-110"
@@ -497,10 +511,24 @@
 						</div>
 					</div>
 
-					<div>
-						<div class="text-xs font-medium text-[var(--color-surface-text-muted)] mb-3 uppercase tracking-wider">Surface</div>
-							<div class="grid grid-cols-6 gap-2">
-								{#each surfaceColors as color}
+		<div>
+			<div class="mb-3 flex items-center justify-between">
+				<div class="text-xs font-medium text-[var(--color-surface-text-muted)] uppercase tracking-wider">Surface</div>
+				<button
+					type="button"
+					onclick={resetSurfaceToDefault}
+					class="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+					title="Reset to default colors"
+					aria-label="Reset surface color to default"
+				>
+					<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12a8 8 0 1 1-2.343-5.657"></path>
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 4v4h-4"></path>
+					</svg>
+				</button>
+			</div>
+				<div class="grid grid-cols-6 gap-2">
+					{#each surfaceColors as color}
 									<button
 										type="button"
 										onclick={(e) => { handleButtonClick(e); selectSurface(color); }}

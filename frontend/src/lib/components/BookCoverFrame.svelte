@@ -19,13 +19,13 @@
 		placeholderSize = 'lg'
 	}: Props = $props();
 
-	let fitClass = $derived(mode === 'contain' ? 'object-contain p-3' : 'object-cover');
+	let fitClass = $derived(mode === 'contain' ? 'object-contain' : 'object-cover');
 </script>
 
-<div class={`relative overflow-hidden bg-[var(--color-surface-700)] rounded-lg border border-[var(--color-surface-border)] ${frameClass}`}>
+<div class={`relative overflow-hidden rounded-lg bg-[var(--color-surface-700)] ${frameClass}`}>
 	{#if src}
 		<img src={src} alt={alt} class={`w-full h-full ${fitClass} ${imageClass}`} />
 	{:else}
-		<BookCoverPlaceholder size={placeholderSize} class="bg-transparent" />
+		<BookCoverPlaceholder size={placeholderSize} />
 	{/if}
 </div>
