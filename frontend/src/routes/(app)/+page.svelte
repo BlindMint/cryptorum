@@ -22,6 +22,9 @@
  	let discoverBooksRowEl = $state<HTMLDivElement | null>(null);
  	let dashboardBookCardWidth = $state(148);
  	let dashboardBookRowGap = $state(16);
+ 	const DASHBOARD_BOOK_MIN_WIDTH = 96;
+ 	const DASHBOARD_BOOK_MAX_WIDTH = 148;
+ 	const DASHBOARD_BOOK_TEXT_HEIGHT = 34;
  	let visibleContinueReadingCount = $state(0);
  	let visibleRecentBooksCount = $state(0);
  	let visibleDiscoverBooksCount = $state(0);
@@ -112,6 +115,10 @@
 				dashboardBookCardWidth = 148;
 				dashboardBookRowGap = 16;
 			}
+			const measuredWidth = measureBookCardWidth();
+			if (measuredWidth > 0) {
+				dashboardBookCardWidth = measuredWidth;
+			}
 			updateDashboardRows();
 		};
 
@@ -138,6 +145,24 @@
 		showConfigModal = !showConfigModal;
 	}
 
+	function measureBookCardWidth(): number {
+		const rows = [continueReadingRowEl, recentBooksRowEl, discoverBooksRowEl].filter(Boolean) as HTMLDivElement[];
+		const rowHeight = rows.reduce((minHeight, row) => {
+			return Math.min(minHeight, row.clientHeight || minHeight);
+		}, Number.POSITIVE_INFINITY);
+
+		if (!Number.isFinite(rowHeight)) {
+			return dashboardBookCardWidth;
+		}
+
+			const availableForCover = Math.max(0, rowHeight - DASHBOARD_BOOK_TEXT_HEIGHT);
+		const heightBoundWidth = Math.floor(availableForCover / 1.5);
+		return Math.max(
+			DASHBOARD_BOOK_MIN_WIDTH,
+			Math.min(DASHBOARD_BOOK_MAX_WIDTH, heightBoundWidth)
+		);
+	}
+
 	function getVisibleBookCount(container: HTMLElement | null, totalCount: number) {
 		if (!container || totalCount <= 0) return 0;
 		const width = container.clientWidth;
@@ -162,7 +187,7 @@
 	}
 </script>
 
-<div class="flex h-full flex-col gap-4 overflow-hidden">
+<div class="flex min-h-full flex-col gap-4 overflow-x-hidden overflow-y-auto">
 	<div class="hidden sm:grid grid-cols-2 lg:grid-cols-4 gap-3">
 		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)]">
 			<div class="flex items-center justify-between">
@@ -223,7 +248,7 @@
 
 	<!-- Continue Reading Section -->
 	{#if dashboardConfig.showContinueReading}
-	<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-none sm:flex-1 min-h-0 flex flex-col">
+	<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-none flex flex-col">
 		<div class="flex items-center justify-between mb-3">
 			<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Continue Reading</h2>
 			<a href="/library?status=reading" class="text-sm text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">View all →</a>
@@ -244,14 +269,14 @@
 						<div class="dashboard-book-item relative group min-w-0 self-start" animate:flip={{ duration: 90, easing: cubicOut }}>
 							<a href="/book/{book.id}" class="flex min-w-0 flex-col">
 								<div class="relative">
-									<BookCoverFrame
-										src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
-										alt={book.title}
-										mode="contain"
-										frameClass="aspect-[2/3] mb-1.5"
-										imageClass="group-hover:scale-105 transition-transform"
-										placeholderSize="md"
-									/>
+										<BookCoverFrame
+											src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
+											alt={book.title}
+											mode="cover"
+											frameClass="aspect-[2/3] mb-1.5"
+											imageClass="group-hover:scale-105 transition-transform"
+											placeholderSize="md"
+										/>
 									{#if book.status === 'reading'}
 										<div class="absolute top-1 right-1 z-10 w-3 h-3 bg-blue-500 rounded-full"></div>
 									{/if}
@@ -301,7 +326,7 @@
 
 	<!-- Recently Added Section -->
 	{#if dashboardConfig.showRecentlyAdded}
-		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-none sm:flex-1 min-h-0 flex flex-col">
+		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-none flex flex-col">
 			<div class="flex items-center justify-between mb-3">
 				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Recently Added</h2>
 				<a href="/library" class="text-sm text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">View all →</a>
@@ -317,7 +342,7 @@
 							<BookCoverFrame
 								src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
 								alt={book.title}
-								mode="contain"
+								mode="cover"
 								frameClass="aspect-[2/3] mb-1.5"
 								imageClass="group-hover:scale-105 transition-transform"
 								placeholderSize="md"
@@ -346,7 +371,7 @@
 
  	<!-- Discover Section -->
 	{#if dashboardConfig.showDiscover}
-		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-none sm:flex-1 min-h-0 flex flex-col">
+		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-none flex flex-col">
 			<div class="flex items-center justify-between mb-3">
 				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Discover</h2>
 				<button
@@ -371,7 +396,7 @@
 							<BookCoverFrame
 								src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
 								alt={book.title}
-								mode="contain"
+								mode="cover"
 								frameClass="aspect-[2/3] mb-1.5"
 								imageClass="group-hover:scale-105 transition-transform"
 								placeholderSize="md"

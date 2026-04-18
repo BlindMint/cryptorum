@@ -252,6 +252,7 @@ func initRoutes(r *chi.Mux) {
 				r.Post("/books", addBookToShelfHandler)
 				r.Post("/books/bulk", bulkAddToShelfHandler)
 				r.Post("/books/bulk-by-filter", bulkAddToShelfByFilterHandler)
+				r.Delete("/books/bulk", bulkRemoveBooksFromShelfHandler)
 				r.Delete("/books/{bookID}", removeBookFromShelfHandler)
 			})
 		})
@@ -1899,6 +1900,7 @@ func getDirectoriesHandler(w http.ResponseWriter, r *http.Request) {
 func searchBooksHandler(w http.ResponseWriter, r *http.Request) {
 	current := getUserFromContext(r.Context())
 	query := r.URL.Query().Get("q")
+	libraryID := r.URL.Query().Get("library_id")
 	if query == "" {
 		jsonResponse(w, http.StatusOK, []interface{}{})
 		return
@@ -1918,6 +1920,12 @@ func searchBooksHandler(w http.ResponseWriter, r *http.Request) {
 	// Use LIKE search for fuzzy matching (FTS will be enabled after database rebuild)
 	likePattern := "%" + query + "%"
 	ownerClause, ownerArgs := userOwnershipClause(current, "l")
+	var libraryClause string
+	var libraryArgs []interface{}
+	if libraryID != "" {
+		libraryClause = " AND b.library_id = ?"
+		libraryArgs = append(libraryArgs, libraryID)
+	}
 	rows, err := appDB.Query(`
 		SELECT b.id, COALESCE(bm.title, '') as title,
 		       COALESCE(bm.authors, '[]') as authors,
@@ -1928,9 +1936,9 @@ func searchBooksHandler(w http.ResponseWriter, r *http.Request) {
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
 		LEFT JOIN reading_progress rp ON b.id = rp.book_id
-		WHERE (`+ownerClause+`) AND (bm.title LIKE ? OR bm.authors LIKE ? OR bm.description LIKE ? OR COALESCE(bm.series, '') LIKE ? OR COALESCE(bm.asin, '') LIKE ?)
+		WHERE (`+ownerClause+`)`+libraryClause+` AND (bm.title LIKE ? OR bm.authors LIKE ? OR bm.description LIKE ? OR COALESCE(bm.series, '') LIKE ? OR COALESCE(bm.asin, '') LIKE ?)
 		LIMIT 50
-	`, append(ownerArgs, likePattern, likePattern, likePattern, likePattern, likePattern)...)
+	`, append(append(ownerArgs, libraryArgs...), likePattern, likePattern, likePattern, likePattern, likePattern)...)
 
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Search failed")

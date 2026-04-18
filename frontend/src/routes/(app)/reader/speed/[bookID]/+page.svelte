@@ -327,12 +327,13 @@
 		}
 	}
 
-	async function saveProgress() {
+	async function saveProgress(keepalive = false) {
 		if (!book || words.length === 0) return;
 		const percent = (currentIndex / words.length) * 100;
 		try {
 			await fetch(`/api/books/${book.id}/progress`, {
 				method: 'PUT',
+				keepalive,
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					percent: percent,
@@ -341,6 +342,7 @@
 			});
 			await fetch(`/api/books/${book.id}/speed-reader`, {
 				method: 'PUT',
+				keepalive,
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					word_index: currentIndex,
@@ -581,9 +583,11 @@
 
 	async function closeReader(e?: Event) {
 		e?.preventDefault();
+		const targetUrl = book ? `/book/${book.id}` : '/book';
 		stop();
-		await endSession();
-		window.location.href = book ? `/book/${book.id}` : '/book';
+		void saveProgress(true);
+		void endSession(true);
+		window.location.href = targetUrl;
 	}
 
 	// Scroll to the pending word in the word picker, debounced so slider drags don't thrash

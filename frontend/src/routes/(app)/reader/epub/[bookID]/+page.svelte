@@ -62,6 +62,7 @@
 		autoAdvance: false,
 		autoAdvanceTimer: 0,
 		fullscreenLock: false,
+		autoHideControls: true,
 		customCss: '',
 		showTextLayer: true,
 		originalLayout: false,
@@ -95,14 +96,20 @@
 	let lastSavedProgress: number | null = null;
 	let progressSaveTimer: ReturnType<typeof setTimeout> | null = null;
 	let viewportResizeTimeout: ReturnType<typeof setTimeout> | null = null;
+	let topBarHideTimeout: ReturnType<typeof setTimeout> | null = null;
 	let pendingProgressCfi: string | undefined;
 	let lastWheelNavigationAt = 0;
+	let lastContinuousScrollTop = 0;
 	let wheelNavigationTarget: Document | null = null;
 	let sessionEnded = false;
 
 	const progress = $derived(currentProgress);
 	const PROGRESS_SAVE_DEBOUNCE_MS = 750;
 	const PROGRESS_SAVE_MIN_DELTA = 0.05;
+	const TOP_BAR_HIDE_DELAY_MS = 2800;
+	const TOP_BAR_SCROLL_DELTA = 12;
+	const TOP_BAR_REVEAL_EDGE_PX = 72;
+	let topBarVisible = $state(true);
 
 	const unsubTheme = currentTheme.subscribe(theme => {
 		appTheme = theme;
@@ -146,6 +153,9 @@
 			if (rendition) {
 				updateTypographyOverrides();
 			}
+			if (!settings.autoHideControls) {
+				showTopBar();
+			}
 		});
 	});
 
@@ -160,6 +170,7 @@
 				applyContinuousContentStyles();
 				await loadContinuousToc();
 				await restoreContinuousProgress();
+				resetTopBarBehavior();
 				preloadPaginatedReader();
 				return true;
 			}
@@ -223,20 +234,89 @@
 	onDestroy(() => {
 		flushProgressSave();
 		void endSession(true);
+		clearTopBarHideTimeout();
 		unsubTheme();
 	});
 
 	async function closeReader(e?: Event) {
 		e?.preventDefault();
+		const targetUrl = book ? `/book/${book.id}` : '/book';
 		if (progressSaveTimer) {
 			clearTimeout(progressSaveTimer);
 			progressSaveTimer = null;
 		}
 		const cfi = pendingProgressCfi;
 		pendingProgressCfi = undefined;
-		await saveProgressNow(cfi);
-		await endSession();
-		window.location.href = book ? `/book/${book.id}` : '/book';
+		void saveProgressNow(cfi);
+		void endSession(true);
+		window.location.href = targetUrl;
+	}
+
+	function clearTopBarHideTimeout() {
+		if (topBarHideTimeout) {
+			clearTimeout(topBarHideTimeout);
+			topBarHideTimeout = null;
+		}
+	}
+
+	function controlsNeedToStayVisible() {
+		return (
+			loading ||
+			initialProcessing ||
+			error.length > 0 ||
+			leftSidebarOpen ||
+			rightSidebarOpen ||
+			isSearching ||
+			isDraggingProgress ||
+			!settings.autoHideControls
+		);
+	}
+
+	function showTopBar(scheduleHide = false) {
+		topBarVisible = true;
+		clearTopBarHideTimeout();
+		if (scheduleHide) {
+			scheduleTopBarAutoHide();
+		}
+	}
+
+	function hideTopBar() {
+		if (!controlsNeedToStayVisible()) {
+			topBarVisible = false;
+		}
+	}
+
+	function scheduleTopBarAutoHide() {
+		clearTopBarHideTimeout();
+		if (controlsNeedToStayVisible() || settings.continuousMode) return;
+		topBarHideTimeout = setTimeout(() => {
+			if (!controlsNeedToStayVisible()) {
+				topBarVisible = false;
+			}
+		}, TOP_BAR_HIDE_DELAY_MS);
+	}
+
+	function resetTopBarBehavior() {
+		showTopBar();
+		if (!settings.continuousMode) {
+			scheduleTopBarAutoHide();
+		}
+	}
+
+	function handleReaderPointerMove(e: PointerEvent) {
+		if (!settings.autoHideControls || controlsNeedToStayVisible()) return;
+		if (e.clientY <= TOP_BAR_REVEAL_EDGE_PX) {
+			showTopBar(!settings.continuousMode);
+		}
+	}
+
+	function handleReaderPointerUp(e: PointerEvent) {
+		if (controlsNeedToStayVisible()) return;
+		const target = e.target as Element | null;
+		if (target?.closest('input, textarea, select, [contenteditable="true"], .left-sidebar, .right-sidebar, .progress-bar, .tap-zone')) {
+			return;
+		}
+		showTopBar(!settings.continuousMode);
 	}
 
 	function getReaderTheme(themeId: string | null) {
@@ -569,6 +649,8 @@
 		} else if (settings.continuousMode && continuousContent) {
 			applyContinuousContentStyles();
 		}
+
+		resetTopBarBehavior();
 	}
 
 	function applyVisualFilters() {
@@ -583,6 +665,7 @@
 			rightSidebarOpen = false;
 		}
 		leftSidebarOpen = !leftSidebarOpen;
+		resetTopBarBehavior();
 	}
 
 	function toggleRightSidebar() {
@@ -592,25 +675,30 @@
 		} else {
 			rightSidebarOpen = !rightSidebarOpen;
 		}
+		resetTopBarBehavior();
 	}
 
 	function toggleSearchSidebar() {
 		if (leftSidebarOpen && activeSidebarTab === 'search' && !rightSidebarOpen) {
 			leftSidebarOpen = false;
+			resetTopBarBehavior();
 			return;
 		}
 
 		activeSidebarTab = 'search';
 		leftSidebarOpen = true;
 		rightSidebarOpen = false;
+		resetTopBarBehavior();
 	}
 
 	function toggleBookmark() {
 		isBookmarked = !isBookmarked;
+		resetTopBarBehavior();
 	}
 
 	function cleanup() {
 		detachWheelNavigationTarget();
+		clearTopBarHideTimeout();
 		if (rendition) {
 			rendition.destroy();
 			rendition = null;
@@ -642,6 +730,7 @@
 
 	async function goNext() {
 		if (rendition) {
+			resetTopBarBehavior();
 			await rendition.next();
 			updateNavState();
 		}
@@ -649,6 +738,7 @@
 
 	async function goPrev() {
 		if (rendition) {
+			resetTopBarBehavior();
 			await rendition.prev();
 			updateNavState();
 		}
@@ -678,9 +768,11 @@
 				}
 			}
 			leftSidebarOpen = false;
+			resetTopBarBehavior();
 			return;
 		}
 		if (rendition && item.href) {
+			resetTopBarBehavior();
 			rendition.display(item.href);
 			leftSidebarOpen = false;
 		}
@@ -727,6 +819,7 @@
 	}
 
 	function handleProgressBarClick(e: MouseEvent) {
+		resetTopBarBehavior();
 		if (isDraggingProgress) return;
 		const progressBar = document.querySelector('.progress-bar') as HTMLElement;
 		if (!progressBar) return;
@@ -750,9 +843,11 @@
 	function handleProgressBarKeydown(e: KeyboardEvent) {
 		if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
 			e.preventDefault();
+			resetTopBarBehavior();
 			goPrev();
 		} else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
 			e.preventDefault();
+			resetTopBarBehavior();
 			goNext();
 		}
 	}
@@ -768,14 +863,17 @@
 			}
 		} else if (e.key === 'ArrowRight' || e.key === ' ') {
 			e.preventDefault();
+			resetTopBarBehavior();
 			goNext();
 		} else if (e.key === 'ArrowLeft') {
 			e.preventDefault();
+			resetTopBarBehavior();
 			goPrev();
 		} else if (e.key === 'b' || e.key === 'B') {
 			toggleBookmark();
 		} else if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
 			e.preventDefault();
+			resetTopBarBehavior();
 			activeSidebarTab = 'search';
 			leftSidebarOpen = true;
 			rightSidebarOpen = false;
@@ -801,6 +899,7 @@
 
 		e.preventDefault();
 		lastWheelNavigationAt = now;
+		resetTopBarBehavior();
 
 		if (dominantDelta > 0) {
 			goNext();
@@ -944,6 +1043,7 @@
 		if (isScrolled) {
 			setupScrollPreload();
 		}
+		resetTopBarBehavior();
 	}
 
 	function preloadPaginatedReader() {
@@ -1036,6 +1136,7 @@
 			if (isScrolled) {
 				setupScrollPreload();
 			}
+			resetTopBarBehavior();
 
 			rendition.on('relocated', (location: any) => {
 				currentLocation = location.start.href;
@@ -1218,6 +1319,7 @@
 			}
 		} finally {
 			setTimeout(() => {
+				lastContinuousScrollTop = continuousScrollEl?.scrollTop ?? 0;
 				isRestoringContinuousProgress = false;
 			}, 150);
 		}
@@ -1261,6 +1363,22 @@
 			setCurrentProgress((scrollTop / maxScroll) * 100);
 			queueProgressSave();
 		}
+
+		if (!settings.autoHideControls || controlsNeedToStayVisible()) {
+			lastContinuousScrollTop = scrollTop;
+			return;
+		}
+
+		const delta = scrollTop - lastContinuousScrollTop;
+		if (scrollTop <= 2) {
+			showTopBar(false);
+		} else if (delta > TOP_BAR_SCROLL_DELTA) {
+			hideTopBar();
+		} else if (delta < -TOP_BAR_SCROLL_DELTA) {
+			showTopBar(false);
+		}
+
+		lastContinuousScrollTop = scrollTop;
 	}
 
 	function resetToDefaults() {
@@ -1362,6 +1480,9 @@
 <div
 	class="epub-reader"
 	style="background-color: {epubThemes.find(t => t.id === settings.theme)?.bg || '#111111'};"
+	role="presentation"
+	onpointermove={handleReaderPointerMove}
+	onpointerup={handleReaderPointerUp}
 >
 	{#if initialProcessing}
 		<div class="initial-loading-overlay">
@@ -1379,7 +1500,7 @@
 	{/if}
 
 	<!-- Top Navigation Bar -->
-	<header class="top-nav">
+	<header class="top-nav" class:top-nav-hidden={!topBarVisible}>
 		<div class="nav-left">
 			<a
 				href={book ? `/book/${book.id}` : '/book'}
@@ -1666,6 +1787,13 @@
 						disabled={!canPrev}
 						aria-label="Previous page"
 					></button>
+					{#if topBarVisible === false && settings.autoHideControls}
+						<button
+							class="center-reveal-zone"
+							onclick={resetTopBarBehavior}
+							aria-label="Show controls"
+						></button>
+					{/if}
 					<button
 						class="tap-zone tap-next"
 						onclick={goNext}
@@ -1866,21 +1994,6 @@
 						/>
 					</div>
 
-					<div class="settings-section">
-						<div class="settings-label">Columns</div>
-						<div class="button-group">
-							{#each [1, 2] as cols}
-								<button
-									onclick={() => updateSetting('maxColumnCount', cols)}
-									class="option-btn"
-									class:active={settings.maxColumnCount === cols}
-								>
-									{cols}
-								</button>
-							{/each}
-						</div>
-					</div>
-
 					{#if bookFormat === 'epub'}
 					<div class="settings-section">
 						<div class="settings-label">Reading Mode</div>
@@ -2010,7 +2123,10 @@
 	}
 
 	.top-nav {
-		position: relative;
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -2019,7 +2135,16 @@
 		background: var(--color-surface-base, #0f172a);
 		border-bottom: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
 		flex-shrink: 0;
-		z-index: 100;
+		z-index: 120;
+		transform: translateY(0);
+		transition: transform 0.22s ease, opacity 0.22s ease;
+		will-change: transform, opacity;
+	}
+
+	.top-nav-hidden {
+		transform: translateY(-100%);
+		opacity: 0;
+		pointer-events: none;
 	}
 
 	.nav-left,
@@ -2428,6 +2553,18 @@
 
 	.tap-prev { left: 0; cursor: w-resize; }
 	.tap-next { right: 0; cursor: e-resize; }
+
+	.center-reveal-zone {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 25%;
+		width: 50%;
+		z-index: 6;
+		background: transparent;
+		border: none;
+		cursor: pointer;
+	}
 
 	.sidebar-close-overlay {
 		position: absolute;

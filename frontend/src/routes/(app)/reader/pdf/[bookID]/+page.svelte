@@ -28,6 +28,8 @@
 		pageLayout: 'single',
 		pageZoom: 'auto',
 		zoomLevel: 100,
+		renderQuality: 'high',
+		autoHideControls: true,
 		showSidebar: false,
 		scrollDirection: 'vertical',
 		scrollMode: 'continuous-vertical',
@@ -80,11 +82,22 @@
 	let fitWidthSnapshot: { pageZoom: PdfReaderSetting['pageZoom']; zoomLevel: number } | null = null;
 	let fitWidthActive = $state(false);
 	let viewportResizeTimeout: ReturnType<typeof setTimeout> | null = null;
+	let topBarHideTimeout: ReturnType<typeof setTimeout> | null = null;
+	let topBarVisible = $state(true);
+	let lastContinuousScrollTop = 0;
 	let sessionEnded = false;
 	let handlePageExit: (() => void) | null = null;
 	let pdfContainerEl: HTMLDivElement | null = null;
 
 	const progress = $derived(numPages > 0 ? (currentPage / numPages) * 100 : 0);
+
+	const renderQualityScale: Record<PdfReaderSetting['renderQuality'], number> = {
+		standard: 1,
+		high: 1.5,
+		maximum: 2
+	};
+	const topBarHideDelayMs = 2800;
+	const scrollHideThresholdPx = 8;
 
 	const viewModeBgColors: Record<PdfViewMode, string> = {
 		light: '#ffffff',
@@ -112,6 +125,7 @@
 			if (container.contains(target) && (leftSidebarOpen || rightSidebarOpen)) {
 				leftSidebarOpen = false;
 				rightSidebarOpen = false;
+				resetTopBarBehavior();
 			}
 		};
 		window.addEventListener('mousedown', globalMouseDownListener);
@@ -192,6 +206,7 @@
 	}
 
 	onDestroy(() => {
+		clearTopBarHideTimer();
 		if (handlePageExit) {
 			window.removeEventListener('pagehide', handlePageExit);
 			window.removeEventListener('beforeunload', handlePageExit);
@@ -248,6 +263,7 @@
 	async function updateSetting(key: string, value: any) {
 		settings = { ...settings, [key]: value };
 		readerSettings.updatePdf({ [key]: value });
+		showTopBar(key === 'scrollMode' || key === 'autoHideControls');
 
 		if (key === 'scrollMode') {
 			const pageBeforeSwitch = currentPage;
@@ -278,6 +294,14 @@
 				await tick();
 				renderPage(currentPage);
 			}
+		} else if (key === 'renderQuality') {
+			if (settings.scrollMode === 'continuous-vertical') {
+				await tick();
+				renderAllPagesContinuous();
+			} else {
+				await tick();
+				renderPage(currentPage);
+			}
 		} else if (key === 'pageRotation') {
 			if (settings.scrollMode === 'continuous-vertical') {
 				await tick();
@@ -297,6 +321,7 @@
 		} else if (key === 'viewMode') {
 			applyViewMode();
 		}
+		resetTopBarBehavior();
 	}
 
 	function applyViewMode() {
@@ -317,6 +342,75 @@
 			const filter = `brightness(${settings.brightness}%) contrast(${settings.contrast}%) grayscale(${settings.grayscale}%)`;
 			container.style.filter = settings.viewMode === 'trueDark' ? `invert(1) ${filter}` : filter;
 		}
+	}
+
+	function getRenderScaleFactor() {
+		const deviceScale = Math.max(window.devicePixelRatio || 1, 1);
+		return deviceScale * renderQualityScale[settings.renderQuality];
+	}
+
+	function controlsNeedToStayVisible() {
+		return (
+			!settings.autoHideControls ||
+			loading ||
+			!!error ||
+			leftSidebarOpen ||
+			rightSidebarOpen ||
+			isEditingPage ||
+			isDraggingProgress
+		);
+	}
+
+	function clearTopBarHideTimer() {
+		if (topBarHideTimeout) {
+			clearTimeout(topBarHideTimeout);
+			topBarHideTimeout = null;
+		}
+	}
+
+	function hideTopBar() {
+		if (controlsNeedToStayVisible()) return;
+		topBarVisible = false;
+	}
+
+	function scheduleTopBarAutoHide() {
+		clearTopBarHideTimer();
+		if (settings.scrollMode !== 'paged' || controlsNeedToStayVisible()) return;
+
+		topBarHideTimeout = setTimeout(() => {
+			topBarHideTimeout = null;
+			hideTopBar();
+		}, topBarHideDelayMs);
+	}
+
+	function showTopBar(scheduleHide = settings.scrollMode === 'paged') {
+		topBarVisible = true;
+		if (scheduleHide) {
+			scheduleTopBarAutoHide();
+		} else {
+			clearTopBarHideTimer();
+		}
+	}
+
+	function resetTopBarBehavior() {
+		if (!settings.autoHideControls || controlsNeedToStayVisible()) {
+			showTopBar(false);
+			return;
+		}
+
+		if (settings.scrollMode === 'paged') {
+			showTopBar(true);
+		} else {
+			clearTopBarHideTimer();
+			topBarVisible = true;
+		}
+	}
+
+	function isInteractiveReaderTarget(target: EventTarget | null) {
+		if (!(target instanceof Element)) return false;
+		return !!target.closest(
+			'button, a, input, textarea, select, label, [contenteditable="true"], .top-nav, .left-sidebar, .right-sidebar, .floating-nav, .progress-bar'
+		);
 	}
 
 	function applyPanMode() {
@@ -369,6 +463,7 @@
 		if (!pdfContainerEl || e.touches.length !== 2) return;
 		if (!pdfContainerEl.contains(e.target as Node)) return;
 
+		showTopBar(true);
 		touchPinchActive = true;
 		touchPinchStartDistance = getTouchDistance(e.touches);
 		touchPinchStartZoom = settings.zoomLevel;
@@ -426,6 +521,7 @@
 	}
 
 	function prevPage() {
+		showTopBar(true);
 		if (settings.readingDirection === 'rtl') {
 			if (currentPage < numPages) {
 				currentPage++;
@@ -449,6 +545,7 @@
 	}
 
 	function nextPage() {
+		showTopBar(true);
 		if (settings.readingDirection === 'rtl') {
 			if (currentPage > 1) {
 				currentPage--;
@@ -473,6 +570,7 @@
 
 	function goToPage(pageNum: number) {
 		if (pageNum >= 1 && pageNum <= numPages) {
+			showTopBar(settings.scrollMode === 'paged');
 			currentPage = pageNum;
 			if (settings.scrollMode === 'continuous-vertical') {
 				scrollToPage(pageNum);
@@ -521,6 +619,7 @@
 	}
 
 	function startEditPage() {
+		showTopBar(false);
 		isEditingPage = true;
 		pageInputValue = String(currentPage);
 	}
@@ -546,6 +645,49 @@
 		if (canvas) {
 			canvas.scrollIntoView({ behavior: 'smooth', block: 'start' });
 			await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+			lastContinuousScrollTop = scrollbar?.scrollTop ?? lastContinuousScrollTop;
+		}
+	}
+
+	function handleContinuousScroll(e: Event) {
+		if (settings.scrollMode !== 'continuous-vertical') return;
+
+		const target = e.currentTarget as HTMLElement;
+		const scrollTop = target.scrollTop;
+		const delta = scrollTop - lastContinuousScrollTop;
+		lastContinuousScrollTop = scrollTop;
+
+		if (controlsNeedToStayVisible() || scrollTop <= 0) {
+			showTopBar(false);
+			return;
+		}
+
+		if (delta > scrollHideThresholdPx) {
+			hideTopBar();
+		} else if (delta < -scrollHideThresholdPx) {
+			showTopBar(false);
+		}
+	}
+
+	function handlePdfContainerPointerUp(e: PointerEvent) {
+		if (!pdfContainerEl || !pdfContainerEl.contains(e.target as Node)) return;
+		if (settings.scrollMode !== 'paged' || settings.panMode || isInteractiveReaderTarget(e.target)) return;
+		if (window.getSelection()?.toString()) return;
+
+		const rect = pdfContainerEl.getBoundingClientRect();
+		const horizontalPosition = (e.clientX - rect.left) / rect.width;
+		const isCenterTap = horizontalPosition > 0.24 && horizontalPosition < 0.76;
+		if (isCenterTap) {
+			showTopBar(true);
+		}
+	}
+
+	function handleReaderPointerMove(e: MouseEvent) {
+		if (!settings.autoHideControls) return;
+		if (e.clientY <= 72) {
+			showTopBar(settings.scrollMode === 'paged');
+		} else if (settings.scrollMode === 'paged' && pdfContainerEl?.contains(e.target as Node)) {
+			scheduleTopBarAutoHide();
 		}
 	}
 
@@ -597,17 +739,14 @@
 				scale: displayScale,
 				rotation: settings.pageRotation
 			});
-			const outputScale = Math.max(window.devicePixelRatio || 1, 1);
-			const renderViewport = page.getViewport({
-				scale: displayScale * outputScale,
-				rotation: settings.pageRotation
-			});
+			const outputScale = getRenderScaleFactor();
+			const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
 
 			canvas.dataset.pageNumber = String(pageNum);
-			canvas.style.width = `${cssViewport.width}px`;
-			canvas.style.height = `${cssViewport.height}px`;
-			canvas.width = renderViewport.width;
-			canvas.height = renderViewport.height;
+			canvas.style.width = `${Math.floor(cssViewport.width)}px`;
+			canvas.style.height = `${Math.floor(cssViewport.height)}px`;
+			canvas.width = Math.max(1, Math.floor(cssViewport.width * outputScale));
+			canvas.height = Math.max(1, Math.floor(cssViewport.height * outputScale));
 
 			ctx = canvas.getContext('2d');
 			if (!ctx) return;
@@ -617,7 +756,8 @@
 
 			task = page.render({
 				canvasContext: ctx,
-				viewport: renderViewport
+				viewport: cssViewport,
+				transform
 			});
 			renderTasks.set(canvas, task);
 
@@ -694,15 +834,19 @@
 			if (!page) return;
 
 			const viewport = page.getViewport({ scale: 0.2 });
-			canvas.height = viewport.height;
-			canvas.width = viewport.width;
+			const outputScale = getRenderScaleFactor();
+			canvas.style.width = `${Math.floor(viewport.width)}px`;
+			canvas.style.height = `${Math.floor(viewport.height)}px`;
+			canvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
+			canvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
 
 			const ctx = canvas.getContext('2d');
 			if (!ctx) return;
 
 			await page.render({
 				canvasContext: ctx,
-				viewport: viewport
+				viewport: viewport,
+				transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null
 			}).promise;
 
 			renderedThumbnails.add(pageNum);
@@ -745,8 +889,8 @@
 
 		const pageCanvas = document.createElement('canvas');
 		pageCanvas.className = 'pdf-page-canvas';
-		pageCanvas.style.width = `${placeholderViewport.width}px`;
-		pageCanvas.style.height = `${placeholderViewport.height}px`;
+		pageCanvas.style.width = `${Math.floor(placeholderViewport.width)}px`;
+		pageCanvas.style.height = `${Math.floor(placeholderViewport.height)}px`;
 		pageCanvas.width = placeholderRenderViewport.width;
 		pageCanvas.height = placeholderRenderViewport.height;
 		pageWrapper.appendChild(pageCanvas);
@@ -756,28 +900,6 @@
 
 		if (intersectionObserver) {
 			intersectionObserver.observe(pageWrapper);
-		}
-	}
-
-	async function appendRemainingContinuousPages(
-		container: HTMLElement,
-		placeholderViewport: any,
-		placeholderRenderViewport: any,
-		initialPages: Set<number>
-	) {
-		const batchSize = 20;
-		let appended = 0;
-
-		for (let i = 1; i <= numPages; i++) {
-			if (initialPages.has(i)) continue;
-
-			appendContinuousPageShell(i, container, placeholderViewport, placeholderRenderViewport);
-			appended++;
-
-			if (appended % batchSize === 0) {
-				await tick();
-				await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-			}
 		}
 	}
 
@@ -800,34 +922,32 @@
 
 		const placeholderPage = await pdfDoc.getPage(currentPage);
 		const displayScale = settings.zoomLevel / 100;
-		const outputScale = Math.max(window.devicePixelRatio || 1, 1);
+		const outputScale = getRenderScaleFactor();
 		const placeholderViewport = placeholderPage.getViewport({
 			scale: displayScale,
 			rotation: settings.pageRotation
 		});
-		const placeholderRenderViewport = placeholderPage.getViewport({
-			scale: displayScale * outputScale,
-			rotation: settings.pageRotation
-		});
+		const placeholderRenderViewport = {
+			width: Math.max(1, Math.floor(placeholderViewport.width * outputScale)),
+			height: Math.max(1, Math.floor(placeholderViewport.height * outputScale))
+		};
 
-		const initialPages = new Set<number>([currentPage]);
-		for (let offset = 1; offset <= 2; offset++) {
-			if (currentPage + offset <= numPages) initialPages.add(currentPage + offset);
-			if (currentPage - offset >= 1) initialPages.add(currentPage - offset);
+		const batchSize = 20;
+		for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+			appendContinuousPageShell(pageNum, container, placeholderViewport, placeholderRenderViewport);
+
+			if (pageNum % batchSize === 0) {
+				await tick();
+				await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			}
 		}
-
-		Array.from(initialPages)
-			.sort((a, b) => a - b)
-			.forEach((pageNum) => {
-				appendContinuousPageShell(pageNum, container, placeholderViewport, placeholderRenderViewport);
-			});
 
 		await observePageVisibility(scrollbarEl);
 		await renderContinuousPage(currentPage);
 		void renderContinuousWindow(currentPage, 2);
 		await tick();
 		await scrollToPage(currentPage);
-		void appendRemainingContinuousPages(container, placeholderViewport, placeholderRenderViewport, initialPages);
+		lastContinuousScrollTop = scrollbarEl?.scrollTop ?? 0;
 	}
 
 	async function renderContinuousPage(pageNum: number) {
@@ -850,22 +970,20 @@
 				pageViewports.set(pageNum, viewport);
 			}
 
-			const outputScale = Math.max(window.devicePixelRatio || 1, 1);
-			const renderViewport = page.getViewport({
-				scale: (settings.zoomLevel / 100) * outputScale,
-				rotation: settings.pageRotation
-			});
+			const outputScale = getRenderScaleFactor();
+			const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
 
-			canvas.style.width = `${viewport.width}px`;
-			canvas.style.height = `${viewport.height}px`;
-			canvas.height = renderViewport.height;
-			canvas.width = renderViewport.width;
+			canvas.style.width = `${Math.floor(viewport.width)}px`;
+			canvas.style.height = `${Math.floor(viewport.height)}px`;
+			canvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
+			canvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
 			const ctx = canvas.getContext('2d');
 			if (!ctx) return;
 
 			await page.render({
 				canvasContext: ctx,
-				viewport: renderViewport
+				viewport,
+				transform
 			}).promise;
 
 			renderedPages.add(pageNum);
@@ -961,37 +1079,46 @@
 	}
 
 	function toggleLeftSidebar() {
+		showTopBar(false);
 		if (rightSidebarOpen) {
 			rightSidebarOpen = false;
 		}
 		leftSidebarOpen = !leftSidebarOpen;
+		resetTopBarBehavior();
 	}
 
 	function toggleRightSidebar() {
+		showTopBar(false);
 		if (leftSidebarOpen) {
 			leftSidebarOpen = false;
 		}
 		rightSidebarOpen = !rightSidebarOpen;
+		resetTopBarBehavior();
 	}
 
 	function toggleSearchSidebar() {
+		showTopBar(false);
 		if (leftSidebarOpen && activeSidebarTab === 'search' && !rightSidebarOpen) {
 			leftSidebarOpen = false;
+			resetTopBarBehavior();
 			return;
 		}
 
 		activeSidebarTab = 'search';
 		leftSidebarOpen = true;
 		rightSidebarOpen = false;
+		resetTopBarBehavior();
 	}
 
 	function togglePanMode() {
+		showTopBar(true);
 		settings = { ...settings, panMode: !settings.panMode };
 		readerSettings.updatePdf({ panMode: settings.panMode });
 		applyPanMode();
 	}
 
 	async function toggleFitWidth() {
+		showTopBar(true);
 		if (fitWidthActive && fitWidthSnapshot) {
 			const snapshot = fitWidthSnapshot;
 			fitWidthSnapshot = null;
@@ -1045,6 +1172,8 @@
 	}
 
 	function handleMouseMove(e: MouseEvent) {
+		handleReaderPointerMove(e);
+
 		if (isDragging && settings.panMode) {
 			e.preventDefault();
 			const dx = e.clientX - dragStart.x;
@@ -1068,6 +1197,7 @@
 	function handleProgressThumbMouseDown(e: MouseEvent) {
 		e.preventDefault();
 		e.stopPropagation();
+		showTopBar(false);
 		isDraggingProgress = true;
 		pendingProgressPage = null;
 		window.addEventListener('mousemove', handleProgressMouseMove);
@@ -1099,10 +1229,12 @@
 			jumpToPage(pendingProgressPage);
 			pendingProgressPage = null;
 		}
+		resetTopBarBehavior();
 	}
 
 	function jumpToPage(pageNum: number) {
 		if (pageNum >= 1 && pageNum <= numPages) {
+			showTopBar(settings.scrollMode === 'paged');
 			currentPage = pageNum;
 			if (settings.scrollMode === 'continuous-vertical') {
 				const canvas = pageCanvases.get(pageNum);
@@ -1148,6 +1280,10 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Tab' || e.key === 'Escape' || e.key.startsWith('Arrow') || e.key === ' ') {
+			showTopBar(true);
+		}
+
 		if (isEditingPage) {
 			if (e.key === 'Enter' || e.key === 'Escape') {
 				finishEditPage();
@@ -1210,6 +1346,7 @@
 		if (settings.scrollMode !== 'paged' || settings.panMode || shouldIgnoreWheelNavigation(e.target)) {
 			return;
 		}
+		showTopBar(true);
 
 		const dominantDelta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
 		if (Math.abs(dominantDelta) < 12) return;
@@ -1240,9 +1377,10 @@
 
 	async function closeReader(e?: Event) {
 		e?.preventDefault();
-		await saveProgress();
-		await endSession();
-		window.location.href = book ? `/book/${book.id}` : '/book';
+		const targetUrl = book ? `/book/${book.id}` : '/book';
+		void saveProgress(true);
+		void endSession(true);
+		window.location.href = targetUrl;
 	}
 
 	async function performSearch() {
@@ -1368,6 +1506,7 @@
 				} else {
 					await renderPage(currentPage);
 				}
+				resetTopBarBehavior();
 
 				tick().then(() => {
 					observeThumbnails();
@@ -1394,12 +1533,13 @@
 		}
 	}
 
-	async function saveProgress() {
+	async function saveProgress(keepalive = false) {
 		if (!book) return;
 		const percent = numPages > 0 ? (currentPage / numPages) * 100 : 0;
 		try {
 			await fetch(`/api/books/${book.id}/progress`, {
 				method: 'PUT',
+				keepalive,
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					page: currentPage,
@@ -1432,6 +1572,7 @@
 		window.addEventListener('wheel', handleWheelNavigation, { passive: false });
 		window.addEventListener('mousemove', handleMouseMove);
 		window.addEventListener('mouseup', handleMouseUp);
+		window.addEventListener('pointerup', handlePdfContainerPointerUp);
 		window.addEventListener('resize', handleViewportResize);
 		pdfContainerEl?.addEventListener('touchstart', handleTouchStart, { passive: false });
 		pdfContainerEl?.addEventListener('touchmove', handleTouchMove, { passive: false });
@@ -1442,6 +1583,7 @@
 			window.removeEventListener('wheel', handleWheelNavigation);
 			window.removeEventListener('mousemove', handleMouseMove);
 			window.removeEventListener('mouseup', handleMouseUp);
+			window.removeEventListener('pointerup', handlePdfContainerPointerUp);
 			window.removeEventListener('resize', handleViewportResize);
 			pdfContainerEl?.removeEventListener('touchstart', handleTouchStart);
 			pdfContainerEl?.removeEventListener('touchmove', handleTouchMove);
@@ -1453,6 +1595,7 @@
 			if (touchPinchFrame !== null) {
 				window.cancelAnimationFrame(touchPinchFrame);
 			}
+			clearTopBarHideTimer();
 			cleanupContinuousRendering();
 		};
 	});
@@ -1477,11 +1620,19 @@
 
 <div
 	class="pdf-reader"
+	class:controls-hidden={!topBarVisible}
 	style="background-color: {viewModeBgColors[settings.viewMode]};"
 	role="application"
 >
+	<div
+		class="top-reveal-zone"
+		role="presentation"
+		aria-hidden="true"
+		onpointerenter={() => showTopBar(settings.scrollMode === 'paged')}
+	></div>
+
 	<!-- Top Navigation Bar -->
-	<header class="top-nav">
+	<header class="top-nav" class:hidden={!topBarVisible}>
 		<div class="nav-left">
 			<a
 				href={book ? `/book/${book.id}` : '/book'}
@@ -1870,6 +2021,7 @@
 				<div
 					id="continuous-scrollbar"
 					class="continuous-scrollbar"
+					onscroll={handleContinuousScroll}
 				>
 					<div id="continuous-container" class="continuous-container">
 					</div>
@@ -1952,36 +2104,17 @@
 				</div>
 			</div>
 
-			<div class="settings-section">
-				<h3 class="section-title">Page Layout</h3>
-				<div class="mode-buttons">
-					<button
-						class="mode-btn"
-						class:active={settings.pageLayout === 'single'}
-						onclick={() => updateSetting('pageLayout', 'single')}
-					>
-						<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<rect x="4" y="2" width="16" height="20" rx="2"></rect>
-						</svg>
-						Single
-					</button>
-					<button
-						class="mode-btn"
-						class:active={settings.pageLayout === 'double'}
-						onclick={() => updateSetting('pageLayout', 'double')}
-					>
-						<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<rect x="2" y="2" width="9" height="20" rx="1"></rect>
-							<rect x="13" y="2" width="9" height="20" rx="1"></rect>
-						</svg>
-						Double
-					</button>
-				</div>
-			</div>
-
-			<div class="settings-section">
-				<h3 class="section-title">Progress Bar</h3>
+				<div class="settings-section">
+					<h3 class="section-title">Controls</h3>
 				<div class="toggle-options">
+					<label class="toggle-option">
+						<span>Auto-hide Controls</span>
+						<input
+							type="checkbox"
+							checked={settings.autoHideControls}
+							onchange={(e) => updateSetting('autoHideControls', e.currentTarget.checked)}
+						/>
+					</label>
 					<label class="toggle-option">
 						<span>Chapter Markers</span>
 						<input
@@ -2021,6 +2154,33 @@
 					Auto Scaling
 				</button>
 			</div>
+
+			<div class="settings-section">
+				<h3 class="section-title">Render Quality</h3>
+				<div class="mode-buttons quality-buttons">
+					<button
+						class="mode-btn"
+						class:active={settings.renderQuality === 'standard'}
+						onclick={() => updateSetting('renderQuality', 'standard')}
+					>
+						Standard
+					</button>
+					<button
+						class="mode-btn"
+						class:active={settings.renderQuality === 'high'}
+						onclick={() => updateSetting('renderQuality', 'high')}
+					>
+						High
+					</button>
+					<button
+						class="mode-btn"
+						class:active={settings.renderQuality === 'maximum'}
+						onclick={() => updateSetting('renderQuality', 'maximum')}
+					>
+						Maximum
+					</button>
+				</div>
+			</div>
 		</aside>
 	</div>
 </div>
@@ -2030,14 +2190,16 @@
 		position: fixed;
 		inset: 0;
 		z-index: 9999;
-		display: flex;
-		flex-direction: column;
+		display: block;
 		font-family: system-ui, -apple-system, sans-serif;
 		overflow: hidden;
 	}
 
 	.top-nav {
-		position: relative;
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -2047,6 +2209,24 @@
 		border-bottom: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
 		flex-shrink: 0;
 		z-index: 100;
+		transform: translateY(0);
+		transition: transform 0.22s ease, opacity 0.22s ease;
+		will-change: transform;
+	}
+
+	.top-nav.hidden {
+		opacity: 0;
+		transform: translateY(-100%);
+		pointer-events: none;
+	}
+
+	.top-reveal-zone {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: 16px;
+		z-index: 99;
 	}
 
 	.nav-left,
@@ -2244,10 +2424,10 @@
 	}
 
 	.main-content {
-		flex: 1;
+		position: absolute;
+		inset: 0;
 		display: flex;
 		overflow: hidden;
-		position: relative;
 	}
 
 	.left-sidebar {
@@ -2866,8 +3046,6 @@
 		}
 
 		.pdf-canvas {
-			max-width: 100%;
-			height: auto;
 			box-shadow: none;
 		}
 

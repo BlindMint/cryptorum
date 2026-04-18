@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { mobileMenuOpen } from '$lib/stores';
 	import ThemeSelector from './ThemeSelector.svelte';
@@ -10,7 +11,11 @@
 	function handleSearch(e: Event) {
 		e.preventDefault();
 		if (searchQuery.trim()) {
-			goto(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
+			const params = new URLSearchParams();
+			params.set('q', searchQuery.trim());
+			const library = $page.url.searchParams.get('library');
+			if (library) params.set('library', library);
+			goto(`/search?${params.toString()}`);
 			searchQuery = '';
 			showMobileActions = false;
 		}

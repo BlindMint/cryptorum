@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
-	import { browser } from '$app/environment';
 	import { readerSettings, cbxFitModes, cbxScrollModes, type CbxReaderSetting } from '$lib/stores/readerSettings';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
 
@@ -27,6 +26,7 @@
 		panelViewEnabled: false,
 		spreadHandling: 'auto',
 		pageTransitionSound: false,
+		autoHideControls: true,
 		vibrance: 100,
 		saturation: 100
 	});
@@ -37,9 +37,16 @@
 	let isDraggingProgress = $state(false);
 	let pendingProgressPage = $state<number | null>(null);
 	let lastWheelNavigationAt = 0;
+	let topBarHideTimeout: ReturnType<typeof setTimeout> | null = null;
+	let lastLongStripScrollTop = 0;
 	let sessionEnded = false;
 	let handlePageExit: (() => void) | null = null;
 	let requestedFormat = $state('');
+	let topBarVisible = $state(true);
+
+	const TOP_BAR_HIDE_DELAY_MS = 2800;
+	const TOP_BAR_SCROLL_DELTA = 12;
+	const TOP_BAR_REVEAL_EDGE_PX = 72;
 
 	const progress = $derived(numPages > 0 ? (currentPage / numPages) * 100 : 0);
 
@@ -70,6 +77,9 @@
 
 		readerSettings.subscribe(s => {
 			settings = { ...s.cbx };
+			if (!settings.autoHideControls) {
+				showTopBar();
+			}
 		});
 
 		handlePageExit = () => {
@@ -77,6 +87,8 @@
 		};
 		window.addEventListener('pagehide', handlePageExit);
 		window.addEventListener('beforeunload', handlePageExit);
+
+		resetTopBarBehavior();
 	});
 
 	async function fetchProgress() {
@@ -90,12 +102,13 @@
 		}
 	}
 
-	async function saveProgress() {
+	async function saveProgress(keepalive = false) {
 		if (!book) return;
 		const percent = numPages > 0 ? (currentPage / numPages) * 100 : 0;
 		try {
 			await fetch(`/api/books/${book.id}/progress`, {
 				method: 'PUT',
+				keepalive,
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					page: currentPage,
@@ -150,11 +163,78 @@
 		}
 	}
 
+	function clearTopBarHideTimeout() {
+		if (topBarHideTimeout) {
+			clearTimeout(topBarHideTimeout);
+			topBarHideTimeout = null;
+		}
+	}
+
+	function controlsNeedToStayVisible() {
+		return (
+			loading ||
+			leftSidebarOpen ||
+			rightSidebarOpen ||
+			isDraggingProgress ||
+			!settings.autoHideControls
+		);
+	}
+
+	function showTopBar(scheduleHide = false) {
+		topBarVisible = true;
+		clearTopBarHideTimeout();
+		if (scheduleHide) {
+			scheduleTopBarAutoHide();
+		}
+	}
+
+	function hideTopBar() {
+		if (!controlsNeedToStayVisible()) {
+			topBarVisible = false;
+		}
+	}
+
+	function scheduleTopBarAutoHide() {
+		clearTopBarHideTimeout();
+		if (controlsNeedToStayVisible() || settings.scrollMode === 'long-strip' || settings.scrollMode === 'infinite') {
+			return;
+		}
+		topBarHideTimeout = setTimeout(() => {
+			if (!controlsNeedToStayVisible()) {
+				topBarVisible = false;
+			}
+		}, TOP_BAR_HIDE_DELAY_MS);
+	}
+
+	function resetTopBarBehavior() {
+		showTopBar();
+		if (settings.scrollMode !== 'long-strip' && settings.scrollMode !== 'infinite') {
+			scheduleTopBarAutoHide();
+		}
+	}
+
+	function handleReaderPointerMove(e: PointerEvent) {
+		if (!settings.autoHideControls || controlsNeedToStayVisible()) return;
+		if (e.clientY <= TOP_BAR_REVEAL_EDGE_PX) {
+			showTopBar(settings.scrollMode !== 'long-strip' && settings.scrollMode !== 'infinite');
+		}
+	}
+
+	function handleReaderPointerUp(e: PointerEvent) {
+		if (controlsNeedToStayVisible()) return;
+		const target = e.target as Element | null;
+		if (target?.closest('input, textarea, select, [contenteditable="true"], .left-sidebar, .right-sidebar, .progress-bar')) {
+			return;
+		}
+		showTopBar(settings.scrollMode !== 'long-strip' && settings.scrollMode !== 'infinite');
+	}
+
 	onDestroy(() => {
 		if (handlePageExit) {
 			window.removeEventListener('pagehide', handlePageExit);
 			window.removeEventListener('beforeunload', handlePageExit);
 		}
+		clearTopBarHideTimeout();
 		void endSession(true);
 	});
 
@@ -165,9 +245,12 @@
 		if (key === 'pageSpread') {
 			updateSpreadPages();
 		}
+
+		resetTopBarBehavior();
 	}
 
 	function prevPage() {
+		resetTopBarBehavior();
 		if (settings.mangaMode || settings.readingDirection === 'rtl') {
 			if (currentPage < numPages) {
 				currentPage++;
@@ -183,6 +266,7 @@
 	}
 
 	function nextPage() {
+		resetTopBarBehavior();
 		if (settings.mangaMode || settings.readingDirection === 'rtl') {
 			if (currentPage > 1) {
 				currentPage--;
@@ -199,6 +283,7 @@
 
 	function goToPage(pageNum: number) {
 		if (pageNum >= 1 && pageNum <= numPages) {
+			resetTopBarBehavior();
 			currentPage = pageNum;
 			updateSpreadPages();
 			saveProgress();
@@ -210,6 +295,7 @@
 			rightSidebarOpen = false;
 		}
 		leftSidebarOpen = !leftSidebarOpen;
+		resetTopBarBehavior();
 	}
 
 	function toggleRightSidebar() {
@@ -217,11 +303,13 @@
 			leftSidebarOpen = false;
 		}
 		rightSidebarOpen = !rightSidebarOpen;
+		resetTopBarBehavior();
 	}
 
 	function handleProgressThumbMouseDown(e: MouseEvent) {
 		e.preventDefault();
 		e.stopPropagation();
+		resetTopBarBehavior();
 		isDraggingProgress = true;
 		pendingProgressPage = null;
 		window.addEventListener('mousemove', handleProgressMouseMove);
@@ -252,6 +340,7 @@
 	}
 
 	function handleProgressBarClick(e: MouseEvent) {
+		resetTopBarBehavior();
 		const progressBar = document.querySelector('.progress-bar') as HTMLElement;
 		if (!progressBar) return;
 		const rect = progressBar.getBoundingClientRect();
@@ -266,18 +355,21 @@
 	function handleProgressBarKeydown(e: KeyboardEvent) {
 		if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
 			e.preventDefault();
+			resetTopBarBehavior();
 			prevPage();
 		} else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
 			e.preventDefault();
+			resetTopBarBehavior();
 			nextPage();
 		}
 	}
 
 	async function closeReader(e?: Event) {
 		e?.preventDefault();
-		await saveProgress();
-		await endSession();
-		window.location.href = book ? `/book/${book.id}` : '/book';
+		const targetUrl = book ? `/book/${book.id}` : '/book';
+		void saveProgress(true);
+		void endSession(true);
+		window.location.href = targetUrl;
 	}
 
 	function toggleFullscreen() {
@@ -299,12 +391,15 @@
 			}
 		} else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
 			e.preventDefault();
+			resetTopBarBehavior();
 			prevPage();
 		} else if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
 			e.preventDefault();
+			resetTopBarBehavior();
 			nextPage();
 		} else if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
 			e.preventDefault();
+			resetTopBarBehavior();
 			toggleLeftSidebar();
 		}
 	}
@@ -334,12 +429,33 @@
 
 		e.preventDefault();
 		lastWheelNavigationAt = now;
+		resetTopBarBehavior();
 
 		if (dominantDelta > 0) {
 			nextPage();
 		} else {
 			prevPage();
 		}
+	}
+
+	function handleLongStripScroll(e: Event) {
+		const container = e.currentTarget as HTMLElement | null;
+		if (!container) return;
+		const scrollTop = container.scrollTop;
+		if (!settings.autoHideControls || controlsNeedToStayVisible()) {
+			lastLongStripScrollTop = scrollTop;
+			return;
+		}
+
+		const delta = scrollTop - lastLongStripScrollTop;
+		if (scrollTop <= 2) {
+			showTopBar(false);
+		} else if (delta > TOP_BAR_SCROLL_DELTA) {
+			hideTopBar();
+		} else if (delta < -TOP_BAR_SCROLL_DELTA) {
+			showTopBar(false);
+		}
+		lastLongStripScrollTop = scrollTop;
 	}
 
 	function getPageUrl(pageNum: number): string {
@@ -372,9 +488,12 @@
 <div
 	class="cbx-reader"
 	style="background-color: {settings.backgroundColor};"
+	role="presentation"
+	onpointermove={handleReaderPointerMove}
+	onpointerup={handleReaderPointerUp}
 >
 	<!-- Top Navigation Bar -->
-	<header class="top-nav">
+	<header class="top-nav" class:top-nav-hidden={!topBarVisible}>
 		<div class="nav-left">
 			<a
 				href={book ? `/book/${book.id}` : '/book'}
@@ -512,7 +631,7 @@
 				</div>
 			{:else if numPages > 0}
 				{#if settings.scrollMode === 'long-strip' || settings.scrollMode === 'infinite'}
-					<div class="long-strip">
+					<div class="long-strip" onscroll={handleLongStripScroll}>
 						<div
 							class="strip-content"
 							style="max-width: {settings.stripMaxWidthPercent}%;"
@@ -759,7 +878,10 @@
 	}
 
 	.top-nav {
-		position: relative;
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -768,7 +890,16 @@
 		background: var(--color-surface-base, #0f172a);
 		border-bottom: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
 		flex-shrink: 0;
-		z-index: 100;
+		z-index: 120;
+		transform: translateY(0);
+		transition: transform 0.22s ease, opacity 0.22s ease;
+		will-change: transform, opacity;
+	}
+
+	.top-nav-hidden {
+		transform: translateY(-100%);
+		opacity: 0;
+		pointer-events: none;
 	}
 
 	.nav-left, .nav-center, .nav-right {

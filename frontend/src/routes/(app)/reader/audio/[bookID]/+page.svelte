@@ -36,6 +36,7 @@
 		skipForward: 15,
 		skipBackward: 15,
 		autoAdvance: false,
+		autoHideControls: true,
 		gaplessPlayback: true,
 		sleepTimer: 'off',
 		sleepTimerCustom: 30,
@@ -68,11 +69,14 @@
 
 		readerSettings.subscribe(s => {
 			settings = { ...s.audio };
+			if (settings.autoHideControls) {
+				showControls = false;
+				resetControlsTimer();
+			} else {
+				showControls = true;
+				clearControlsTimer();
+			}
 		});
-
-		if (browser) {
-			showControls = false;
-		}
 
 		handlePageExit = () => {
 			void endSession(true);
@@ -92,12 +96,13 @@
 		}
 	}
 
-	async function saveProgress() {
+	async function saveProgress(keepalive = false) {
 		if (!book || !duration) return;
 		const percent = (currentTime / duration) * 100;
 		try {
 			await fetch(`/api/books/${book.id}/progress`, {
 				method: 'PUT',
+				keepalive,
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					percent: percent,
@@ -153,18 +158,34 @@
 			window.removeEventListener('pagehide', handlePageExit);
 			window.removeEventListener('beforeunload', handlePageExit);
 		}
+		clearControlsTimer();
 		void endSession(true);
 	});
 
 	function resetControlsTimer() {
+		clearControlsTimer();
+		if (!settings.autoHideControls) {
+			showControls = true;
+			return;
+		}
 		showControls = true;
-		if (controlsTimeout) clearTimeout(controlsTimeout);
 		controlsTimeout = setTimeout(() => {
 			if (!showSettings) showControls = false;
 		}, 3000);
 	}
 
+	function clearControlsTimer() {
+		if (controlsTimeout) {
+			clearTimeout(controlsTimeout);
+			controlsTimeout = null;
+		}
+	}
+
 	function toggleControls() {
+		if (!settings.autoHideControls) {
+			showControls = true;
+			return;
+		}
 		showControls = !showControls;
 		if (showControls) resetControlsTimer();
 	}
@@ -213,6 +234,18 @@
 		saveProgress();
 		if (settings.autoAdvance) {
 		}
+	}
+
+	function closeReader(e?: Event) {
+		e?.preventDefault();
+		const targetUrl = book ? `/book/${book.id}` : '/book';
+		if (progressSaveTimeout) {
+			clearTimeout(progressSaveTimeout);
+			progressSaveTimeout = null;
+		}
+		void saveProgress(true);
+		void endSession(true);
+		window.location.href = targetUrl;
 	}
 
 	function seek(e: Event) {
@@ -355,12 +388,15 @@
 
 		if (e.key === ' ' || e.key === 'k') {
 			e.preventDefault();
+			resetControlsTimer();
 			togglePlay();
 		} else if (e.key === 'ArrowLeft') {
 			e.preventDefault();
+			resetControlsTimer();
 			skipBackward();
 		} else if (e.key === 'ArrowRight') {
 			e.preventDefault();
+			resetControlsTimer();
 			skipForward();
 		} else if (e.key === 'Escape' && showSettings) {
 			showSettings = false;
@@ -369,10 +405,21 @@
 		} else if ((e.ctrlKey || e.metaKey) && e.key === 's') {
 			e.preventDefault();
 			showSettings = !showSettings;
+			showControls = true;
+			if (showSettings) {
+				clearControlsTimer();
+			} else {
+				resetControlsTimer();
+			}
 		}
 	}
 
 	function handleMouseMove(e: MouseEvent) {
+		if (!settings.autoHideControls) {
+			showControls = true;
+			clearControlsTimer();
+			return;
+		}
 		if (e.movementY !== 0) {
 			resetControlsTimer();
 		}
@@ -397,13 +444,14 @@
 	class="fixed inset-0 z-50 flex flex-col bg-slate-900"
 	role="presentation"
 	onmousemove={handleMouseMove}
+	onpointermove={handleMouseMove}
 >
 	<!-- Top Bar -->
 	<header 
-		class="absolute top-0 left-0 right-0 h-14 flex items-center justify-between px-4 transition-opacity duration-200 z-20 {showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}"
+		class="absolute top-0 left-0 right-0 h-14 flex items-center justify-between px-4 transition-[transform,opacity] duration-200 z-20 {showControls ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}"
 		style="background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);"
 	>
-		<a href="/book/{book?.id}" class="text-white/80 hover:text-white transition-colors" aria-label="Back to book details">
+		<a href="/book/{book?.id}" onclick={closeReader} class="text-white/80 hover:text-white transition-colors" aria-label="Back to book details">
 			<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
 			</svg>
@@ -629,6 +677,17 @@
 								class="rounded bg-slate-700 text-amber-500 focus:ring-amber-500"
 							>
 							<label for="autoAdvance" class="text-sm font-medium text-slate-300">Auto-advance to next chapter</label>
+						</div>
+
+						<div class="flex items-center space-x-3">
+							<input
+								type="checkbox"
+								id="audioAutoHideControls"
+								checked={settings.autoHideControls}
+								onchange={(e) => updateSetting('autoHideControls', e.currentTarget.checked)}
+								class="rounded bg-slate-700 text-amber-500 focus:ring-amber-500"
+							>
+							<label for="audioAutoHideControls" class="text-sm font-medium text-slate-300">Auto-hide Controls</label>
 						</div>
 
 						<!-- Gapless Playback -->

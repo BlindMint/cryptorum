@@ -18,10 +18,10 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		}
 	});
 	let localReaderSettings = $state<ReaderSettings>({
-		epub: { fontFamily: 'serif', fontSize: 18, fontWeight: 400, fontStyle: 'normal' as const, lineHeight: 1.6, letterSpacing: 0, paragraphSpacing: 0, paragraphIndent: 0, justify: true, hyphenate: false, hyphenationLanguage: 'en', maxColumnCount: 1, gap: 5, theme: 'dark', isDark: true, flow: 'paginated' as const, maxInlineSize: 680, maxBlockSize: 1440, margin: 5, continuousMaxWidth: 720, brightness: 100, contrast: 100, pageAnimation: 'slide' as const, autoAdvance: false, autoAdvanceTimer: 0, fullscreenLock: false, customCss: '', showTextLayer: true, originalLayout: false, continuousMode: true, showImages: true, imageSize: 'fit-width' as const, imageGrayscale: false },
-		pdf: { pageSpread: 'off' as const, pageLayout: 'single' as const, pageZoom: 'auto', zoomLevel: 100, showSidebar: false, scrollDirection: 'vertical' as const, scrollMode: 'paged' as const, pageRotation: 0 as const, backgroundColor: '#111111', brightness: 100, contrast: 100, grayscale: 0, readingDirection: 'ltr' as const, autoCropMargins: false, textLayerEnabled: true, annotationsEnabled: true, viewMode: 'dark' as const, showChapterMarkers: false, showQuoteMarks: false, panMode: false },
-		cbx: { pageSpread: 'auto' as const, pageLayout: 'single' as const, fitMode: 'fit-width' as const, scrollMode: 'paginated' as const, backgroundColor: '#111111', readingDirection: 'ltr' as const, stripMaxWidthPercent: 100, mangaMode: false, panelViewEnabled: false, spreadHandling: 'auto' as const, pageTransitionSound: false, vibrance: 100, saturation: 100 },
-		audio: { playbackSpeed: 1.0, skipForward: 15, skipBackward: 15, autoAdvance: false, gaplessPlayback: true, sleepTimer: 'off' as const, sleepTimerCustom: 30, theme: 'cover-focused' as const, waveformStyle: 'line' as const, backgroundStyle: 'cover-blur' as const, voiceBoost: false, equalizerLow: 50, equalizerMid: 50, equalizerHigh: 50 },
+		epub: { fontFamily: 'serif', fontSize: 18, fontWeight: 400, fontStyle: 'normal' as const, lineHeight: 1.6, letterSpacing: 0, paragraphSpacing: 0, paragraphIndent: 0, justify: true, hyphenate: false, hyphenationLanguage: 'en', maxColumnCount: 1, gap: 5, theme: 'dark', isDark: true, flow: 'paginated' as const, maxInlineSize: 680, maxBlockSize: 1440, margin: 5, continuousMaxWidth: 720, brightness: 100, contrast: 100, pageAnimation: 'slide' as const, autoAdvance: false, autoAdvanceTimer: 0, fullscreenLock: false, autoHideControls: true, customCss: '', showTextLayer: true, originalLayout: false, continuousMode: true, showImages: true, imageSize: 'fit-width' as const, imageGrayscale: false },
+		pdf: { pageSpread: 'off' as const, pageLayout: 'single' as const, pageZoom: 'auto', zoomLevel: 100, renderQuality: 'high' as const, autoHideControls: true, showSidebar: false, scrollDirection: 'vertical' as const, scrollMode: 'paged' as const, pageRotation: 0 as const, backgroundColor: '#111111', brightness: 100, contrast: 100, grayscale: 0, readingDirection: 'ltr' as const, autoCropMargins: false, textLayerEnabled: true, annotationsEnabled: true, viewMode: 'dark' as const, showChapterMarkers: false, showQuoteMarks: false, panMode: false },
+		cbx: { pageSpread: 'auto' as const, pageLayout: 'single' as const, fitMode: 'fit-width' as const, scrollMode: 'paginated' as const, backgroundColor: '#111111', readingDirection: 'ltr' as const, stripMaxWidthPercent: 100, mangaMode: false, panelViewEnabled: false, spreadHandling: 'auto' as const, pageTransitionSound: false, autoHideControls: true, vibrance: 100, saturation: 100 },
+		audio: { playbackSpeed: 1.0, skipForward: 15, skipBackward: 15, autoAdvance: false, autoHideControls: true, gaplessPlayback: true, sleepTimer: 'off' as const, sleepTimerCustom: 30, theme: 'cover-focused' as const, waveformStyle: 'line' as const, backgroundStyle: 'cover-blur' as const, voiceBoost: false, equalizerLow: 50, equalizerMid: 50, equalizerHigh: 50 },
 		speedReader: { wpm: 300, wordSize: 48, fontFamily: 'serif', focalPoint: 0.38, centerWord: false, accentEnabled: true, accentColor: '#ef4444', accentOpacity: 1.0, focusIndicator: 'lines' as const, focusIndicatorDistance: 20, horizontalBars: true, horizontalBarsColor: '#666666', horizontalBarsOpacity: 1.0, verticalIndicator: 'off' as const, sentencePause: 350, autoSentencePause: true, keepScreenOn: true, theme: 'dark', letterSpacing: 0, focusIndicatorLength: 20 }
 	});
 	let loading = $state(true);
@@ -1141,20 +1141,6 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 								</div>
 							</div>
 
-							<!-- Max Columns -->
-							<div>
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Max Columns</div>
-								<select 
-									value={localReaderSettings.epub.maxColumnCount} 
-									onchange={(e) => updateEpubSetting('maxColumnCount', parseInt(e.currentTarget.value))}
-									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-								>
-									<option value={1}>1</option>
-									<option value={2}>2</option>
-									<option value={3}>3</option>
-								</select>
-							</div>
-
 							<!-- Column Gap -->
 							<div>
 						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Column Gap: {localReaderSettings.epub.gap}%</div>
@@ -1200,6 +1186,17 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 				</div>
 			</div>
 
+			<div class="flex items-center space-x-3">
+				<input
+					type="checkbox"
+					id="epub-auto-hide-controls"
+					checked={localReaderSettings.epub.autoHideControls}
+					onchange={(e) => updateEpubSetting('autoHideControls', e.currentTarget.checked)}
+					class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+				>
+				<label for="epub-auto-hide-controls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
+			</div>
+
 			<!-- PDF Reader Settings -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
 				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
@@ -1230,19 +1227,6 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 									<option value="off">None</option>
 									<option value="even">Even</option>
 									<option value="odd">Odd</option>
-								</select>
-							</div>
-
-							<!-- Page Layout -->
-							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Layout</div>
-								<select 
-									value={localReaderSettings.pdf.pageLayout} 
-									onchange={(e) => updatePdfSetting('pageLayout', e.currentTarget.value)}
-									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-								>
-									<option value="single">Single Page</option>
-									<option value="double">Two Pages</option>
 								</select>
 							</div>
 
@@ -1376,6 +1360,18 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 								>
 								<label for="annotations" class="text-sm font-medium text-[var(--color-surface-text)]">Enable Annotations</label>
 							</div>
+
+							<!-- Auto-hide Controls -->
+							<div class="flex items-center space-x-3">
+								<input
+									type="checkbox"
+									id="pdfAutoHideControls"
+									checked={localReaderSettings.pdf.autoHideControls}
+									onchange={(e) => updatePdfSetting('autoHideControls', e.currentTarget.checked)}
+									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+								>
+								<label for="pdfAutoHideControls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -1412,19 +1408,6 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 									<option value="off">None</option>
 									<option value="even">Even</option>
 									<option value="odd">Odd</option>
-								</select>
-							</div>
-
-							<!-- Page Layout -->
-							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Layout</div>
-								<select 
-									value={localReaderSettings.cbx.pageLayout} 
-									onchange={(e) => updateCbxSetting('pageLayout', e.currentTarget.value)}
-									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-								>
-									<option value="single">Single Page</option>
-									<option value="double">Two Page</option>
 								</select>
 							</div>
 
@@ -1577,6 +1560,17 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 							</div>
 						</div>
 					{/if}
+
+					<div class="flex items-center space-x-3">
+						<input
+							type="checkbox"
+							id="cbx-auto-hide-controls"
+							checked={localReaderSettings.cbx.autoHideControls}
+							onchange={(e) => updateCbxSetting('autoHideControls', e.currentTarget.checked)}
+							class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+						>
+						<label for="cbx-auto-hide-controls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
+					</div>
 				</div>
 			</div>
 
@@ -1773,6 +1767,17 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 								class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 							>
 							<label for="auto-advance" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-advance to next chapter</label>
+						</div>
+
+						<div class="flex items-center space-x-3">
+							<input
+								type="checkbox"
+								id="audio-auto-hide-controls"
+								checked={localReaderSettings.audio.autoHideControls}
+								onchange={(e) => updateAudioSetting('autoHideControls', e.currentTarget.checked)}
+								class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+							>
+							<label for="audio-auto-hide-controls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
 						</div>
 					</div>
 				</div>

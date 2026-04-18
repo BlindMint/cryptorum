@@ -28,6 +28,7 @@ export interface EpubReaderSetting {
 	autoAdvance: boolean;
 	autoAdvanceTimer: number;
 	fullscreenLock: boolean;
+	autoHideControls: boolean;
 	customCss: string;
 	showTextLayer: boolean;
 	originalLayout: boolean;
@@ -45,6 +46,8 @@ export interface PdfReaderSetting {
 	pageLayout: PdfPageLayout;
 	pageZoom: string;
 	zoomLevel: number;
+	renderQuality: 'standard' | 'high' | 'maximum';
+	autoHideControls: boolean;
 	showSidebar: boolean;
 	scrollDirection: 'vertical' | 'horizontal';
 	scrollMode: 'paged' | 'continuous-vertical';
@@ -75,6 +78,7 @@ export interface CbxReaderSetting {
 	panelViewEnabled: boolean;
 	spreadHandling: 'auto' | 'force-single' | 'force-double' | 'never-split';
 	pageTransitionSound: boolean;
+	autoHideControls: boolean;
 	vibrance: number;
 	saturation: number;
 }
@@ -84,6 +88,7 @@ export interface AudioReaderSetting {
 	skipForward: number;
 	skipBackward: number;
 	autoAdvance: boolean;
+	autoHideControls: boolean;
 	gaplessPlayback: boolean;
 	sleepTimer: 'off' | '15min' | '30min' | '60min' | 'end-of-chapter' | 'custom';
 	sleepTimerCustom: number;
@@ -155,6 +160,7 @@ export const defaultReaderSettings: ReaderSettings = {
 		autoAdvance: false,
 		autoAdvanceTimer: 0,
 		fullscreenLock: false,
+		autoHideControls: true,
 		customCss: '',
 		showTextLayer: true,
 		originalLayout: false,
@@ -168,6 +174,8 @@ export const defaultReaderSettings: ReaderSettings = {
 		pageLayout: 'single',
 		pageZoom: 'auto',
 		zoomLevel: 100,
+		renderQuality: 'high',
+		autoHideControls: true,
 		showSidebar: false,
 		scrollDirection: 'vertical',
 		scrollMode: 'paged',
@@ -197,6 +205,7 @@ export const defaultReaderSettings: ReaderSettings = {
 		panelViewEnabled: false,
 		spreadHandling: 'auto',
 		pageTransitionSound: false,
+		autoHideControls: true,
 		vibrance: 100,
 		saturation: 100
 	},
@@ -205,6 +214,7 @@ export const defaultReaderSettings: ReaderSettings = {
 		skipForward: 15,
 		skipBackward: 15,
 		autoAdvance: false,
+		autoHideControls: true,
 		gaplessPlayback: true,
 		sleepTimer: 'off',
 		sleepTimerCustom: 30,

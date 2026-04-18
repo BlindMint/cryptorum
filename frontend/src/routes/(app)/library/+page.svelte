@@ -1247,7 +1247,7 @@
 							<BookCoverFrame
 								src={book.cover_path ? getCoverThumbUrl(book.id, libraryCoverThumbSize, book.cover_updated_on) : null}
 								alt={book.title}
-								mode="contain"
+								mode="cover"
 								frameClass="aspect-[2/3] mb-2"
 								imageClass="group-hover:scale-105 transition-transform"
 								placeholderSize="md"
@@ -1286,14 +1286,14 @@
   					>
   						<a href="/book/{book.id}" class="block bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] {selectedBooks.has(book.id) ? 'border-[var(--color-primary-500)]' : ''} p-4 hover:border-[var(--color-primary-500)]/50 transition-colors">
   							<div class="flex items-center space-x-4">
-  								<BookCoverFrame
-  									src={book.cover_path ? getCoverThumbUrl(book.id, 'small', book.cover_updated_on) : null}
-  									alt={book.title}
-  									mode="contain"
-  									frameClass="w-12 h-16 flex-shrink-0"
-  									imageClass="object-cover"
-  									placeholderSize="sm"
-  								/>
+								<BookCoverFrame
+									src={book.cover_path ? getCoverThumbUrl(book.id, 'small', book.cover_updated_on) : null}
+									alt={book.title}
+									mode="cover"
+									frameClass="w-12 h-16 flex-shrink-0"
+									imageClass="object-cover"
+									placeholderSize="sm"
+								/>
   								<div class="flex-1 min-w-0">
   									<div class="flex items-center space-x-2 mb-1">
   										<h3 class="text-lg font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>

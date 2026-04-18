@@ -457,3 +457,61 @@ func removeBookFromShelfHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func bulkRemoveBooksFromShelfHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	shelfID := chi.URLParam(r, "shelfID")
+
+	var req struct {
+		BookIDs []int64 `json:"book_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if len(req.BookIDs) == 0 {
+		errorResponse(w, http.StatusBadRequest, "No books selected")
+		return
+	}
+
+	allowed, err := canAccessShelf(current, mustInt64(shelfID))
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to verify shelf access")
+		return
+	}
+	if !allowed {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
+	tx, err := appDB.Begin()
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to remove books from shelf")
+		return
+	}
+	defer tx.Rollback()
+
+	for _, bookID := range req.BookIDs {
+		bookAllowed, err := canAccessBook(current, bookID)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
+			return
+		}
+		if !bookAllowed {
+			errorResponse(w, http.StatusForbidden, "Permission denied")
+			return
+		}
+
+		if _, err := tx.Exec("DELETE FROM book_shelf WHERE shelf_id = ? AND book_id = ?", shelfID, bookID); err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to remove books from shelf")
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to remove books from shelf")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

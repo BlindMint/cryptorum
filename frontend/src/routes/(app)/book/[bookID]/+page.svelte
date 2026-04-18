@@ -560,7 +560,7 @@
 	}
 </script>
 
-	<div class="space-y-6 pb-20">
+	<div class="space-y-6">
 		{#if editing}
 			<button onclick={cancelEditing} class="group inline-flex items-center text-[var(--color-surface-text-muted)] transition-colors duration-200 ease-out hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
 				<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-surface-text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
