@@ -1,12 +1,16 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { onDestroy, onMount } from 'svelte';
 	import { mobileMenuOpen } from '$lib/stores';
+	import AppLogo from '$lib/components/AppLogo.svelte';
 	import ThemeSelector from './ThemeSelector.svelte';
 	import NotificationBell from './NotificationBell.svelte';
 
 	let searchQuery = $state('');
 	let showMobileActions = $state(false);
+	let scanRunning = $state(false);
+	let scanPollTimer: number | null = null;
 
 	function handleSearch(e: Event) {
 		e.preventDefault();
@@ -24,6 +28,62 @@
 	function closeMobileActions() {
 		showMobileActions = false;
 	}
+
+	async function loadScanStatus() {
+		try {
+			const [notificationRes, librariesRes] = await Promise.all([
+				fetch('/api/notifications?unread=true&limit=50', { cache: 'no-store' }),
+				fetch('/api/libraries', { cache: 'no-store' })
+			]);
+			const notificationData = notificationRes.ok ? await notificationRes.json() : { items: [] };
+			const libraries = librariesRes.ok ? await librariesRes.json() : [];
+			const jobRunning = (notificationData.items ?? []).some((item: any) =>
+				item.source === 'job' &&
+				item.job?.job_type === 'library_scan' &&
+				['queued', 'running'].includes(item.job.status)
+			);
+			const libraryRunning = Array.isArray(libraries) && libraries.some((library: any) => library.is_importing);
+			scanRunning = jobRunning || libraryRunning;
+		} catch (e) {
+			console.error('Failed to load scan status:', e);
+		}
+	}
+
+	async function scanLibraries() {
+		scanRunning = true;
+		try {
+			const response = await fetch('/api/scan', { method: 'POST' });
+			const data = response.ok ? await response.json().catch(() => null) : null;
+			const queued = (data?.queued_count ?? 0) > 0;
+			scanRunning = queued || scanRunning;
+			await loadScanStatus();
+			scanRunning = queued || scanRunning;
+			if ((window as any).refreshSidebar) {
+				(window as any).refreshSidebar();
+			}
+			if ((window as any).refreshSettingsScans) {
+				(window as any).refreshSettingsScans();
+			}
+		} catch (e) {
+			console.error('Scan failed:', e);
+			await loadScanStatus();
+		}
+	}
+
+	onMount(() => {
+		void loadScanStatus();
+		(window as any).refreshScanStatus = loadScanStatus;
+		scanPollTimer = window.setInterval(loadScanStatus, 5000);
+	});
+
+	onDestroy(() => {
+		if (scanPollTimer !== null) {
+			window.clearInterval(scanPollTimer);
+		}
+		if ((window as any).refreshScanStatus === loadScanStatus) {
+			delete (window as any).refreshScanStatus;
+		}
+	});
 </script>
 
 <header class="relative z-50 overflow-visible border-b border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] backdrop-blur-sm">
@@ -39,11 +99,7 @@
 		</button>
 
 		<div class="hidden items-center space-x-3 shrink-0 lg:flex">
-			<div class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--color-primary-400)] to-[var(--color-primary-600)]">
-				<svg class="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-				</svg>
-			</div>
+			<AppLogo sizeClass="h-10 w-10" roundedClass="rounded-xl" />
 			<div>
 				<h1 class="text-lg font-bold text-[var(--color-surface-text)]">Cryptorum</h1>
 				<p class="text-xs text-[var(--color-surface-text-muted)]">Personal Library</p>
@@ -93,17 +149,11 @@
 			</a>
 
 			<button
-				onclick={async () => {
-					try {
-						await fetch('/api/scan', { method: 'POST' });
-					} catch (e) {
-						console.error('Scan failed:', e);
-					}
-				}}
+				onclick={scanLibraries}
 				class="rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
-				title="Scan Library"
+				title={scanRunning ? 'Library scan running' : 'Scan Libraries'}
 			>
-				<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<svg class="h-5 w-5 {scanRunning ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
 				</svg>
 			</button>
@@ -171,18 +221,14 @@
 				<button
 					onclick={async () => {
 						closeMobileActions();
-						try {
-							await fetch('/api/scan', { method: 'POST' });
-						} catch (e) {
-							console.error('Scan failed:', e);
-						}
+						await scanLibraries();
 					}}
 					class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-[var(--color-surface-text)] transition-all"
 				>
-					<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<svg class="h-5 w-5 text-[var(--color-surface-text-muted)] {scanRunning ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
 					</svg>
-					<span>Scan Library</span>
+					<span>{scanRunning ? 'Scanning Libraries' : 'Scan Libraries'}</span>
 				</button>
 				<a
 					href="/settings"

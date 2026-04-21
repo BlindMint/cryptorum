@@ -7,6 +7,7 @@
 	import { currentTheme, resolveThemeColors, type FullTheme } from '$lib/stores/theme';
 	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 	import { getPreferredTextFormat, getReaderRouteKind, normalizeBookFormat } from '$lib/utils/book-formats';
+	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
 	import {
 		getCachedBook,
 		cacheBook,
@@ -62,6 +63,7 @@
 		autoAdvance: false,
 		autoAdvanceTimer: 0,
 		fullscreenLock: false,
+		useStandardFullscreen: false,
 		autoHideControls: true,
 		customCss: '',
 		showTextLayer: true,
@@ -932,11 +934,7 @@
 	}
 
 	function toggleFullscreen() {
-		if (!document.fullscreenElement) {
-			document.documentElement.requestFullscreen();
-		} else {
-			document.exitFullscreen();
-		}
+		toggleReaderFullscreen(settings.useStandardFullscreen).catch(console.error);
 	}
 
 	async function performSearch() {
@@ -2084,6 +2082,17 @@
 							</div>
 						</div>
 					{/if}
+
+					<div class="settings-section">
+						<label class="toggle-option">
+							<span>Use Standard Fullscreen</span>
+							<input
+								type="checkbox"
+								checked={settings.useStandardFullscreen}
+								onchange={(e) => updateSetting('useStandardFullscreen', e.currentTarget.checked)}
+							/>
+						</label>
+					</div>
 
 					<div class="settings-section">
 						<div class="settings-label">Layout</div>

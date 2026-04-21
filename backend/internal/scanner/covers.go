@@ -22,7 +22,12 @@ type CoverProgressFunc func(processed, updated, failed, total int)
 
 // RegenerateCovers rebuilds stored covers from the source book files.
 func (s *Scanner) RegenerateCovers(missingOnly bool, progress CoverProgressFunc) (int, int, error) {
-	candidates, err := s.coverCandidates(missingOnly)
+	return s.RegenerateCoversForLibrary(0, missingOnly, progress)
+}
+
+// RegenerateCoversForLibrary rebuilds stored covers for all libraries or one library.
+func (s *Scanner) RegenerateCoversForLibrary(libraryID int64, missingOnly bool, progress CoverProgressFunc) (int, int, error) {
+	candidates, err := s.coverCandidates(libraryID, missingOnly)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -80,20 +85,32 @@ func (s *Scanner) RegenerateCovers(missingOnly bool, progress CoverProgressFunc)
 
 // CountCoverCandidates returns the number of book files a cover regeneration job will inspect.
 func (s *Scanner) CountCoverCandidates(missingOnly bool) (int, error) {
-	candidates, err := s.coverCandidates(missingOnly)
+	return s.CountCoverCandidatesForLibrary(0, missingOnly)
+}
+
+// CountCoverCandidatesForLibrary returns the number of book files a cover regeneration job will inspect.
+func (s *Scanner) CountCoverCandidatesForLibrary(libraryID int64, missingOnly bool) (int, error) {
+	candidates, err := s.coverCandidates(libraryID, missingOnly)
 	if err != nil {
 		return 0, err
 	}
 	return len(candidates), nil
 }
 
-func (s *Scanner) coverCandidates(missingOnly bool) ([]coverCandidate, error) {
-	rows, err := s.db.Query(`
+func (s *Scanner) coverCandidates(libraryID int64, missingOnly bool) ([]coverCandidate, error) {
+	query := `
 		SELECT b.id, bf.path, COALESCE(bm.cover_path, '')
 		FROM book b
 		JOIN book_file bf ON b.id = bf.book_id
 		LEFT JOIN book_metadata bm ON b.id = bm.book_id
-	`)
+	`
+	args := []any{}
+	if libraryID > 0 {
+		query += ` WHERE b.library_id = ?`
+		args = append(args, libraryID)
+	}
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

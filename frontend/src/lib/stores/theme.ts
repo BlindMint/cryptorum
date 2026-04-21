@@ -17,6 +17,8 @@ export interface ThemeColors {
   background: string;
 }
 
+export type BackgroundImageDisplay = 'fill' | 'fit' | 'center' | 'stretch' | 'tile';
+
 export interface AppearanceSettings {
   glowEnabled: boolean;
   glowAutoMode: boolean;
@@ -24,6 +26,7 @@ export interface AppearanceSettings {
   glowIntensity: number;
   bgImageEnabled: boolean;
   bgImageTransparency: number;
+  bgImageDisplay: BackgroundImageDisplay;
   backgroundImages: string[];
   selectedBgImageIndex: number;
   customThemes: CustomTheme[];
@@ -64,6 +67,7 @@ function createDefaultAppearance(): AppearanceSettings {
 		glowIntensity: 10,
 		bgImageEnabled: false,
 		bgImageTransparency: 50,
+		bgImageDisplay: 'fill',
 		backgroundImages: [],
 		selectedBgImageIndex: 0,
 		customThemes: [],
@@ -98,6 +102,9 @@ if (typeof localStorage !== 'undefined') {
 			}
 			if (initialTheme.appearance.selectedCustomThemeId === undefined) {
 				initialTheme.appearance.selectedCustomThemeId = defaultTheme.appearance.selectedCustomThemeId;
+			}
+			if (!initialTheme.appearance.bgImageDisplay) {
+				initialTheme.appearance.bgImageDisplay = defaultTheme.appearance.bgImageDisplay;
 			}
 		} catch (e) {
 			console.warn('Invalid theme in localStorage, using default');
@@ -401,12 +408,35 @@ function updateThemeColors(theme: FullTheme) {
 			const transparency = theme.appearance.bgImageTransparency / 100;
 			const selectedIndex = theme.appearance.selectedBgImageIndex ?? 0;
 			const bgImage = theme.appearance.backgroundImages[selectedIndex] || theme.appearance.backgroundImages[0];
+			const display = getBackgroundDisplayCss(theme.appearance.bgImageDisplay);
 			root.style.setProperty('--color-bg-image', `url(${bgImage})`);
 			root.style.setProperty('--color-bg-image-opacity', String(transparency));
+			root.style.setProperty('--color-bg-image-position', display.position);
+			root.style.setProperty('--color-bg-image-repeat', display.repeat);
+			root.style.setProperty('--color-bg-image-size', display.size);
 		} else {
 			root.style.removeProperty('--color-bg-image');
 			root.style.removeProperty('--color-bg-image-opacity');
+			root.style.removeProperty('--color-bg-image-position');
+			root.style.removeProperty('--color-bg-image-repeat');
+			root.style.removeProperty('--color-bg-image-size');
 		}
+	}
+}
+
+function getBackgroundDisplayCss(display: BackgroundImageDisplay | undefined): { position: string; repeat: string; size: string } {
+	switch (display) {
+		case 'fit':
+			return { position: 'center center', repeat: 'no-repeat', size: 'contain' };
+		case 'center':
+			return { position: 'center center', repeat: 'no-repeat', size: 'auto' };
+		case 'stretch':
+			return { position: 'center center', repeat: 'no-repeat', size: '100% 100%' };
+		case 'tile':
+			return { position: 'top left', repeat: 'repeat', size: 'auto' };
+		case 'fill':
+		default:
+			return { position: 'center center', repeat: 'no-repeat', size: 'cover' };
 	}
 }
 
@@ -515,6 +545,13 @@ export function updateBgImageTransparency(transparency: number) {
 	currentTheme.update(t => ({
 		...t,
 		appearance: { ...t.appearance, bgImageTransparency: Math.max(0, Math.min(100, transparency)) }
+	}));
+}
+
+export function updateBgImageDisplay(display: BackgroundImageDisplay) {
+	currentTheme.update(t => ({
+		...t,
+		appearance: { ...t.appearance, bgImageDisplay: display }
 	}));
 }
 

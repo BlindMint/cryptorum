@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { readerSettings, epubThemes, fontFamilies, pdfZoomModes, cbxFitModes, cbxScrollModes, skipIntervalOptions, sleepTimerOptions, waveformStyles, type ReaderSettings } from '$lib/stores/readerSettings';
-	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, updateCustomTheme, removeCustomTheme, resetPrimaryToDefault, resetSurfaceToDefault, generateId, updateGlowEnabled, updateGlowAutoMode, updateGlowColor, updateGlowIntensity, updateBgImageEnabled, updateBgImageTransparency, updateSelectedBgImage, addBackgroundImage, removeBackgroundImage, DEFAULT_THEME_PRIMARY, DEFAULT_THEME_SURFACE } from '$lib/stores/theme';
+	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, updateCustomTheme, removeCustomTheme, resetPrimaryToDefault, resetSurfaceToDefault, generateId, updateGlowEnabled, updateGlowAutoMode, updateGlowColor, updateGlowIntensity, updateBgImageEnabled, updateBgImageTransparency, updateBgImageDisplay, updateSelectedBgImage, addBackgroundImage, removeBackgroundImage, DEFAULT_THEME_PRIMARY, DEFAULT_THEME_SURFACE } from '$lib/stores/theme';
+	import type { BackgroundImageDisplay } from '$lib/stores/theme';
 import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 import AdminPanel from './AdminPanel.svelte';
 import MetadataManagerContent from '$lib/components/MetadataManagerContent.svelte';
@@ -18,15 +19,17 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		}
 	});
 	let localReaderSettings = $state<ReaderSettings>({
-		epub: { fontFamily: 'serif', fontSize: 18, fontWeight: 400, fontStyle: 'normal' as const, lineHeight: 1.6, letterSpacing: 0, paragraphSpacing: 0, paragraphIndent: 0, justify: true, hyphenate: false, hyphenationLanguage: 'en', maxColumnCount: 1, gap: 5, theme: 'dark', isDark: true, flow: 'paginated' as const, maxInlineSize: 680, maxBlockSize: 1440, margin: 5, continuousMaxWidth: 720, brightness: 100, contrast: 100, pageAnimation: 'slide' as const, autoAdvance: false, autoAdvanceTimer: 0, fullscreenLock: false, autoHideControls: true, customCss: '', showTextLayer: true, originalLayout: false, continuousMode: true, showImages: true, imageSize: 'fit-width' as const, imageGrayscale: false },
-		pdf: { pageSpread: 'off' as const, pageLayout: 'single' as const, pageZoom: 'auto', zoomLevel: 100, renderQuality: 'high' as const, autoHideControls: true, showSidebar: false, scrollDirection: 'vertical' as const, scrollMode: 'paged' as const, pageRotation: 0 as const, backgroundColor: '#111111', brightness: 100, contrast: 100, grayscale: 0, readingDirection: 'ltr' as const, autoCropMargins: false, textLayerEnabled: true, annotationsEnabled: true, viewMode: 'dark' as const, showChapterMarkers: false, showQuoteMarks: false, panMode: false },
-		cbx: { pageSpread: 'auto' as const, pageLayout: 'single' as const, fitMode: 'fit-width' as const, scrollMode: 'paginated' as const, backgroundColor: '#111111', readingDirection: 'ltr' as const, stripMaxWidthPercent: 100, mangaMode: false, panelViewEnabled: false, spreadHandling: 'auto' as const, pageTransitionSound: false, autoHideControls: true, vibrance: 100, saturation: 100 },
+		epub: { fontFamily: 'serif', fontSize: 18, fontWeight: 400, fontStyle: 'normal' as const, lineHeight: 1.6, letterSpacing: 0, paragraphSpacing: 0, paragraphIndent: 0, justify: true, hyphenate: false, hyphenationLanguage: 'en', maxColumnCount: 1, gap: 5, theme: 'dark', isDark: true, flow: 'paginated' as const, maxInlineSize: 680, maxBlockSize: 1440, margin: 5, continuousMaxWidth: 720, brightness: 100, contrast: 100, pageAnimation: 'slide' as const, autoAdvance: false, autoAdvanceTimer: 0, fullscreenLock: false, useStandardFullscreen: false, autoHideControls: true, customCss: '', showTextLayer: true, originalLayout: false, continuousMode: true, showImages: true, imageSize: 'fit-width' as const, imageGrayscale: false },
+		pdf: { pageSpread: 'off' as const, pageLayout: 'single' as const, pageZoom: 'auto', zoomLevel: 100, renderQuality: 'high' as const, autoHideControls: true, showSidebar: false, scrollDirection: 'vertical' as const, scrollMode: 'paged' as const, pageRotation: 0 as const, backgroundColor: '#111111', brightness: 100, contrast: 100, grayscale: 0, readingDirection: 'ltr' as const, autoCropMargins: false, textLayerEnabled: true, annotationsEnabled: true, viewMode: 'dark' as const, showChapterMarkers: false, showQuoteMarks: false, panMode: false, useStandardFullscreen: false },
+		cbx: { pageSpread: 'auto' as const, pageLayout: 'single' as const, fitMode: 'fit-width' as const, scrollMode: 'paginated' as const, backgroundColor: '#111111', readingDirection: 'ltr' as const, stripMaxWidthPercent: 100, mangaMode: false, panelViewEnabled: false, spreadHandling: 'auto' as const, pageTransitionSound: false, autoHideControls: true, useStandardFullscreen: false, vibrance: 100, saturation: 100 },
 		audio: { playbackSpeed: 1.0, skipForward: 15, skipBackward: 15, autoAdvance: false, autoHideControls: true, gaplessPlayback: true, sleepTimer: 'off' as const, sleepTimerCustom: 30, theme: 'cover-focused' as const, waveformStyle: 'line' as const, backgroundStyle: 'cover-blur' as const, voiceBoost: false, equalizerLow: 50, equalizerMid: 50, equalizerHigh: 50 },
 		speedReader: { wpm: 300, wordSize: 48, fontFamily: 'serif', focalPoint: 0.38, centerWord: false, accentEnabled: true, accentColor: '#ef4444', accentOpacity: 1.0, focusIndicator: 'lines' as const, focusIndicatorDistance: 20, horizontalBars: true, horizontalBarsColor: '#666666', horizontalBarsOpacity: 1.0, verticalIndicator: 'off' as const, sentencePause: 350, autoSentencePause: true, keepScreenOn: true, theme: 'dark', letterSpacing: 0, focusIndicatorLength: 20 }
 	});
 	let loading = $state(true);
 	let scanning = $state(false);
 	let deletingLibraryId = $state<number | null>(null);
+	let scanPollTimer: number | null = null;
+	let activeLibraryScanJobs = $state<any[]>([]);
 	let activeTab = $state<'general' | 'metadata' | 'reader' | 'appearance' | 'users' | 'admin'>('general');
 	let settingsSaved = $state(false);
 	let bookCoverSettings = $state({
@@ -54,8 +57,19 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		paths: ['']
 	});
 	let currentLibraryIcon = $derived(parseLibraryIcon(libraryForm.icon));
+	let anyLibraryScanning = $derived(
+		!!settings.libraries?.some((library: any) => library.is_importing)
+	);
+	let scanActive = $derived(scanning || anyLibraryScanning || activeLibraryScanJobs.length > 0);
 
-	let themeState = $state<{ primary: string; surface: string; appearance: { glowEnabled: boolean; glowAutoMode: boolean; glowColor: string; glowIntensity: number; bgImageEnabled: boolean; bgImageTransparency: number; backgroundImages: string[]; selectedBgImageIndex: number; customThemes: any[]; selectedCustomThemeId: string | null } }>({ primary: DEFAULT_THEME_PRIMARY, surface: DEFAULT_THEME_SURFACE, appearance: { glowEnabled: true, glowAutoMode: true, glowColor: '#f97316', glowIntensity: 10, bgImageEnabled: false, bgImageTransparency: 50, backgroundImages: [], selectedBgImageIndex: 0, customThemes: [], selectedCustomThemeId: null } });
+	let themeState = $state<{ primary: string; surface: string; appearance: { glowEnabled: boolean; glowAutoMode: boolean; glowColor: string; glowIntensity: number; bgImageEnabled: boolean; bgImageTransparency: number; bgImageDisplay: BackgroundImageDisplay; backgroundImages: string[]; selectedBgImageIndex: number; customThemes: any[]; selectedCustomThemeId: string | null } }>({ primary: DEFAULT_THEME_PRIMARY, surface: DEFAULT_THEME_SURFACE, appearance: { glowEnabled: true, glowAutoMode: true, glowColor: '#f97316', glowIntensity: 10, bgImageEnabled: false, bgImageTransparency: 50, bgImageDisplay: 'fill', backgroundImages: [], selectedBgImageIndex: 0, customThemes: [], selectedCustomThemeId: null } });
+	const bgImageDisplayOptions: Array<{ id: BackgroundImageDisplay; label: string; description: string }> = [
+		{ id: 'fill', label: 'Fill', description: 'Cover the whole screen' },
+		{ id: 'fit', label: 'Fit', description: 'Show the whole image' },
+		{ id: 'center', label: 'Center', description: 'Natural size, centered' },
+		{ id: 'stretch', label: 'Stretch', description: 'Stretch to viewport' },
+		{ id: 'tile', label: 'Tile', description: 'Repeat the image' }
+	];
 	let showCustomThemeEditor = $state(false);
 	let editingCustomTheme = $state<any>(null);
 	let customThemeName = $state('');
@@ -525,7 +539,10 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 
 	async function loadSettings() {
 		try {
-			const res = await fetch('/api/settings');
+			const res = await fetch('/api/settings', { cache: 'no-store' });
+			if (!res.ok) {
+				throw new Error(`Unable to load settings: ${res.status}`);
+			}
 			const data = await res.json();
 			settings = data;
 			bookdropPath = settings.bookdrop?.path || '';
@@ -536,8 +553,73 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 				aspect_ratio_threshold: data.book_covers?.aspect_ratio_threshold ?? 2.5,
 				smart_cropping: data.book_covers?.smart_cropping ?? true
 			};
+			return data;
 		} catch (e) {
 			console.error('Failed to fetch settings:', e);
+			return null;
+		}
+	}
+
+	function getJobLibraryId(job: any): number | null {
+		const payload = job?.payload;
+		if (!payload) return null;
+		if (typeof payload.library_id === 'number') return payload.library_id;
+		if (typeof payload.library_id === 'string') {
+			const parsed = Number.parseInt(payload.library_id, 10);
+			return Number.isNaN(parsed) ? null : parsed;
+		}
+		return null;
+	}
+
+	function getLibraryScanJob(libraryId: number) {
+		return activeLibraryScanJobs.find((job: any) => getJobLibraryId(job) === libraryId);
+	}
+
+	function isLibraryScanQueued(library: any): boolean {
+		return getLibraryScanJob(library.id)?.status === 'queued';
+	}
+
+	function isLibraryScanRunning(library: any): boolean {
+		const job = getLibraryScanJob(library.id);
+		return library.is_importing || job?.status === 'running';
+	}
+
+	function isLibraryScanActive(library: any): boolean {
+		return isLibraryScanQueued(library) || isLibraryScanRunning(library);
+	}
+
+	async function refreshScanState() {
+		const [data, activeJobs] = await Promise.all([loadSettings(), loadActiveLibraryScanJobs()]);
+		const libraryScanning = !!data?.libraries?.some((library: any) => library.is_importing);
+		scanning = libraryScanning || activeJobs.length > 0;
+		if (scanning) {
+			startScanPolling();
+		} else {
+			stopScanPolling();
+		}
+	}
+
+	async function loadActiveLibraryScanJobs() {
+		try {
+			const res = await fetch('/api/notifications?unread=true&limit=100', { cache: 'no-store' });
+			if (!res.ok) {
+				activeLibraryScanJobs = [];
+				return [];
+			}
+			const data = await res.json();
+			const jobs = (data.items ?? [])
+				.filter((item: any) =>
+					item.source === 'job' &&
+					item.job?.job_type === 'library_scan' &&
+					['queued', 'running'].includes(item.job.status)
+				)
+				.map((item: any) => item.job);
+			activeLibraryScanJobs = jobs;
+			return jobs;
+		} catch (e) {
+			console.error('Failed to load active scan jobs:', e);
+			activeLibraryScanJobs = [];
+			return [];
 		}
 	}
 
@@ -548,46 +630,65 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 				if ((window as any).refreshSidebar) {
 					(window as any).refreshSidebar();
 				}
-				const interval = setInterval(async () => {
-					if ((window as any).refreshSidebar) {
-						(window as any).refreshSidebar();
-					}
-					await loadSettings();
-				}, 5000);
-
-				setTimeout(() => {
-					clearInterval(interval);
-					if ((window as any).refreshSidebar) {
-						(window as any).refreshSidebar();
-					}
-					loadSettings();
-				}, 120000);
+				if ((window as any).refreshScanStatus) {
+					(window as any).refreshScanStatus();
+				}
+				await Promise.all([loadSettings(), loadActiveLibraryScanJobs()]);
+				scanning = true;
+				startScanPolling();
 			}
 		} catch (e) {
 			console.error('Failed to scan library:', e);
 		}
 	}
 
-	async function triggerScan() {
-		scanning = true;
-		try {
-			await fetch('/api/scan', { method: 'POST' });
+	function startScanPolling() {
+		if (scanPollTimer !== null) return;
+		scanPollTimer = window.setInterval(async () => {
 			if ((window as any).refreshSidebar) {
 				(window as any).refreshSidebar();
 			}
-			const interval = setInterval(async () => {
+			if ((window as any).refreshScanStatus) {
+				(window as any).refreshScanStatus();
+			}
+			const [data, activeJobs] = await Promise.all([loadSettings(), loadActiveLibraryScanJobs()]);
+			const libraryScanning = !!data?.libraries?.some((library: any) => library.is_importing);
+			const stillActive = libraryScanning || activeJobs.length > 0;
+			scanning = stillActive;
+			if (!stillActive) {
+				stopScanPolling();
+				await loadSettings();
 				if ((window as any).refreshSidebar) {
 					(window as any).refreshSidebar();
 				}
-			}, 5000);
+			}
+		}, 3000);
+	}
 
-			setTimeout(() => {
-				clearInterval(interval);
-				scanning = false;
-				if ((window as any).refreshSidebar) {
-					(window as any).refreshSidebar();
-				}
-			}, 120000);
+	function stopScanPolling() {
+		if (scanPollTimer !== null) {
+			window.clearInterval(scanPollTimer);
+			scanPollTimer = null;
+		}
+	}
+
+	async function triggerScan() {
+		scanning = true;
+		try {
+			const response = await fetch('/api/scan', { method: 'POST' });
+			const result = response.ok ? await response.json().catch(() => null) : null;
+			if ((window as any).refreshSidebar) {
+				(window as any).refreshSidebar();
+			}
+			const [data, activeJobs] = await Promise.all([loadSettings(), loadActiveLibraryScanJobs()]);
+			const queued = result?.queued_count ?? 0;
+			const libraryScanning = !!data?.libraries?.some((library: any) => library.is_importing);
+			scanning = queued > 0 || libraryScanning || activeJobs.length > 0;
+			if (scanning) {
+				startScanPolling();
+			} else {
+				stopScanPolling();
+			}
 		} catch (e) {
 			console.error('Scan failed:', e);
 			scanning = false;
@@ -613,9 +714,20 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 				activeTab = tab;
 			}
 		}
-		await loadSettings();
-		readerSettings.syncWithBackend();
+		await Promise.all([loadSettings(), loadActiveLibraryScanJobs()]);
+		if (scanActive) {
+			startScanPolling();
+		}
+		(window as any).refreshSettingsScans = refreshScanState;
+		void readerSettings.syncWithBackend();
 		loading = false;
+	});
+
+	onDestroy(() => {
+		stopScanPolling();
+		if ((window as any).refreshSettingsScans === refreshScanState) {
+			delete (window as any).refreshSettingsScans;
+		}
 	});
 </script>
 
@@ -842,6 +954,23 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 								class="absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform {themeState.appearance.bgImageEnabled ? 'left-7' : 'left-1'}"
 							></span>
 						</button>
+					</div>
+				</div>
+
+				<div class="mb-4 {themeState.appearance.bgImageEnabled ? '' : 'opacity-50 pointer-events-none'}">
+					<div class="text-sm font-medium text-[var(--color-surface-text-muted)] mb-2">Display</div>
+					<div class="grid grid-cols-2 gap-2 sm:grid-cols-5">
+						{#each bgImageDisplayOptions as option}
+							<button
+								type="button"
+								onclick={() => updateBgImageDisplay(option.id)}
+								class="rounded-lg border px-3 py-2 text-left transition-colors {themeState.appearance.bgImageDisplay === option.id ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10 text-[var(--color-surface-text)]' : 'border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-surface-text)] hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-overlay)]'}"
+								title={option.description}
+							>
+								<span class="block text-sm font-medium">{option.label}</span>
+								<span class="block text-xs text-[var(--color-surface-text-muted)]">{option.description}</span>
+							</button>
+						{/each}
 					</div>
 				</div>
 
@@ -1817,35 +1946,60 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 							<p class="text-sm text-[var(--color-surface-text-muted)]">Configure your book libraries</p>
 						</div>
 					</div>
-					<button
-						onclick={() => openLibraryModal()}
-						class="p-2 rounded-lg text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors"
-						title="Add Library"
-					>
-						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-						</svg>
-					</button>
+					<div class="flex items-center gap-2">
+						<button
+							onclick={triggerScan}
+							disabled={scanActive}
+							class="inline-flex items-center gap-2 rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)] disabled:cursor-not-allowed disabled:opacity-70"
+							title="Scan all libraries"
+						>
+							<svg class="h-4 w-4 {scanActive ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+							</svg>
+							<span>{scanActive ? 'Scanning...' : 'Scan Libraries'}</span>
+						</button>
+						<button
+							onclick={() => openLibraryModal()}
+							class="p-2 rounded-lg border border-[var(--color-surface-border)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors"
+							title="Add Library"
+						>
+							<svg class="w-4 h-4 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+							</svg>
+						</button>
+					</div>
 				</div>
 				<div class="p-6">
 					{#if settings.libraries && settings.libraries.length > 0}
 						<div class="space-y-4">
 							{#each settings.libraries as lib}
-								<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)]">
+								<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border transition-colors {isLibraryScanActive(lib) ? 'border-[var(--color-primary-500)]/70' : 'border-[var(--color-surface-border)]'}">
 									<div class="flex items-center justify-between mb-3">
 										<div class="flex items-center space-x-3">
-											<svg class="w-5 h-5 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-											</svg>
+											{#if isLibraryScanActive(lib)}
+												<svg class="w-5 h-5 animate-scan-spin text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+												</svg>
+											{:else}
+												<svg class="w-5 h-5 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+												</svg>
+											{/if}
 											<h3 class="font-medium text-[var(--color-surface-text)]">{lib.name}</h3>
+											{#if isLibraryScanRunning(lib)}
+												<span class="rounded-full bg-[var(--color-primary-500)]/15 px-2 py-0.5 text-xs font-semibold text-[var(--color-primary-300)]">Scanning</span>
+											{:else if isLibraryScanQueued(lib)}
+												<span class="rounded-full bg-[var(--color-surface-base)] px-2 py-0.5 text-xs font-semibold text-[var(--color-surface-text-muted)]">Queued</span>
+											{/if}
 										</div>
 										<div class="flex items-center space-x-2">
 											<button
 												onclick={() => scanLibrary(lib)}
-												class="p-1.5 rounded text-[var(--color-surface-text-muted)] hover:text-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)] transition-colors"
+												disabled={isLibraryScanActive(lib)}
+												class="p-1.5 rounded text-[var(--color-surface-text-muted)] hover:text-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)] transition-colors disabled:cursor-not-allowed disabled:opacity-70"
 												title="Scan Library"
 											>
-												<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<svg class="w-4 h-4 {isLibraryScanActive(lib) ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
 												</svg>
 											</button>
@@ -1865,7 +2019,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 												title="Delete Library"
 											>
 												{#if deletingLibraryId === lib.id}
-													<svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<svg class="w-4 h-4 animate-scan-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
 													</svg>
 												{:else}

@@ -24,16 +24,19 @@ import (
 )
 
 var (
-	appConfig         *config.Config
-	appDB             *db.DB
-	appScanner        *scanner.Scanner
-	appWatcher        *watcher.Watcher
-	cronRunner        *cron.Cron
-	backupCronRunner  *cron.Cron
-	backupCronMu      sync.Mutex
-	scanningLibraries map[int64]bool
-	isScanning        bool
-	maintenanceMode   atomic.Bool
+	appConfig           *config.Config
+	appDB               *db.DB
+	appScanner          *scanner.Scanner
+	appWatcher          *watcher.Watcher
+	cronRunner          *cron.Cron
+	backupCronRunner    *cron.Cron
+	backupCronMu        sync.Mutex
+	scanningLibraries   map[int64]bool
+	scanningLibrariesMu sync.RWMutex
+	libraryScanLimiter  chan struct{}
+	libraryScanWorker   atomic.Bool
+	isScanning          bool
+	maintenanceMode     atomic.Bool
 )
 
 func main() {
@@ -56,6 +59,7 @@ func main() {
 
 	// Initialize scanning libraries map
 	scanningLibraries = make(map[int64]bool)
+	libraryScanLimiter = make(chan struct{}, 1)
 
 	// Initialize database
 	appDB, err = db.New(appConfig.Server.DataPath)
@@ -87,6 +91,8 @@ func main() {
 
 	// Initialize scanner
 	appScanner = scanner.New(appDB.DB, appConfig.Server.DataPath, appConfig.GetCoversPath())
+	requeueInterruptedLibraryScans()
+	signalLibraryScanWorker()
 
 	// Initialize router
 	r := chi.NewRouter()
@@ -271,6 +277,11 @@ func startCronTasks() {
 // Helper function for JSON responses
 func jsonResponse(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	if w.Header().Get("Cache-Control") == "" {
+		w.Header().Set("Cache-Control", "no-store, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+	}
 	w.WriteHeader(status)
 	if data != nil {
 		json.NewEncoder(w).Encode(data)

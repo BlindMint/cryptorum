@@ -3,7 +3,15 @@ WORKDIR /app
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend .
-RUN npm run build
+RUN if [ -d build/_app/immutable ]; then \
+        mkdir -p /tmp/previous-immutable && \
+        cp -a build/_app/immutable/. /tmp/previous-immutable/; \
+    fi && \
+    npm run build && \
+    if [ -d /tmp/previous-immutable ]; then \
+        mkdir -p build/_app/immutable && \
+        cp -an /tmp/previous-immutable/. build/_app/immutable/; \
+    fi
 
 FROM golang:1.25-alpine AS api-build
 WORKDIR /app

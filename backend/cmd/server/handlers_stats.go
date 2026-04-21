@@ -99,7 +99,12 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 
 	var stats StatsResponse
 
-	appDB.QueryRow("SELECT COUNT(*) FROM book").Scan(&stats.TotalBooks)
+	appDB.QueryRow(`
+		SELECT COUNT(DISTINCT b.id)
+		FROM book b
+		JOIN book_file bf ON bf.book_id = b.id
+		WHERE bf.missing_at IS NULL
+	`).Scan(&stats.TotalBooks)
 	appDB.QueryRow("SELECT COALESCE(SUM(COALESCE(page_count, 0)), 0) FROM book_metadata").Scan(&stats.TotalPages)
 	appDB.QueryRow("SELECT COUNT(DISTINCT series) FROM book_metadata WHERE series IS NOT NULL AND series != ''").Scan(&stats.TotalSeries)
 	appDB.QueryRow("SELECT COUNT(DISTINCT language) FROM book_metadata WHERE language IS NOT NULL AND language != ''").Scan(&stats.TotalLanguages)
@@ -125,6 +130,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := appDB.Query(`
 		SELECT format, COUNT(DISTINCT book_id) as cnt
 		FROM book_file
+		WHERE missing_at IS NULL
 		GROUP BY format
 	`)
 	if err == nil {

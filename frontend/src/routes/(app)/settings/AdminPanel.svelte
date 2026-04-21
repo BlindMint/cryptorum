@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
+	import { notificationVisualIndicator } from '$lib/stores';
 
 	type AdminJob = {
 		id: number;
@@ -20,21 +21,14 @@
 
 	type AdminNotification = {
 		id: number;
+		source?: 'notification' | 'job' | 'log';
 		kind: string;
 		title: string;
 		message?: string;
 		url?: string;
 		read_at?: number;
 		created_at: number;
-	};
-
-	type AdminLogEntry = {
-		id: number;
-		level: string;
-		category: string;
-		message: string;
-		data?: any;
-		created_at: number;
+		job?: AdminJob;
 	};
 
 	type BackupItem = {
@@ -52,25 +46,14 @@
 		keep_last: number;
 	};
 
-	let jobs = $state<AdminJob[]>([]);
 	let notifications = $state<AdminNotification[]>([]);
 	let unreadCount = $state(0);
-	let logs = $state<AdminLogEntry[]>([]);
-	let jobsLoading = $state(false);
 	let notificationsLoading = $state(false);
-	let logsLoading = $state(false);
 	let backupsLoading = $state(false);
-	let jobError = $state('');
 	let notificationError = $state('');
-	let logError = $state('');
 	let backupError = $state('');
 
 	let jobStatus = $state('');
-	let logLevel = $state('');
-	let logCategory = $state('');
-	let logQuery = $state('');
-	let logFrom = $state('');
-	let logTo = $state('');
 	let backups = $state<BackupItem[]>([]);
 	let backupSettings = $state<BackupSettings>({ enabled: true, cron: '', keep_last: 14 });
 	let savingBackupSettings = $state(false);
@@ -78,9 +61,7 @@
 	let coverJobQueueing = $state<'all' | 'missing' | ''>('');
 	let coverJobMessage = $state('');
 	let backupsExpanded = $state(false);
-	let jobsExpanded = $state(false);
 	let notificationsExpanded = $state(false);
-	let logsExpanded = $state(false);
 	let reviewJob = $state<AdminJob | null>(null);
 
 	function formatTime(value: number) {
@@ -138,17 +119,6 @@
 		}
 	}
 
-	function levelClass(level: string) {
-		switch (level) {
-			case 'error':
-				return 'text-red-300 border-red-500/30 bg-red-500/10';
-			case 'warn':
-				return 'text-amber-300 border-amber-500/30 bg-amber-500/10';
-			default:
-				return 'text-[var(--color-surface-text)] border-[var(--color-surface-border)] bg-[var(--color-surface-base)]';
-		}
-	}
-
 	function sectionBodyClass(expanded: boolean): string {
 		return expanded ? 'max-h-[70vh] overflow-auto' : 'max-h-[22rem] overflow-auto';
 	}
@@ -157,48 +127,24 @@
 		return expanded ? 'Show less' : 'Show all';
 	}
 
-	function buildLogExportUrl(format: 'json' | 'text') {
+	function buildNotificationExportUrl(format: 'json' | 'text') {
 		const params = new URLSearchParams();
 		params.set('format', format);
 		params.set('limit', '200');
-		if (logLevel.trim()) params.set('level', logLevel.trim());
-		if (logCategory.trim()) params.set('category', logCategory.trim());
-		if (logQuery.trim()) params.set('q', logQuery.trim());
-		if (logFrom.trim()) params.set('from', logFrom.trim());
-		if (logTo.trim()) params.set('to', logTo.trim());
-		return `/api/logs?${params.toString()}`;
+		if (jobStatus.trim()) params.set('status', jobStatus.trim());
+		return `/api/notifications?${params.toString()}`;
 	}
 
-	async function loadJobs(silent = false) {
+	async function loadNotifications(silent = false) {
 		if (!silent) {
-			jobsLoading = true;
+			notificationsLoading = notifications.length === 0;
 		}
-		jobError = '';
-		try {
-			const params = new URLSearchParams();
-			params.set('limit', '25');
-			if (jobStatus.trim()) params.set('status', jobStatus.trim());
-			const res = await fetch(`/api/jobs?${params.toString()}`);
-			if (res.ok) {
-				jobs = await res.json();
-			} else {
-				jobError = 'Unable to load jobs.';
-			}
-		} catch (error) {
-			console.error('Failed to load jobs:', error);
-			jobError = 'Unable to load jobs.';
-		} finally {
-			if (!silent) {
-				jobsLoading = false;
-			}
-		}
-	}
-
-	async function loadNotifications() {
-		notificationsLoading = true;
 		notificationError = '';
 		try {
-			const res = await fetch('/api/notifications?limit=25');
+			const params = new URLSearchParams();
+			params.set('limit', '50');
+			if (jobStatus.trim()) params.set('status', jobStatus.trim());
+			const res = await fetch(`/api/notifications?${params.toString()}`, { cache: 'no-store' });
 			if (res.ok) {
 				const data = await res.json();
 				notifications = data.items ?? [];
@@ -210,32 +156,9 @@
 			console.error('Failed to load notifications:', error);
 			notificationError = 'Unable to load notifications.';
 		} finally {
-			notificationsLoading = false;
-		}
-	}
-
-	async function loadLogs() {
-		logsLoading = true;
-		logError = '';
-		try {
-			const params = new URLSearchParams();
-			params.set('limit', '100');
-			if (logLevel.trim()) params.set('level', logLevel.trim());
-			if (logCategory.trim()) params.set('category', logCategory.trim());
-			if (logQuery.trim()) params.set('q', logQuery.trim());
-			if (logFrom.trim()) params.set('from', logFrom.trim());
-			if (logTo.trim()) params.set('to', logTo.trim());
-			const res = await fetch(`/api/logs?${params.toString()}`);
-			if (res.ok) {
-				logs = await res.json();
-			} else {
-				logError = 'Unable to load logs.';
+			if (!silent) {
+				notificationsLoading = false;
 			}
-		} catch (error) {
-			console.error('Failed to load logs:', error);
-			logError = 'Unable to load logs.';
-		} finally {
-			logsLoading = false;
 		}
 	}
 
@@ -260,13 +183,13 @@
 	}
 
 	async function refreshAll() {
-		await Promise.all([loadJobs(), loadNotifications(), loadLogs(), loadBackups()]);
+		await Promise.all([loadNotifications(), loadBackups()]);
 	}
 
 	async function deleteJob(jobId: number) {
 		if (!confirm('Delete this job entry?')) return;
 		await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
-		await loadJobs();
+		await loadNotifications();
 	}
 
 	function openMetadataReview(job: AdminJob) {
@@ -335,7 +258,7 @@
 
 	async function queueCoverJob(mode: 'all' | 'missing') {
 		coverJobQueueing = mode;
-		jobError = '';
+		notificationError = '';
 		coverJobMessage = '';
 		try {
 			const res = await fetch('/api/settings/book-covers/regenerate', {
@@ -349,10 +272,10 @@
 			coverJobMessage = mode === 'all'
 				? 'Cover regeneration job queued.'
 				: 'Missing cover regeneration job queued.';
-			await Promise.all([loadJobs(), loadLogs(), loadNotifications()]);
+			await loadNotifications();
 		} catch (error) {
 			console.error('Failed to queue cover job:', error);
-			jobError = 'Unable to queue cover regeneration.';
+			notificationError = 'Unable to queue cover regeneration.';
 		} finally {
 			coverJobQueueing = '';
 			setTimeout(() => coverJobMessage = '', 4000);
@@ -394,10 +317,10 @@
 	}
 
 	onMount(() => {
+		notificationVisualIndicator.init();
 		refreshAll();
 		const interval = setInterval(() => {
-			void loadJobs(true);
-			void loadNotifications();
+			void loadNotifications(true);
 		}, 5000);
 		return () => clearInterval(interval);
 	});
@@ -407,7 +330,7 @@
 	<div class="flex flex-wrap items-end justify-between gap-3">
 		<div>
 			<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Admin</h2>
-			<p class="text-sm text-[var(--color-surface-text-muted)]">Jobs, notifications, and logs for background operations</p>
+			<p class="text-sm text-[var(--color-surface-text-muted)]">Jobs, notifications, and app events for background operations</p>
 		</div>
 		<button
 			onclick={refreshAll}
@@ -534,153 +457,133 @@
 		</div>
 	</section>
 
-	<div class="grid gap-6 xl:grid-cols-3">
-		<section class="xl:col-span-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] overflow-hidden">
-			<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-6 py-4">
-				<div>
-					<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Jobs</h3>
-					<p class="text-sm text-[var(--color-surface-text-muted)]">Background metadata and maintenance tasks</p>
-				</div>
-				<div class="flex flex-wrap items-center gap-2">
-					<button
-						onclick={() => jobsExpanded = !jobsExpanded}
-						class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-[var(--color-primary-500)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] transition-colors"
+	<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] overflow-hidden">
+		<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-6 py-4">
+			<div>
+				<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Notifications</h3>
+				<p class="text-sm text-[var(--color-surface-text-muted)]">{unreadCount} active or unread · includes job history and app events</p>
+				<label class="mt-3 flex items-center gap-3 text-sm text-[var(--color-surface-text-muted)]">
+					<input
+						type="checkbox"
+						checked={$notificationVisualIndicator}
+						onchange={(e) => notificationVisualIndicator.set(e.currentTarget.checked)}
+						class="h-4 w-4 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)]"
 					>
-						{sectionButtonLabel(jobsExpanded)}
-					</button>
-					<button
-						onclick={() => queueCoverJob('missing')}
-						disabled={coverJobQueueing !== ''}
-						class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors disabled:opacity-50"
-					>
-						{coverJobQueueing === 'missing' ? 'Queueing...' : 'Regenerate Missing Covers'}
-					</button>
-					<button
-						onclick={() => queueCoverJob('all')}
-						disabled={coverJobQueueing !== ''}
-						class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors disabled:opacity-50"
-					>
-						{coverJobQueueing === 'all' ? 'Queueing...' : 'Regenerate Covers'}
-					</button>
-					<select
-						value={jobStatus}
-						onchange={async (e) => { jobStatus = e.currentTarget.value; await loadJobs(); }}
-						class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)]"
-					>
-						<option value="">All statuses</option>
-						<option value="queued">Queued</option>
-						<option value="running">Running</option>
-						<option value="completed">Completed</option>
-						<option value="failed">Failed</option>
-					</select>
-				</div>
+					<span>Show top-bar indicator for new notifications</span>
+				</label>
 			</div>
-			<div class={sectionBodyClass(jobsExpanded) + ' p-6 space-y-4'}>
-				{#if coverJobMessage}
-					<div class="text-sm text-emerald-300">{coverJobMessage}</div>
+			<div class="flex flex-wrap items-center gap-2">
+				<button
+					onclick={() => queueCoverJob('missing')}
+					disabled={coverJobQueueing !== ''}
+					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors disabled:opacity-50"
+				>
+					{coverJobQueueing === 'missing' ? 'Queueing...' : 'Regenerate Missing Covers'}
+				</button>
+				<button
+					onclick={() => queueCoverJob('all')}
+					disabled={coverJobQueueing !== ''}
+					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors disabled:opacity-50"
+				>
+					{coverJobQueueing === 'all' ? 'Queueing...' : 'Regenerate Covers'}
+				</button>
+				<select
+					value={jobStatus}
+					onchange={async (e) => { jobStatus = e.currentTarget.value; await loadNotifications(); }}
+					class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)]"
+				>
+					<option value="">All job statuses</option>
+					<option value="queued">Queued</option>
+					<option value="running">Running</option>
+					<option value="completed">Completed</option>
+					<option value="failed">Failed</option>
+				</select>
+				{#if notifications.some((item) => item.source === 'notification')}
+					<button
+						onclick={deleteAllNotifications}
+						class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-red-500/50 hover:text-red-300 transition-colors"
+					>
+						Dismiss app notifications
+					</button>
 				{/if}
-				{#if jobsLoading}
-					<div class="text-sm text-[var(--color-surface-text-muted)]">Loading jobs...</div>
-				{:else if jobError}
-					<div class="text-sm text-red-300">{jobError}</div>
-				{:else if jobs.length === 0}
-					<div class="text-sm text-[var(--color-surface-text-muted)]">No jobs yet.</div>
-				{:else}
-					<div class="space-y-3">
-						{#each jobs as job}
-							<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
-								<div class="flex items-start justify-between gap-4">
-									<div class="space-y-2">
-										<div class="flex flex-wrap items-center gap-2">
-											<span class="rounded-full border px-2.5 py-1 text-xs font-medium {statusClass(job.status)}">{job.status}</span>
-											<span class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">{job.job_type}</span>
-										</div>
-										<div class="text-sm font-medium text-[var(--color-surface-text)]">{job.title}</div>
-										<div class="text-xs text-[var(--color-surface-text-muted)]">
-											{job.completed_items}/{job.total_items} completed · {job.failed_items} failed
-											{#if job.started_at || job.completed_at}
-												· {formatDuration(job.started_at, job.completed_at)}
-											{/if}
-										</div>
-										<div class="text-xs text-[var(--color-surface-text-muted)]">
-											Created {formatTime(job.created_at)}
-										</div>
-										{#if job.error}
-											<div class="text-xs text-red-300">{job.error}</div>
-										{/if}
-									</div>
-									<div class="flex shrink-0 items-center gap-2">
-										{#if job.job_type === 'metadata_lookup' && job.status !== 'queued' && job.status !== 'running'}
-											<button
-												onclick={() => openMetadataReview(job)}
-												class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors"
-											>
-												Review
-											</button>
-										{/if}
-										<button
-											onclick={() => deleteJob(job.id)}
-											class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-xs text-[var(--color-surface-text-muted)] hover:border-red-500/50 hover:text-red-300 transition-colors"
-										>
-											Delete
-										</button>
-									</div>
-								</div>
-							</div>
-						{/each}
-					</div>
-				{/if}
+				<button
+					onclick={() => notificationsExpanded = !notificationsExpanded}
+					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-[var(--color-primary-500)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] transition-colors"
+				>
+					{sectionButtonLabel(notificationsExpanded)}
+				</button>
+				<a href={buildNotificationExportUrl('text')} download class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors">
+					Export Text
+				</a>
+				<a href={buildNotificationExportUrl('json')} download class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors">
+					Export JSON
+				</a>
 			</div>
-		</section>
-
-		<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] overflow-hidden">
-			<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-6 py-4">
-				<div>
-					<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Notifications</h3>
-					<p class="text-sm text-[var(--color-surface-text-muted)]">{unreadCount} unread</p>
-				</div>
-				<div class="flex items-center gap-2">
-					{#if notifications.length > 0}
-						<button
-							onclick={deleteAllNotifications}
-							class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-red-500/50 hover:text-red-300 transition-colors"
-						>
-							Dismiss all
-						</button>
-					{/if}
-					<button
-						onclick={() => notificationsExpanded = !notificationsExpanded}
-						class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-[var(--color-primary-500)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] transition-colors"
-					>
-						{sectionButtonLabel(notificationsExpanded)}
-					</button>
-				</div>
-			</div>
-			<div class={sectionBodyClass(notificationsExpanded) + ' p-6 space-y-3'}>
-				{#if notificationsLoading}
-					<div class="text-sm text-[var(--color-surface-text-muted)]">Loading notifications...</div>
-				{:else if notificationError}
-					<div class="text-sm text-red-300">{notificationError}</div>
-				{:else if notifications.length === 0}
-					<div class="text-sm text-[var(--color-surface-text-muted)]">No notifications yet.</div>
-				{:else}
-					{#each notifications as item}
-						<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
-							<div class="flex items-start justify-between gap-3">
-								<button onclick={() => openNotification(item)} class="text-left flex-1">
-									<div class="flex items-center gap-2">
-										<span class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">{item.kind}</span>
-										{#if !item.read_at}
-											<span class="rounded-full bg-[var(--color-primary-500)] px-2 py-0.5 text-[10px] font-semibold text-white">New</span>
-										{/if}
-									</div>
-									<div class="mt-1 text-sm font-medium text-[var(--color-surface-text)]">{item.title}</div>
-									{#if item.message}
-										<div class="mt-1 text-xs text-[var(--color-surface-text-muted)]">{item.message}</div>
+		</div>
+		<div class={sectionBodyClass(notificationsExpanded) + ' p-6 space-y-3'}>
+			{#if coverJobMessage}
+				<div class="text-sm text-emerald-300">{coverJobMessage}</div>
+			{/if}
+			{#if notificationsLoading}
+				<div class="text-sm text-[var(--color-surface-text-muted)]">Loading notifications...</div>
+			{:else if notificationError}
+				<div class="text-sm text-red-300">{notificationError}</div>
+			{:else if notifications.length === 0}
+				<div class="text-sm text-[var(--color-surface-text-muted)]">No notifications yet.</div>
+			{:else}
+				{#each notifications as item}
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
+						<div class="flex items-start justify-between gap-3">
+							<button onclick={() => openNotification(item)} class="text-left flex-1">
+								<div class="flex flex-wrap items-center gap-2">
+									{#if item.job}
+										<span class="rounded-full border px-2.5 py-1 text-xs font-medium {statusClass(item.job.status)}">{item.job.status}</span>
 									{/if}
-									<div class="mt-2 text-xs text-[var(--color-surface-text-muted)]">{formatTime(item.created_at)}</div>
-								</button>
-								<div class="flex flex-col gap-2">
+									<span class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">
+										{item.source === 'job' ? `job · ${item.kind}` : item.source === 'log' ? `event · ${item.kind}` : item.kind}
+									</span>
+									{#if !item.read_at}
+										<span class="rounded-full bg-[var(--color-primary-500)] px-2 py-0.5 text-[10px] font-semibold text-white">New</span>
+									{/if}
+								</div>
+								<div class="mt-1 text-sm font-medium text-[var(--color-surface-text)]">{item.title}</div>
+								{#if item.message}
+									<div class="mt-1 text-xs text-[var(--color-surface-text-muted)]">{item.message}</div>
+								{/if}
+								{#if item.job}
+									<div class="mt-1 text-xs text-[var(--color-surface-text-muted)]">
+										{item.job.completed_items}/{item.job.total_items} completed · {item.job.failed_items} failed
+										{#if item.job.started_at || item.job.completed_at}
+											· {formatDuration(item.job.started_at, item.job.completed_at)}
+										{/if}
+									</div>
+									{#if item.job.error}
+										<div class="mt-1 text-xs text-red-300">{item.job.error}</div>
+									{/if}
+								{/if}
+								<div class="mt-2 text-xs text-[var(--color-surface-text-muted)]">{formatTime(item.created_at)}</div>
+							</button>
+							<div class="flex flex-col gap-2">
+								{#if item.job?.job_type === 'metadata_lookup' && item.job.status !== 'queued' && item.job.status !== 'running'}
+									<button
+										onclick={() => item.job && openMetadataReview(item.job)}
+										class="rounded-lg border border-[var(--color-surface-border)] px-2 py-1 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)]"
+									>
+										Review
+									</button>
+								{/if}
+								{#if item.source === 'job' && item.job}
+									<button
+										onclick={() => item.job && deleteJob(item.job.id)}
+										class="rounded-lg border border-[var(--color-surface-border)] px-2 py-1 text-xs text-red-300 hover:border-red-500/50"
+									>
+										Delete
+									</button>
+								{:else if item.source === 'log'}
+									<span class="rounded-lg border border-[var(--color-surface-border)] px-2 py-1 text-xs text-[var(--color-surface-text-muted)]">
+										Event
+									</span>
+								{:else}
 									{#if !item.read_at}
 										<button
 											onclick={() => markNotificationRead(item.id)}
@@ -695,104 +598,15 @@
 									>
 										Dismiss
 									</button>
-								</div>
+								{/if}
 							</div>
 						</div>
-					{/each}
-				{/if}
-			</div>
-		</section>
-	</div>
-
-		<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] overflow-hidden">
-			<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-6 py-4">
-				<div>
-					<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Logs</h3>
-					<p class="text-sm text-[var(--color-surface-text-muted)]">Searchable app events with export</p>
-				</div>
-				<div class="flex flex-wrap items-center gap-2">
-					<button
-						onclick={() => logsExpanded = !logsExpanded}
-						class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-[var(--color-primary-500)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] transition-colors"
-					>
-						{sectionButtonLabel(logsExpanded)}
-					</button>
-					<a href={buildLogExportUrl('text')} download class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors">
-						Export Text
-					</a>
-				<a href={buildLogExportUrl('json')} download class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors">
-					Export JSON
-				</a>
-			</div>
-		</div>
-		<div class="grid gap-4 border-b border-[var(--color-surface-border)] p-6 lg:grid-cols-5">
-			<input
-				type="text"
-				bind:value={logQuery}
-				placeholder="Search message or data"
-				class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)]"
-			>
-			<input
-				type="text"
-				bind:value={logCategory}
-				placeholder="Category"
-				class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)]"
-			>
-			<select bind:value={logLevel} class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)]">
-				<option value="">All levels</option>
-				<option value="info">Info</option>
-				<option value="warn">Warn</option>
-				<option value="error">Error</option>
-			</select>
-			<input
-				type="text"
-				bind:value={logFrom}
-				placeholder="From (date or timestamp)"
-				class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)]"
-			>
-			<div class="flex items-center gap-2">
-				<input
-					type="text"
-					bind:value={logTo}
-					placeholder="To (date or timestamp)"
-					class="min-w-0 flex-1 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)]"
-				>
-				<button
-					onclick={loadLogs}
-					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors"
-				>
-					Search
-				</button>
-			</div>
-		</div>
-		<div class={sectionBodyClass(logsExpanded) + ' p-6'}>
-			{#if logsLoading}
-				<div class="text-sm text-[var(--color-surface-text-muted)]">Loading logs...</div>
-			{:else if logError}
-				<div class="text-sm text-red-300">{logError}</div>
-			{:else if logs.length === 0}
-				<div class="text-sm text-[var(--color-surface-text-muted)]">No logs found.</div>
-			{:else}
-				<div class="space-y-3">
-					{#each logs as item}
-						<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
-							<div class="flex flex-wrap items-center justify-between gap-3">
-								<div class="flex flex-wrap items-center gap-2">
-									<span class="rounded-full border px-2.5 py-1 text-xs font-medium {levelClass(item.level)}">{item.level}</span>
-									<span class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">{item.category}</span>
-								</div>
-								<span class="text-xs text-[var(--color-surface-text-muted)]">{formatTime(item.created_at)}</span>
-							</div>
-							<div class="mt-2 text-sm text-[var(--color-surface-text)]">{item.message}</div>
-							{#if item.data}
-								<pre class="mt-3 overflow-auto rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3 text-xs text-[var(--color-surface-text-muted)]">{JSON.stringify(item.data, null, 2)}</pre>
-							{/if}
-						</div>
-					{/each}
-				</div>
+					</div>
+				{/each}
 			{/if}
 		</div>
 	</section>
+
 </div>
 
 {#if reviewJob}
@@ -800,6 +614,6 @@
 		jobId={reviewJob.id}
 		initialJob={reviewJob}
 		onClose={() => reviewJob = null}
-		onApplied={loadJobs}
+		onApplied={loadNotifications}
 	/>
 {/if}

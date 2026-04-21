@@ -1,6 +1,9 @@
 import { writable, derived } from 'svelte/store';
 import { browser } from '$app/environment';
 
+const READER_SETTINGS_VERSION = 2;
+const READER_SETTINGS_VERSION_KEY = 'readerSettingsVersion';
+
 export interface EpubReaderSetting {
 	fontFamily: string;
 	fontSize: number;
@@ -28,6 +31,7 @@ export interface EpubReaderSetting {
 	autoAdvance: boolean;
 	autoAdvanceTimer: number;
 	fullscreenLock: boolean;
+	useStandardFullscreen: boolean;
 	autoHideControls: boolean;
 	customCss: string;
 	showTextLayer: boolean;
@@ -64,6 +68,7 @@ export interface PdfReaderSetting {
 	showChapterMarkers: boolean;
 	showQuoteMarks: boolean;
 	panMode: boolean;
+	useStandardFullscreen: boolean;
 }
 
 export interface CbxReaderSetting {
@@ -79,6 +84,7 @@ export interface CbxReaderSetting {
 	spreadHandling: 'auto' | 'force-single' | 'force-double' | 'never-split';
 	pageTransitionSound: boolean;
 	autoHideControls: boolean;
+	useStandardFullscreen: boolean;
 	vibrance: number;
 	saturation: number;
 }
@@ -160,6 +166,7 @@ export const defaultReaderSettings: ReaderSettings = {
 		autoAdvance: false,
 		autoAdvanceTimer: 0,
 		fullscreenLock: false,
+		useStandardFullscreen: false,
 		autoHideControls: true,
 		customCss: '',
 		showTextLayer: true,
@@ -178,7 +185,7 @@ export const defaultReaderSettings: ReaderSettings = {
 		autoHideControls: true,
 		showSidebar: false,
 		scrollDirection: 'vertical',
-		scrollMode: 'paged',
+		scrollMode: 'continuous-vertical',
 		pageRotation: 0,
 		backgroundColor: '#111111',
 		brightness: 100,
@@ -191,7 +198,8 @@ export const defaultReaderSettings: ReaderSettings = {
 		viewMode: 'dark',
 		showChapterMarkers: false,
 		showQuoteMarks: false,
-		panMode: false
+		panMode: false,
+		useStandardFullscreen: false
 	},
 	cbx: {
 		pageSpread: 'auto',
@@ -206,6 +214,7 @@ export const defaultReaderSettings: ReaderSettings = {
 		spreadHandling: 'auto',
 		pageTransitionSound: false,
 		autoHideControls: true,
+		useStandardFullscreen: false,
 		vibrance: 100,
 		saturation: 100
 	},
@@ -256,12 +265,36 @@ function loadSettings(): ReaderSettings {
 	const stored = localStorage.getItem('readerSettings');
 	if (stored) {
 		try {
-			return deepMerge(defaultReaderSettings, JSON.parse(stored));
+			const settings = migrateSettings(deepMerge(defaultReaderSettings, JSON.parse(stored)));
+			localStorage.setItem('readerSettings', JSON.stringify(settings));
+			localStorage.setItem(READER_SETTINGS_VERSION_KEY, String(READER_SETTINGS_VERSION));
+			return settings;
 		} catch {
 			return defaultReaderSettings;
 		}
 	}
+	localStorage.setItem(READER_SETTINGS_VERSION_KEY, String(READER_SETTINGS_VERSION));
 	return defaultReaderSettings;
+}
+
+function migrateSettings(settings: ReaderSettings): ReaderSettings {
+	const version = Number(localStorage.getItem(READER_SETTINGS_VERSION_KEY) || '0');
+	if (version >= READER_SETTINGS_VERSION) {
+		return settings;
+	}
+
+	return {
+		...settings,
+		epub: {
+			...settings.epub,
+			flow: 'scrolled',
+			continuousMode: true
+		},
+		pdf: {
+			...settings.pdf,
+			scrollMode: settings.pdf.scrollMode === 'paged' ? 'continuous-vertical' : settings.pdf.scrollMode
+		}
+	};
 }
 
 function deepMerge<T extends Record<string, any>>(target: T, source: Partial<T>): T {
@@ -347,7 +380,7 @@ function createReaderSettingsStore() {
 		syncWithBackend: async () => {
 			if (!browser) return;
 			try {
-				const res = await fetch('/api/settings');
+				const res = await fetch('/api/settings', { cache: 'no-store' });
 				if (res.ok) {
 					const data = await res.json();
 					if (data.reader) {

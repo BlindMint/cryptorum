@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -19,6 +20,7 @@ import (
 	"cryptorum/internal/auth"
 	"cryptorum/internal/config"
 	"cryptorum/internal/db"
+	"cryptorum/internal/scanner"
 )
 
 type filterList []string
@@ -367,6 +369,7 @@ func initRoutes(r *chi.Mux) {
 
 // FileServer sets up a static file server
 func FileServer(r chi.Router, path string, root http.FileSystem) {
+	prefix := path
 	if path != "/" && path[len(path)-1] != '/' {
 		r.Get(path, http.RedirectHandler(path+"/", http.StatusMovedPermanently).ServeHTTP)
 		path += "/"
@@ -374,13 +377,38 @@ func FileServer(r chi.Router, path string, root http.FileSystem) {
 	path += "*"
 
 	r.Get(path, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fs := http.StripPrefix(path[:len(path)-1], http.FileServer(root))
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/_app/immutable/"):
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		case r.URL.Path == "/_app/version.json" || r.URL.Path == "/_app/env.js":
+			w.Header().Set("Cache-Control", "no-store, max-age=0")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
+		case strings.HasPrefix(prefix, "/_app"):
+			w.Header().Set("Cache-Control", "no-cache, max-age=0")
+		}
+		fs := http.StripPrefix(prefix, http.FileServer(root))
 		fs.ServeHTTP(w, r)
 	}).ServeHTTP)
 }
 
 // serveSPAHandler serves the frontend SPA
 func serveSPAHandler(w http.ResponseWriter, r *http.Request) {
+	cleanPath := filepath.Clean(r.URL.Path)
+	if cleanPath == "." || cleanPath == "/" {
+		cleanPath = "/index.html"
+	}
+
+	staticPath := filepath.Join("./static", strings.TrimPrefix(cleanPath, "/"))
+	if info, err := os.Stat(staticPath); err == nil && !info.IsDir() && filepath.Base(staticPath) != "index.html" {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		http.ServeFile(w, r, staticPath)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	http.ServeFile(w, r, "./static/index.html")
 }
 
@@ -427,6 +455,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN (
 			SELECT book_id, MIN(format) AS format
 			FROM book_file
+			WHERE missing_at IS NULL
 			GROUP BY book_id
 		) bf ON b.id = bf.book_id`
 
@@ -471,6 +500,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		conditions = append(conditions, "l.owner_user_id = ?")
 		args = append(args, current.ID)
 	}
+	conditions = append(conditions, "EXISTS (SELECT 1 FROM book_file active_bf WHERE active_bf.book_id = b.id AND active_bf.missing_at IS NULL)")
 
 	if status != "" {
 		for _, value := range queryValues("status", false) {
@@ -1380,9 +1410,10 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 	ownerClause, ownerArgs := userOwnershipClause(current, "l")
 	rows, err := appDB.Query(`
 		SELECT l.id, l.name, COALESCE(l.icon, '') as icon,
-		       COUNT(DISTINCT b.id) as book_count
+		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL THEN b.id END) as book_count
 		FROM library l
 		LEFT JOIN book b ON l.id = b.library_id
+		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
 		WHERE `+ownerClause+`
 		GROUP BY l.id, l.name, l.icon
 		ORDER BY l.name
@@ -1407,6 +1438,7 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&lib.ID, &lib.Name, &lib.Icon, &lib.BookCount); err != nil {
 			continue
 		}
+		lib.IsImporting = isLibraryScanning(lib.ID)
 		libraries = append(libraries, lib)
 	}
 
@@ -1429,9 +1461,10 @@ func getLibraryHandler(w http.ResponseWriter, r *http.Request) {
 	var lib LibraryResponse
 	query := `
 		SELECT l.id, l.name, COALESCE(l.icon, '') as icon,
-		       COUNT(DISTINCT b.id) as book_count
+		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL THEN b.id END) as book_count
 		FROM library l
 		LEFT JOIN book b ON l.id = b.library_id
+		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
 		WHERE l.id = ? AND ` + ownerClause + `
 		GROUP BY l.id
 	`
@@ -1482,6 +1515,7 @@ func getLibraryBooksHandler(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN book_metadata bm ON b.id = bm.book_id
 		LEFT JOIN reading_progress rp ON b.id = rp.book_id
 		WHERE b.library_id = ? AND `+ownerClause+`
+		  AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL)
 		ORDER BY b.added_at DESC
 		LIMIT ? OFFSET ?
 	`, append([]interface{}{libraryID}, append(ownerArgs, limit, offset)...)...)
@@ -1535,6 +1569,290 @@ func getFirstAvailableLibraryID(database *db.DB) (int64, error) {
 			return i, nil
 		}
 	}
+}
+
+func isLibraryScanning(libraryID int64) bool {
+	scanningLibrariesMu.RLock()
+	scanning := scanningLibraries[libraryID]
+	scanningLibrariesMu.RUnlock()
+	if scanning {
+		return true
+	}
+	return hasActiveLibraryScanJob(libraryID)
+}
+
+func markLibraryScanning(libraryID int64, scanning bool) {
+	scanningLibrariesMu.Lock()
+	defer scanningLibrariesMu.Unlock()
+	if scanning {
+		scanningLibraries[libraryID] = true
+		return
+	}
+	delete(scanningLibraries, libraryID)
+}
+
+func hasActiveLibraryScanJob(libraryID int64) bool {
+	if appDB == nil {
+		return false
+	}
+	rows, err := appDB.Query(`
+		SELECT COALESCE(payload_json, '')
+		FROM metadata_job
+		WHERE job_type = ? AND status IN ('queued', 'running')
+		ORDER BY created_at DESC
+		LIMIT 100
+	`, "library_scan")
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var payloadRaw string
+		if err := rows.Scan(&payloadRaw); err != nil || strings.TrimSpace(payloadRaw) == "" {
+			continue
+		}
+		var payload struct {
+			LibraryID int64 `json:"library_id"`
+		}
+		if err := json.Unmarshal([]byte(payloadRaw), &payload); err == nil && payload.LibraryID == libraryID {
+			return true
+		}
+	}
+	return false
+}
+
+func queueLibraryScan(libraryID int64, paths []string) (int64, bool, error) {
+	return queueLibraryScanWithWorker(libraryID, paths, true)
+}
+
+func queueLibraryScanWithWorker(libraryID int64, paths []string, startWorker bool) (int64, bool, error) {
+	if isLibraryScanning(libraryID) {
+		return 0, false, nil
+	}
+
+	var libraryName string
+	if err := appDB.QueryRow(`SELECT name FROM library WHERE id = ?`, libraryID).Scan(&libraryName); err != nil {
+		libraryName = fmt.Sprintf("Library %d", libraryID)
+	}
+
+	now := time.Now().Unix()
+	title := fmt.Sprintf("Scan library: %s", libraryName)
+	payload, _ := json.Marshal(map[string]any{
+		"library_id": libraryID,
+		"paths":      paths,
+	})
+	jobResult, err := appDB.Exec(`
+		INSERT INTO metadata_job (
+			job_type, title, status, payload_json,
+			total_items, completed_items, failed_items, created_at
+		) VALUES (?, ?, ?, ?, 0, 0, 0, ?)
+	`, "library_scan", title, "queued", nullString(payload), now)
+	if err != nil {
+		return 0, false, err
+	}
+	jobID, _ := jobResult.LastInsertId()
+	createAdminNotification(
+		"library_scan_queued",
+		title,
+		"Queued a library scan.",
+		"/settings?tab=admin",
+	)
+	recordAppLog("info", "library", "Queued library scan", map[string]any{
+		"job_id":     jobID,
+		"library_id": libraryID,
+	})
+
+	if startWorker {
+		signalLibraryScanWorker()
+	}
+
+	return jobID, true, nil
+}
+
+func requeueInterruptedLibraryScans() {
+	if appDB == nil {
+		return
+	}
+	_, err := appDB.Exec(`
+		UPDATE metadata_job
+		SET status = 'queued', started_at = NULL
+		WHERE job_type = 'library_scan'
+		  AND status = 'running'
+		  AND completed_at IS NULL
+	`)
+	if err != nil {
+		slog.Warn("Failed to requeue interrupted library scans", "error", err)
+	}
+}
+
+func signalLibraryScanWorker() {
+	if appDB == nil || appScanner == nil {
+		return
+	}
+	if !libraryScanWorker.CompareAndSwap(false, true) {
+		return
+	}
+	go runLibraryScanWorker()
+}
+
+func runLibraryScanWorker() {
+	defer func() {
+		libraryScanWorker.Store(false)
+		if hasQueuedLibraryScanJobs() {
+			signalLibraryScanWorker()
+		}
+	}()
+
+	for {
+		jobID, libraryID, libraryName, paths, title, ok := claimNextLibraryScanJob()
+		if !ok {
+			return
+		}
+		processLibraryScanJob(jobID, libraryID, libraryName, paths, title)
+	}
+}
+
+func hasQueuedLibraryScanJobs() bool {
+	var exists bool
+	if err := appDB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1
+			FROM metadata_job
+			WHERE job_type = ? AND status = ?
+		)
+	`, "library_scan", "queued").Scan(&exists); err != nil {
+		return false
+	}
+	return exists
+}
+
+func claimNextLibraryScanJob() (int64, int64, string, []string, string, bool) {
+	for {
+		var jobID int64
+		var title, payloadRaw string
+		err := appDB.QueryRow(`
+			SELECT id, title, COALESCE(payload_json, '')
+			FROM metadata_job
+			WHERE job_type = ? AND status = ?
+			ORDER BY created_at, id
+			LIMIT 1
+		`, "library_scan", "queued").Scan(&jobID, &title, &payloadRaw)
+		if err == sql.ErrNoRows {
+			return 0, 0, "", nil, "", false
+		}
+		if err != nil {
+			slog.Warn("Failed to load queued library scan", "error", err)
+			return 0, 0, "", nil, "", false
+		}
+
+		startedAt := time.Now().Unix()
+		result, err := appDB.Exec(`
+			UPDATE metadata_job
+			SET status = ?, started_at = ?
+			WHERE id = ? AND status = ?
+		`, "running", startedAt, jobID, "queued")
+		if err != nil {
+			slog.Warn("Failed to claim queued library scan", "job_id", jobID, "error", err)
+			return 0, 0, "", nil, "", false
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			continue
+		}
+
+		var payload struct {
+			LibraryID int64    `json:"library_id"`
+			Paths     []string `json:"paths"`
+		}
+		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil || payload.LibraryID == 0 || len(payload.Paths) == 0 {
+			completedAt := time.Now().Unix()
+			_, _ = appDB.Exec(`
+				UPDATE metadata_job
+				SET status = ?, error = ?, completed_at = ?
+				WHERE id = ?
+			`, "failed", "Invalid library scan payload", completedAt, jobID)
+			continue
+		}
+
+		var libraryName string
+		if err := appDB.QueryRow(`SELECT name FROM library WHERE id = ?`, payload.LibraryID).Scan(&libraryName); err != nil {
+			libraryName = fmt.Sprintf("Library %d", payload.LibraryID)
+		}
+
+		return jobID, payload.LibraryID, libraryName, payload.Paths, title, true
+	}
+}
+
+func processLibraryScanJob(jobID, libraryID int64, libraryName string, paths []string, title string) {
+	markLibraryScanning(libraryID, true)
+	defer markLibraryScanning(libraryID, false)
+
+	lastJobUpdate := time.Time{}
+	updateProgress := func(progress scanner.ScanProgress) {
+		if time.Since(lastJobUpdate) < time.Second &&
+			progress.ScannedFiles < progress.TotalFiles {
+			return
+		}
+		lastJobUpdate = time.Now()
+		resultPayload, _ := json.Marshal(map[string]any{
+			"library_id":      libraryID,
+			"library_name":    libraryName,
+			"imported_books":  progress.ImportedBooks,
+			"scanned_files":   progress.ScannedFiles,
+			"failed_files":    progress.FailedFiles,
+			"total_files":     progress.TotalFiles,
+			"current_path":    progress.CurrentPath,
+			"unchanged_files": progress.UnchangedFiles,
+			"missing_files":   progress.MissingFiles,
+			"changed_files":   progress.ChangedFiles,
+			"phase":           progress.Phase,
+		})
+		_, _ = appDB.Exec(`
+			UPDATE metadata_job
+			SET total_items = ?, completed_items = ?, failed_items = ?, result_json = ?
+			WHERE id = ?
+		`, progress.TotalFiles, progress.ScannedFiles, progress.FailedFiles, nullString(resultPayload), jobID)
+	}
+
+	imported, err := appScanner.ScanLibraryWithProgress(libraryID, paths, updateProgress)
+	completedAt := time.Now().Unix()
+	if err != nil {
+		_, _ = appDB.Exec(`
+			UPDATE metadata_job
+			SET status = ?, error = ?, completed_at = ?
+			WHERE id = ?
+		`, "failed", err.Error(), completedAt, jobID)
+		recordAppLog("error", "library", "Library scan failed", map[string]any{
+			"job_id":     jobID,
+			"library_id": libraryID,
+			"error":      err.Error(),
+		})
+		createAdminNotification(
+			"library_scan_failed",
+			"Library scan failed",
+			fmt.Sprintf("Library %d scan failed: %s", libraryID, err.Error()),
+			"/settings?tab=admin",
+		)
+		return
+	}
+
+	_, _ = appDB.Exec(`
+		UPDATE metadata_job
+		SET status = ?, completed_at = ?
+		WHERE id = ?
+	`, "completed", completedAt, jobID)
+	createAdminNotification(
+		"library_scan_completed",
+		title,
+		fmt.Sprintf("Library scan finished: %d new books imported.", imported),
+		"/settings?tab=admin",
+	)
+	recordAppLog("info", "library", "Library scan completed", map[string]any{
+		"job_id":     jobID,
+		"library_id": libraryID,
+		"imported":   imported,
+	})
 }
 
 func createLibraryHandler(w http.ResponseWriter, r *http.Request) {
@@ -1811,15 +2129,20 @@ func scanLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set importing status
-	scanningLibraries[libraryID] = true
+	jobID, queued, err := queueLibraryScan(libraryID, paths)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to create scan job")
+		return
+	}
+	if !queued {
+		jsonResponse(w, http.StatusAccepted, map[string]string{"status": "scanning"})
+		return
+	}
 
-	go func() {
-		appScanner.ScanLibrary(libraryID, paths)
-		scanningLibraries[libraryID] = false
-	}()
-
-	jsonResponse(w, http.StatusOK, map[string]string{"status": "scanning"})
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"status": "scanning",
+		"job_id": jobID,
+	})
 }
 
 func getDirectoriesHandler(w http.ResponseWriter, r *http.Request) {
@@ -2316,9 +2639,10 @@ func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	// Fetch libraries from DB
 	rows, err := appDB.Query(`
 		SELECT l.id, l.name, COALESCE(l.icon, '') as icon,
-		       COUNT(DISTINCT b.id) as book_count
+		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL THEN b.id END) as book_count
 		FROM library l
 		LEFT JOIN book b ON l.id = b.library_id
+		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
 		GROUP BY l.id, l.name, l.icon
 		ORDER BY l.name
 	`)
@@ -2345,34 +2669,48 @@ func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Fetch paths
-		pathRows, _ := appDB.Query("SELECT path FROM library_path WHERE library_id = ?", lib.ID)
 		paths := []string{}
+		pathRows, pathErr := appDB.Query("SELECT path FROM library_path WHERE library_id = ?", lib.ID)
+		if pathErr != nil {
+			slog.Warn("Failed to fetch library paths for settings", "library_id", lib.ID, "error", pathErr)
+			lib.IsImporting = isLibraryScanning(lib.ID)
+			lib.Paths = paths
+			libraries = append(libraries, lib)
+			continue
+		}
 		for pathRows.Next() {
 			var path string
-			pathRows.Scan(&path)
-			paths = append(paths, path)
+			if err := pathRows.Scan(&path); err == nil {
+				paths = append(paths, path)
+			}
 		}
 		pathRows.Close()
 
-		lib.IsImporting = len(scanningLibraries) > 0 // Set to true if any library is being scanned
+		lib.IsImporting = isLibraryScanning(lib.ID)
 		lib.Paths = paths
 		libraries = append(libraries, lib)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("Settings library rows ended with error", "error", err)
 	}
 
 	// Default reader settings
 	readerSettings := map[string]interface{}{
 		"epub": map[string]interface{}{
-			"fontFamily": "serif",
-			"fontSize":   16,
-			"lineHeight": 1.5,
-			"margin":     20,
-			"textAlign":  "justify",
-			"theme":      "light",
+			"fontFamily":     "serif",
+			"fontSize":       16,
+			"lineHeight":     1.5,
+			"margin":         20,
+			"textAlign":      "justify",
+			"theme":          "light",
+			"flow":           "scrolled",
+			"continuousMode": true,
 		},
 		"pdf": map[string]interface{}{
 			"pageFit":         "auto",
 			"zoomLevel":       100,
 			"scrollDirection": "vertical",
+			"scrollMode":      "continuous-vertical",
 		},
 		"cbx": map[string]interface{}{
 			"readerMode": "single",
@@ -2781,6 +3119,14 @@ func init() {
 const sessionCookieName = "cryptorum_session"
 const sessionSignatureCookieName = "cryptorum_sig"
 
+func authFailure(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		errorResponse(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
 func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if maintenanceMode.Load() {
@@ -2802,24 +3148,24 @@ func authMiddleware(next http.Handler) http.Handler {
 		signature, _ := r.Cookie(sessionSignatureCookieName)
 
 		if sessionID == nil || signature == nil {
-			http.Redirect(w, r, "/login", http.StatusFound)
+			authFailure(w, r)
 			return
 		}
 
 		if !sessionStore.VerifySignature(sessionID.Value, signature.Value) {
-			http.Redirect(w, r, "/login", http.StatusFound)
+			authFailure(w, r)
 			return
 		}
 
 		session, err := sessionStore.ValidateSession(sessionID.Value)
 		if err != nil || session == nil {
-			http.Redirect(w, r, "/login", http.StatusFound)
+			authFailure(w, r)
 			return
 		}
 
 		user, err := loadUserByID(session.UserID)
 		if err != nil {
-			http.Redirect(w, r, "/login", http.StatusFound)
+			authFailure(w, r)
 			return
 		}
 

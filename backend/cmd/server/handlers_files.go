@@ -341,6 +341,11 @@ func ServeBookFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Translate host path to container path if needed
 	filePath = translateHostPathToContainerPath(filePath)
+	info, err := os.Stat(filePath)
+	if err != nil || info.IsDir() {
+		errorResponse(w, http.StatusNotFound, "Book file not found")
+		return
+	}
 
 	// Set content type based on format
 	contentTypes := map[string]string{
@@ -361,6 +366,8 @@ func ServeBookFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", filepath.Base(filePath)))
 	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.Header().Set("ETag", fmt.Sprintf("\"bookfile-%d-%d-%d\"", bookIDInt, info.Size(), info.ModTime().Unix()))
 	http.ServeFile(w, r, filePath)
 }
 

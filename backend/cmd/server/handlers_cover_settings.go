@@ -78,8 +78,9 @@ func regenerateBookCoversHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Mode     string                     `json:"mode"`
-		Settings *bookCoverSettingsResponse `json:"settings,omitempty"`
+		Mode      string                     `json:"mode"`
+		LibraryID int64                      `json:"library_id,omitempty"`
+		Settings  *bookCoverSettingsResponse `json:"settings,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		errorResponse(w, http.StatusBadRequest, "Invalid request body")
@@ -90,6 +91,21 @@ func regenerateBookCoversHandler(w http.ResponseWriter, r *http.Request) {
 	if mode != "all" && mode != "missing" {
 		errorResponse(w, http.StatusBadRequest, "Mode must be 'all' or 'missing'")
 		return
+	}
+	if req.LibraryID < 0 {
+		errorResponse(w, http.StatusBadRequest, "Invalid library ID")
+		return
+	}
+	if req.LibraryID > 0 && !userCanAccessAllData(current) {
+		var exists bool
+		if err := appDB.QueryRow(`SELECT EXISTS(SELECT 1 FROM library WHERE id = ? AND owner_user_id = ?)`, req.LibraryID, current.ID).Scan(&exists); err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to verify library ownership")
+			return
+		}
+		if !exists {
+			errorResponse(w, http.StatusForbidden, "Permission denied")
+			return
+		}
 	}
 
 	settings := loadBookCoverSettingsResponse()
@@ -109,11 +125,12 @@ func regenerateBookCoversHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	recordAppLog("info", "covers", "Started cover regeneration", map[string]any{
-		"mode": mode,
+		"mode":       mode,
+		"library_id": req.LibraryID,
 	})
 
 	missingOnly := mode == "missing"
-	total, err := appScanner.CountCoverCandidates(missingOnly)
+	total, err := appScanner.CountCoverCandidatesForLibrary(req.LibraryID, missingOnly)
 	if err != nil {
 		slog.Error("Failed to count cover regeneration candidates", "mode", mode, "error", err)
 		errorResponse(w, http.StatusInternalServerError, "Failed to queue cover regeneration")
@@ -124,7 +141,10 @@ func regenerateBookCoversHandler(w http.ResponseWriter, r *http.Request) {
 	if missingOnly {
 		title = "Regenerate missing book covers"
 	}
-	payload, _ := json.Marshal(map[string]any{"mode": mode})
+	if req.LibraryID > 0 {
+		title += fmt.Sprintf(" for library %d", req.LibraryID)
+	}
+	payload, _ := json.Marshal(map[string]any{"mode": mode, "library_id": req.LibraryID})
 	now := time.Now().Unix()
 	res, err := appDB.Exec(`
 		INSERT INTO metadata_job (
@@ -147,12 +167,13 @@ func regenerateBookCoversHandler(w http.ResponseWriter, r *http.Request) {
 		"/settings?tab=admin",
 	)
 	recordAppLog("info", "jobs", "Queued cover regeneration job", map[string]any{
-		"job_id": jobID,
-		"mode":   mode,
-		"total":  total,
+		"job_id":     jobID,
+		"mode":       mode,
+		"library_id": req.LibraryID,
+		"total":      total,
 	})
 
-	go processCoverRegenerationJob(jobID, title, mode, missingOnly, total)
+	go processCoverRegenerationJob(jobID, title, mode, req.LibraryID, missingOnly, total)
 
 	job, err := loadAdminJob(jobID)
 	if err != nil {
@@ -163,7 +184,7 @@ func regenerateBookCoversHandler(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusAccepted, job)
 }
 
-func processCoverRegenerationJob(jobID int64, title, mode string, missingOnly bool, total int) {
+func processCoverRegenerationJob(jobID int64, title, mode string, libraryID int64, missingOnly bool, total int) {
 	startedAt := time.Now().Unix()
 	_, _ = appDB.Exec(`
 		UPDATE metadata_job
@@ -171,7 +192,7 @@ func processCoverRegenerationJob(jobID int64, title, mode string, missingOnly bo
 		WHERE id = ?
 	`, "running", startedAt, jobID)
 
-	updated, failed, err := appScanner.RegenerateCovers(missingOnly, func(processed, updated, failed, total int) {
+	updated, failed, err := appScanner.RegenerateCoversForLibrary(libraryID, missingOnly, func(processed, updated, failed, total int) {
 		_, _ = appDB.Exec(`
 			UPDATE metadata_job
 			SET completed_items = ?, failed_items = ?
@@ -185,11 +206,12 @@ func processCoverRegenerationJob(jobID int64, title, mode string, missingOnly bo
 			SET status = ?, error = ?, completed_at = ?
 			WHERE id = ?
 		`, "failed", err.Error(), completedAt, jobID)
-		slog.Error("Failed to regenerate book covers", "mode", mode, "error", err)
+		slog.Error("Failed to regenerate book covers", "mode", mode, "library_id", libraryID, "error", err)
 		recordAppLog("error", "covers", "Cover regeneration failed", map[string]any{
-			"job_id": jobID,
-			"mode":   mode,
-			"error":  err.Error(),
+			"job_id":     jobID,
+			"mode":       mode,
+			"library_id": libraryID,
+			"error":      err.Error(),
 		})
 		createAdminNotification(
 			"job_failed",
@@ -201,10 +223,11 @@ func processCoverRegenerationJob(jobID int64, title, mode string, missingOnly bo
 	}
 
 	resultPayload := map[string]any{
-		"mode":    mode,
-		"updated": updated,
-		"failed":  failed,
-		"total":   total,
+		"mode":       mode,
+		"library_id": libraryID,
+		"updated":    updated,
+		"failed":     failed,
+		"total":      total,
 	}
 	resultJSON, _ := json.Marshal(resultPayload)
 	_, _ = appDB.Exec(`
@@ -213,12 +236,13 @@ func processCoverRegenerationJob(jobID int64, title, mode string, missingOnly bo
 		WHERE id = ?
 	`, "completed", total, failed, nullString(resultJSON), completedAt, jobID)
 
-	slog.Info("Book cover regeneration finished", "mode", mode, "updated", updated, "total", total)
+	slog.Info("Book cover regeneration finished", "mode", mode, "library_id", libraryID, "updated", updated, "total", total)
 	recordAppLog("info", "covers", "Cover regeneration finished", map[string]any{
-		"job_id":  jobID,
-		"mode":    mode,
-		"updated": updated,
-		"total":   total,
+		"job_id":     jobID,
+		"mode":       mode,
+		"library_id": libraryID,
+		"updated":    updated,
+		"total":      total,
 	})
 	createAdminNotification(
 		"job_completed",

@@ -21,6 +21,9 @@
 	--color-glow-intensity: 0.1;
 	--glow-opacity: 1;
 	--color-bg-image-opacity: 1;
+	--color-bg-image-position: center center;
+	--color-bg-image-repeat: no-repeat;
+	--color-bg-image-size: cover;
 }
 
 body {
@@ -41,10 +44,35 @@ body::before {
 	content: '';
 	position: fixed;
 	inset: 0;
-	background: var(--color-bg-image, none);
+	background-image: var(--color-bg-image, none);
+	background-position: var(--color-bg-image-position);
+	background-repeat: var(--color-bg-image-repeat);
+	background-size: var(--color-bg-image-size);
 	opacity: var(--color-bg-image-opacity);
 	pointer-events: none;
 	z-index: -1;
+}
+
+@keyframes scan-spin-counterclockwise {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(-360deg);
+	}
+}
+
+.animate-scan-spin {
+	animation: scan-spin-counterclockwise 1s linear infinite;
+}
+
+html.true-fullscreen-reader,
+body.true-fullscreen-reader {
+	width: 100vw;
+	height: 100vh;
+	min-height: 100vh;
+	overflow: hidden;
+	background: #000;
 }
 
 /* Custom scrollbar styling */

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -45,13 +46,15 @@ type AdminJob struct {
 }
 
 type AdminNotification struct {
-	ID        int64  `json:"id"`
-	Kind      string `json:"kind"`
-	Title     string `json:"title"`
-	Message   string `json:"message,omitempty"`
-	URL       string `json:"url,omitempty"`
-	ReadAt    *int64 `json:"read_at,omitempty"`
-	CreatedAt int64  `json:"created_at"`
+	ID        int64     `json:"id"`
+	Source    string    `json:"source"`
+	Kind      string    `json:"kind"`
+	Title     string    `json:"title"`
+	Message   string    `json:"message,omitempty"`
+	URL       string    `json:"url,omitempty"`
+	ReadAt    *int64    `json:"read_at,omitempty"`
+	CreatedAt int64     `json:"created_at"`
+	Job       *AdminJob `json:"job,omitempty"`
 }
 
 type AdminLogEntry struct {
@@ -174,6 +177,112 @@ func loadAdminJob(jobID int64) (AdminJob, error) {
 	job.StartedAt = scanOptionalInt(startedAt)
 	job.CompletedAt = scanOptionalInt(completedAt)
 	return job, nil
+}
+
+func isJobNotificationKind(kind string) bool {
+	return strings.HasPrefix(kind, "job_") ||
+		strings.HasPrefix(kind, "library_scan_") ||
+		strings.HasPrefix(kind, "backup_") ||
+		strings.HasPrefix(kind, "cover_regeneration_")
+}
+
+func isActiveJobStatus(status string) bool {
+	return status == "queued" || status == "running"
+}
+
+func jobNotificationMessage(job AdminJob) string {
+	progress := ""
+	if job.TotalItems > 0 {
+		progress = fmt.Sprintf(" %d/%d completed, %d failed.", job.CompletedItems, job.TotalItems, job.FailedItems)
+	}
+	if job.Error != "" {
+		return fmt.Sprintf("%s.%s Error: %s", job.Status, progress, job.Error)
+	}
+	return fmt.Sprintf("%s.%s", job.Status, progress)
+}
+
+func jobNotificationReadAt(job AdminJob) *int64 {
+	if isActiveJobStatus(job.Status) {
+		return nil
+	}
+	if job.CompletedAt != nil {
+		return job.CompletedAt
+	}
+	readAt := job.CreatedAt
+	return &readAt
+}
+
+func humanizeKey(key string) string {
+	parts := strings.FieldsFunc(key, func(r rune) bool {
+		return r == '_' || r == '-'
+	})
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+func humanizeLogData(data json.RawMessage) string {
+	if len(data) == 0 {
+		return ""
+	}
+
+	var values map[string]any
+	if err := json.Unmarshal(data, &values); err != nil || len(values) == 0 {
+		return ""
+	}
+
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		value := values[key]
+		switch typed := value.(type) {
+		case nil:
+			continue
+		case string:
+			if strings.TrimSpace(typed) == "" {
+				continue
+			}
+			parts = append(parts, fmt.Sprintf("%s: %s", humanizeKey(key), typed))
+		case float64:
+			if typed == float64(int64(typed)) {
+				parts = append(parts, fmt.Sprintf("%s: %d", humanizeKey(key), int64(typed)))
+			} else {
+				parts = append(parts, fmt.Sprintf("%s: %.2f", humanizeKey(key), typed))
+			}
+		case bool:
+			parts = append(parts, fmt.Sprintf("%s: %t", humanizeKey(key), typed))
+		default:
+			encoded, err := json.Marshal(typed)
+			if err != nil {
+				continue
+			}
+			parts = append(parts, fmt.Sprintf("%s: %s", humanizeKey(key), string(encoded)))
+		}
+	}
+
+	return strings.Join(parts, " · ")
+}
+
+func notificationTextLine(item AdminNotification) string {
+	when := time.Unix(item.CreatedAt, 0).Format(time.RFC3339)
+	source := item.Kind
+	if item.Source != "" {
+		source = item.Source + " · " + item.Kind
+	}
+	line := fmt.Sprintf("%s [%s] %s", when, source, item.Title)
+	if strings.TrimSpace(item.Message) != "" {
+		line += " - " + item.Message
+	}
+	return line
 }
 
 func loadMetadataLookupSnapshot(bookID int64) (MetadataLookupBookSnapshot, error) {
@@ -872,39 +981,172 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	includeUnreadOnly := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("unread")), "true")
-
-	query := `
-		SELECT id, kind, title, COALESCE(message, ''), COALESCE(url, ''),
-		       read_at, created_at
-		FROM app_notification
-	`
-	args := []any{}
-	if includeUnreadOnly {
-		query += " WHERE read_at IS NULL"
-	}
-	query += " ORDER BY created_at DESC LIMIT ?"
-	args = append(args, limit)
-
-	rows, err := appDB.Query(query, args...)
-	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to load notifications")
-		return
-	}
-	defer rows.Close()
+	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
 
 	notifications := []AdminNotification{}
-	for rows.Next() {
-		var item AdminNotification
-		var readAt sql.NullInt64
-		if err := rows.Scan(&item.ID, &item.Kind, &item.Title, &item.Message, &item.URL, &readAt, &item.CreatedAt); err != nil {
+	if statusFilter == "" {
+		query := `
+			SELECT id, kind, title, COALESCE(message, ''), COALESCE(url, ''),
+			       read_at, created_at
+			FROM app_notification
+		`
+		args := []any{}
+		conditions := []string{}
+		if includeUnreadOnly {
+			conditions = append(conditions, "read_at IS NULL")
+		}
+		conditions = append(conditions, `
+			kind NOT LIKE 'job_%'
+			AND kind NOT LIKE 'library_scan_%'
+			AND kind NOT LIKE 'backup_%'
+			AND kind NOT LIKE 'cover_regeneration_%'
+		`)
+		query += " WHERE " + strings.Join(conditions, " AND ")
+		query += " ORDER BY created_at DESC LIMIT ?"
+		args = append(args, limit)
+
+		rows, err := appDB.Query(query, args...)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to load notifications")
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var item AdminNotification
+			var readAt sql.NullInt64
+			if err := rows.Scan(&item.ID, &item.Kind, &item.Title, &item.Message, &item.URL, &readAt, &item.CreatedAt); err != nil {
+				continue
+			}
+			item.Source = "notification"
+			item.ReadAt = scanOptionalInt(readAt)
+			notifications = append(notifications, item)
+		}
+
+		if !includeUnreadOnly {
+			logRows, err := appDB.Query(`
+				SELECT id, level, category, message, COALESCE(data_json, ''), created_at
+				FROM app_log
+				ORDER BY created_at DESC
+				LIMIT ?
+			`, limit)
+			if err != nil {
+				errorResponse(w, http.StatusInternalServerError, "Failed to load log notifications")
+				return
+			}
+			defer logRows.Close()
+
+			for logRows.Next() {
+				var logEntry AdminLogEntry
+				var data sql.NullString
+				if err := logRows.Scan(
+					&logEntry.ID, &logEntry.Level, &logEntry.Category, &logEntry.Message,
+					&data, &logEntry.CreatedAt,
+				); err != nil {
+					continue
+				}
+				logEntry.Data = rawMessageOrNil(data)
+				readAt := logEntry.CreatedAt
+				notifications = append(notifications, AdminNotification{
+					ID:        -1000000000 - logEntry.ID,
+					Source:    "log",
+					Kind:      logEntry.Level + " · " + logEntry.Category,
+					Title:     logEntry.Message,
+					Message:   humanizeLogData(logEntry.Data),
+					URL:       "",
+					ReadAt:    &readAt,
+					CreatedAt: logEntry.CreatedAt,
+				})
+			}
+		}
+	}
+
+	jobQuery := `
+		SELECT id, job_type, title, status, payload_json, result_json,
+		       total_items, completed_items, failed_items, COALESCE(error, ''),
+		       created_at, started_at, completed_at
+		FROM metadata_job
+	`
+	jobArgs := []any{}
+	jobConditions := []string{}
+	if statusFilter != "" {
+		jobConditions = append(jobConditions, "status = ?")
+		jobArgs = append(jobArgs, statusFilter)
+	}
+	if includeUnreadOnly {
+		jobConditions = append(jobConditions, "status IN ('queued', 'running')")
+	}
+	if len(jobConditions) > 0 {
+		jobQuery += " WHERE " + strings.Join(jobConditions, " AND ")
+	}
+	jobQuery += " ORDER BY created_at DESC LIMIT ?"
+	jobArgs = append(jobArgs, limit)
+
+	jobRows, err := appDB.Query(jobQuery, jobArgs...)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to load job notifications")
+		return
+	}
+	defer jobRows.Close()
+
+	for jobRows.Next() {
+		var job AdminJob
+		var payload, result sql.NullString
+		var startedAt, completedAt sql.NullInt64
+		if err := jobRows.Scan(
+			&job.ID, &job.JobType, &job.Title, &job.Status, &payload, &result,
+			&job.TotalItems, &job.CompletedItems, &job.FailedItems, &job.Error,
+			&job.CreatedAt, &startedAt, &completedAt,
+		); err != nil {
 			continue
 		}
-		item.ReadAt = scanOptionalInt(readAt)
-		notifications = append(notifications, item)
+		job.Payload = rawMessageOrNil(payload)
+		job.Result = rawMessageOrNil(result)
+		job.StartedAt = scanOptionalInt(startedAt)
+		job.CompletedAt = scanOptionalInt(completedAt)
+		jobCopy := job
+		notifications = append(notifications, AdminNotification{
+			ID:        -job.ID,
+			Source:    "job",
+			Kind:      job.JobType,
+			Title:     job.Title,
+			Message:   jobNotificationMessage(job),
+			URL:       "/settings?tab=admin",
+			ReadAt:    jobNotificationReadAt(job),
+			CreatedAt: job.CreatedAt,
+			Job:       &jobCopy,
+		})
+	}
+
+	sort.SliceStable(notifications, func(i, j int) bool {
+		return notifications[i].CreatedAt > notifications[j].CreatedAt
+	})
+	if len(notifications) > limit {
+		notifications = notifications[:limit]
+	}
+
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if format == "text" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		for _, item := range notifications {
+			_, _ = w.Write([]byte(notificationTextLine(item) + "\n"))
+		}
+		return
 	}
 
 	var unreadCount int64
-	_ = appDB.QueryRow(`SELECT COUNT(*) FROM app_notification WHERE read_at IS NULL`).Scan(&unreadCount)
+	_ = appDB.QueryRow(`
+		SELECT COUNT(*)
+		FROM app_notification
+		WHERE read_at IS NULL
+		  AND kind NOT LIKE 'job_%'
+		  AND kind NOT LIKE 'library_scan_%'
+		  AND kind NOT LIKE 'backup_%'
+		  AND kind NOT LIKE 'cover_regeneration_%'
+	`).Scan(&unreadCount)
+	var activeJobCount int64
+	_ = appDB.QueryRow(`SELECT COUNT(*) FROM metadata_job WHERE status IN ('queued', 'running')`).Scan(&activeJobCount)
+	unreadCount += activeJobCount
 
 	jsonResponse(w, http.StatusOK, map[string]any{
 		"items":        notifications,

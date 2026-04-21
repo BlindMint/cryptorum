@@ -10,6 +10,8 @@
 		name: string;
 		icon: string;
 		book_count: number;
+		is_importing?: boolean;
+		paths?: string[];
 	}
 
 	interface Shelf {
@@ -20,16 +22,20 @@
 
 	let libraries = $state<Library[]>([]);
 	let shelves = $state<Shelf[]>([]);
+	let activeLibraryScanJobs = $state<any[]>([]);
 	let isLoading = $state(false);
 	let isCreating = $state(false);
-	let scanIntervals = $state<Map<number, number>>(new Map());
+	let refreshTimer: number | null = null;
 	let sidebarWidth = $state(256);
 	let sidebarCollapsed = $state(false);
 	let isResizing = $state(false);
 	let activeResizePointerId: number | null = null;
+	let activeLibraryMenu = $state<Library | null>(null);
+	let libraryMenuPosition = $state({ top: 0, left: 0 });
 
 	// Library modal state
 	let showLibraryModal = $state(false);
+	let editingLibrary = $state<Library | null>(null);
 	let showLibraryIconPicker = $state(false);
 	let libraryForm = $state({
 		name: '',
@@ -37,13 +43,12 @@
 		paths: ['']
 	});
 	let currentLibraryIcon = $derived(parseLibraryIcon(libraryForm.icon));
-	let lastRefresh = 0;
-	let modalPortal: HTMLDivElement;
 
 	// Directory browser state
 	let showDirectoryModal = $state(false);
 	let currentDirectory = $state('/');
 	let directoryContents = $state<any[]>([]);
+	let directoryLoading = $state(false);
 	const SIDEBAR_MIN_WIDTH = 240;
 	const SIDEBAR_MAX_WIDTH = 400;
 	const SIDEBAR_STORAGE_KEY = 'sidebarWidth';
@@ -127,6 +132,22 @@
 		return currentPath === href;
 	}
 
+	function getJobLibraryId(job: any): number | null {
+		const payload = job?.payload;
+		if (!payload) return null;
+		if (typeof payload.library_id === 'number') return payload.library_id;
+		if (typeof payload.library_id === 'string') {
+			const parsed = Number.parseInt(payload.library_id, 10);
+			return Number.isNaN(parsed) ? null : parsed;
+		}
+		return null;
+	}
+
+	function isLibraryScanActive(library: Library): boolean {
+		return !!library.is_importing ||
+			activeLibraryScanJobs.some((job: any) => getJobLibraryId(job) === library.id);
+	}
+
 	onMount(async () => {
 		const storedWidth = localStorage.getItem(SIDEBAR_STORAGE_KEY);
 		if (storedWidth !== null) {
@@ -136,28 +157,73 @@
 			}
 		}
 
-		try {
-			const res = await fetch('/api/libraries');
-			if (res.ok) libraries = await res.json();
-		} catch (e) {
-			console.error('Failed to fetch libraries:', e);
-		}
+		await loadData();
+		refreshTimer = window.setInterval(() => {
+			if (libraries.some((library) => isLibraryScanActive(library)) || activeLibraryScanJobs.length > 0) {
+				void loadData();
+			}
+		}, 3000);
 
 		(window as any).refreshSidebar = loadData;
+		document.addEventListener('click', closeLibraryMenu);
 	});
 
 	onDestroy(() => {
 		stopResize();
+		document.removeEventListener('click', closeLibraryMenu);
+		if (refreshTimer !== null) {
+			window.clearInterval(refreshTimer);
+		}
 	});
 
 	function openLibraryModal() {
+		editingLibrary = null;
 		libraryForm = { name: '', icon: '', paths: [''] };
 		showLibraryModal = true;
 	}
 
 	function closeLibraryModal() {
 		showLibraryModal = false;
+		editingLibrary = null;
 		showLibraryIconPicker = false;
+	}
+
+	function closeLibraryMenu() {
+		activeLibraryMenu = null;
+	}
+
+	function openLibraryMenu(event: MouseEvent, library: Library) {
+		event.preventDefault();
+		event.stopPropagation();
+
+		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		const menuWidth = 196;
+		const menuHeight = 178;
+		const margin = 8;
+
+		libraryMenuPosition = {
+			top: Math.min(Math.max(margin, rect.bottom + 4), window.innerHeight - menuHeight - margin),
+			left: Math.min(Math.max(margin, rect.right - menuWidth), window.innerWidth - menuWidth - margin)
+		};
+		activeLibraryMenu = activeLibraryMenu?.id === library.id ? null : library;
+	}
+
+	async function openEditLibrary(library: Library | null) {
+		if (!library) return;
+		closeLibraryMenu();
+		try {
+			const response = await fetch(`/api/libraries/${library.id}`, { cache: 'no-store' });
+			const fullLibrary = response.ok ? await response.json() : library;
+			editingLibrary = fullLibrary;
+			libraryForm = {
+				name: fullLibrary.name || '',
+				icon: fullLibrary.icon || '',
+				paths: fullLibrary.paths?.length ? [...fullLibrary.paths] : ['']
+			};
+			showLibraryModal = true;
+		} catch (e) {
+			console.error('Failed to load library for editing:', e);
+		}
 	}
 
 	function openLibraryIconPicker() {
@@ -183,80 +249,83 @@
 		}
 	}
 
-	async function createLibrary() {
+	async function saveLibrary() {
 		if (!libraryForm.name.trim()) return;
 
 		isCreating = true;
 		try {
 			const filteredPaths = libraryForm.paths.filter(p => p.trim());
-			const response = await fetch('/api/libraries', {
-				method: 'POST',
+			const libraryBeingEdited = editingLibrary;
+			const response = await fetch(libraryBeingEdited ? `/api/libraries/${libraryBeingEdited.id}` : '/api/libraries', {
+				method: libraryBeingEdited ? 'PUT' : 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ ...libraryForm, paths: filteredPaths })
 			});
 
 			if (response.ok) {
-				const newLibrary = await response.json();
+				const savedLibrary = libraryBeingEdited ? libraryBeingEdited : await response.json();
 				closeLibraryModal();
 
 				// Reload data to get is_importing state and updated book_count
 				await loadData();
 
 				// Trigger a scan for the new library
-				await scanLibrary(newLibrary);
+				if (!libraryBeingEdited) {
+					await scanLibrary(savedLibrary);
+				}
 			} else {
-				console.error('Failed to create library');
+				console.error(`Failed to ${libraryBeingEdited ? 'update' : 'create'} library`);
 			}
 		} catch (error) {
-			console.error('Error creating library:', error);
+			console.error('Error saving library:', error);
 		} finally {
 			isCreating = false;
 		}
 	}
 
 	async function scanLibrary(library: any) {
+		closeLibraryMenu();
 		try {
 			const response = await fetch(`/api/libraries/${library.id}/scan`, { method: 'POST' });
 			if (response.ok) {
-				// Start polling for updates
-				const interval = setInterval(async () => {
-					await loadData();
-					// Check if still importing
-					const libsRes = await fetch('/api/libraries');
-					if (libsRes.ok) {
-						const libs = await libsRes.json();
-						const updatedLib = libs.find((l: any) => l.id === library.id);
-						if (updatedLib && !updatedLib.is_importing) {
-							clearInterval(interval);
-							scanIntervals.delete(library.id);
-						}
-					}
-				}, 3000);
-
-				scanIntervals.set(library.id, interval as any);
-
-				// Stop after 5 minutes
-				setTimeout(() => {
-					clearInterval(interval);
-					scanIntervals.delete(library.id);
-				}, 300000);
+				await loadData();
 			}
 		} catch (e) {
 			console.error('Failed to scan library:', e);
 		}
 	}
 
+	async function regenerateLibraryCovers(library: Library | null, mode: 'all' | 'missing' = 'all') {
+		if (!library) return;
+		closeLibraryMenu();
+		try {
+			const response = await fetch('/api/settings/book-covers/regenerate', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ mode, library_id: library.id })
+			});
+			if (!response.ok) {
+				console.error('Failed to queue library cover regeneration:', await response.text());
+			}
+		} catch (e) {
+			console.error('Failed to queue library cover regeneration:', e);
+		}
+	}
+
 	async function openDirectoryModal() {
 		showDirectoryModal = true;
+		currentDirectory = '/books';
+		directoryContents = [];
+		directoryLoading = true;
 		try {
 			const response = await fetch('/api/directories?path=/books');
 			if (response.ok) {
-				loadDirectoryContents('/books');
+				await loadDirectoryContents('/books');
 			} else {
-				loadDirectoryContents('/');
+				await loadDirectoryContents('/');
 			}
 		} catch (e) {
-			loadDirectoryContents('/');
+			await loadDirectoryContents('/');
 		}
 	}
 
@@ -266,6 +335,8 @@
 
 	async function loadDirectoryContents(path: string) {
 		currentDirectory = path;
+		directoryLoading = true;
+		directoryContents = [];
 		try {
 			const response = await fetch(`/api/directories?path=${encodeURIComponent(path)}`);
 			if (response.ok) {
@@ -275,6 +346,8 @@
 			}
 		} catch (e) {
 			directoryContents = [];
+		} finally {
+			directoryLoading = false;
 		}
 	}
 
@@ -299,8 +372,8 @@
 
 		try {
 			const [libsRes, shelvesRes] = await Promise.all([
-				fetch('/api/libraries'),
-				fetch('/api/shelves')
+				fetch('/api/libraries', { cache: 'no-store' }),
+				fetch('/api/shelves', { cache: 'no-store' })
 			]);
 
 			if (libsRes.ok) {
@@ -312,10 +385,33 @@
 				const sh = await shelvesRes.json();
 				if (sh) shelves = sh;
 			}
+
+			await loadActiveLibraryScanJobs();
 		} catch (e) {
 			console.error('Failed to load navigation data:', e);
 		} finally {
 			isLoading = false;
+		}
+	}
+
+	async function loadActiveLibraryScanJobs() {
+		try {
+			const res = await fetch('/api/notifications?unread=true&limit=100', { cache: 'no-store' });
+			if (!res.ok) {
+				activeLibraryScanJobs = [];
+				return;
+			}
+			const data = await res.json();
+			activeLibraryScanJobs = (data.items ?? [])
+				.filter((item: any) =>
+					item.source === 'job' &&
+					item.job?.job_type === 'library_scan' &&
+					['queued', 'running'].includes(item.job.status)
+				)
+				.map((item: any) => item.job);
+		} catch (e) {
+			console.error('Failed to load active library scan jobs:', e);
+			activeLibraryScanJobs = [];
 		}
 	}
 
@@ -328,10 +424,10 @@
 	id="app-sidebar"
 	class="
 		fixed lg:static top-16 lg:top-0 bottom-0 left-0 z-40
-		w-64 bg-[var(--color-surface-overlay)] border-r border-[var(--color-surface-border)]
+		w-64 bg-[var(--color-surface-overlay)] shadow-[1px_0_0_rgba(255,255,255,0.03)]
 		transform transition-transform duration-200 ease-in-out overflow-hidden
 		lg:translate-x-0
-		{sidebarCollapsed ? 'lg:w-0 lg:min-w-0 lg:border-r-0' : 'lg:w-[var(--sidebar-width)] lg:min-w-[240px]'}
+		{sidebarCollapsed ? 'lg:w-0 lg:min-w-0 lg:shadow-none' : 'lg:w-[var(--sidebar-width)] lg:min-w-[240px]'}
 		{$mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
 		flex flex-col h-[calc(100dvh-4rem)] lg:h-full min-h-0
 	"
@@ -403,25 +499,42 @@
 			</div>
 
 			{#each libraries as library}
-				<a
-					href="/library?library={library.id}"
-					onclick={() => $mobileMenuOpen = false}
-					class="flex items-center px-3 py-2 rounded-lg transition-all duration-200 {isActive('/library?library=' + library.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
+				<div
+					class="group/library-row flex items-center rounded-lg transition-all duration-200 {isActive('/library?library=' + library.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
 				>
-					<div class="flex items-center space-x-3 flex-1 min-w-0">
-						{#if 'is_importing' in library && library.is_importing}
-							<svg class="animate-spin w-5 h-5 text-[var(--color-primary-500)] flex-shrink-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-							</svg>
-						{:else}
-							<svg class="w-5 h-5 text-[var(--color-primary-500)] flex-shrink-0 transition-transform duration-200 {isActive('/library?library=' + library.id) ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-							</svg>
-						{/if}
-						<span class="truncate flex-1 min-w-0">{library.name}</span>
-					</div>
-					<span class="text-xs text-[var(--color-surface-500)] font-medium px-2 py-0.5 bg-[var(--color-surface-700)] rounded-md ml-2 flex-shrink-0">{library.book_count}</span>
-				</a>
+					<a
+						href="/library?library={library.id}"
+						onclick={() => $mobileMenuOpen = false}
+						class="flex min-w-0 flex-1 items-center space-x-3 px-3 py-2"
+					>
+							{#if isLibraryScanActive(library)}
+								<svg class="animate-scan-spin w-5 h-5 text-[var(--color-primary-500)] flex-shrink-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+								</svg>
+							{:else}
+								<svg class="w-5 h-5 text-[var(--color-primary-500)] flex-shrink-0 transition-transform duration-200 {isActive('/library?library=' + library.id) ? '' : 'group-hover/library-row:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+								</svg>
+							{/if}
+							<span class="truncate flex-1 min-w-0">{library.name}</span>
+					</a>
+					<button
+						type="button"
+						class="group/count relative mr-2 inline-flex h-7 min-w-8 flex-shrink-0 items-center justify-center rounded-md bg-[var(--color-surface-700)] px-2 text-xs font-medium text-[var(--color-surface-500)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
+						aria-haspopup="menu"
+						aria-expanded={activeLibraryMenu?.id === library.id}
+						aria-label="Open actions for {library.name}"
+						title="Library actions"
+						onclick={(event) => openLibraryMenu(event, library)}
+					>
+						<span class="transition-opacity group-hover/count:opacity-0 group-focus/count:opacity-0 {activeLibraryMenu?.id === library.id ? 'opacity-0' : ''}">{library.book_count}</span>
+						<svg class="absolute h-4 w-4 opacity-0 transition-opacity group-hover/count:opacity-100 group-focus/count:opacity-100 {activeLibraryMenu?.id === library.id ? 'opacity-100' : ''}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+							<circle cx="12" cy="5" r="2"></circle>
+							<circle cx="12" cy="12" r="2"></circle>
+							<circle cx="12" cy="19" r="2"></circle>
+						</svg>
+					</button>
+				</div>
 			{/each}
 		</div>
 
@@ -478,21 +591,84 @@
 	</footer>
 </div>
 	<div
-		class={`group absolute inset-y-0 right-0 hidden w-4 lg:flex items-center justify-end cursor-col-resize touch-none select-none border-l border-[var(--color-surface-border)]/70 bg-gradient-to-l from-[var(--color-surface-border)]/10 to-transparent transition-colors hover:from-[var(--color-primary-500)]/10 ${sidebarCollapsed ? 'lg:pointer-events-none lg:opacity-0' : ''}`}
+		class={`group absolute inset-y-0 -right-1 hidden w-3 lg:flex cursor-col-resize touch-none select-none ${sidebarCollapsed ? 'lg:pointer-events-none lg:opacity-0' : ''}`}
 		title="Drag to resize sidebar"
 		role="separator"
 		aria-orientation="vertical"
 		aria-label="Resize sidebar"
 		onpointerdown={startResize}
 	>
-		<div class="mr-1 h-12 w-1 rounded-full bg-[var(--color-surface-border)] transition-colors group-hover:bg-[var(--color-primary-500)]"></div>
+		<div class={`ml-auto h-full w-px bg-transparent transition-colors group-hover:bg-[var(--color-primary-500)]/55 ${isResizing ? 'bg-[var(--color-primary-500)]/70' : ''}`}></div>
 	</div>
 </aside>
 
+{#if activeLibraryMenu}
+	<div
+		class="fixed z-[90] w-[196px] overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-1 shadow-2xl"
+		style:top={`${libraryMenuPosition.top}px`}
+		style:left={`${libraryMenuPosition.left}px`}
+		role="menu"
+		tabindex="-1"
+		aria-label="Actions for {activeLibraryMenu.name}"
+		onclick={(event) => event.stopPropagation()}
+		onkeydown={(event) => event.stopPropagation()}
+	>
+		<a
+			href="/library?library={activeLibraryMenu.id}"
+			class="block px-3 py-2 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+			role="menuitem"
+			onclick={() => { closeLibraryMenu(); $mobileMenuOpen = false; }}
+		>
+			Open Library
+		</a>
+		<button
+			type="button"
+			class="block w-full px-3 py-2 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+			role="menuitem"
+			onclick={() => openEditLibrary(activeLibraryMenu)}
+		>
+			Edit Library
+		</button>
+		<button
+			type="button"
+			class="block w-full px-3 py-2 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] disabled:cursor-not-allowed disabled:opacity-60"
+			role="menuitem"
+			disabled={isLibraryScanActive(activeLibraryMenu)}
+			onclick={() => scanLibrary(activeLibraryMenu)}
+		>
+			{isLibraryScanActive(activeLibraryMenu) ? 'Scan Running' : 'Scan Library'}
+		</button>
+		<button
+			type="button"
+			class="block w-full px-3 py-2 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+			role="menuitem"
+			onclick={() => regenerateLibraryCovers(activeLibraryMenu, 'all')}
+		>
+			Regenerate Covers
+		</button>
+		<button
+			type="button"
+			class="block w-full px-3 py-2 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+			role="menuitem"
+			onclick={() => regenerateLibraryCovers(activeLibraryMenu, 'missing')}
+		>
+			Regenerate Missing Covers
+		</button>
+		<a
+			href="/settings?tab=general"
+			class="block px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)]"
+			role="menuitem"
+			onclick={closeLibraryMenu}
+		>
+			Manage Libraries
+		</a>
+	</div>
+{/if}
+
 <button
 	type="button"
-	class="fixed top-[5rem] z-50 hidden lg:flex h-12 w-7 items-center justify-center rounded-r-lg border border-l-0 border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] shadow-lg transition-colors hover:text-[var(--color-primary-500)]"
-	style:left={sidebarCollapsed ? '0px' : `${sidebarWidth - 14}px`}
+	class="fixed top-[5rem] z-50 hidden h-10 w-6 items-center justify-center rounded-r-md bg-[var(--color-surface-overlay)]/80 text-[var(--color-surface-text-muted)] shadow-[0_8px_24px_rgba(0,0,0,0.18)] backdrop-blur-sm transition-colors hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)] lg:flex"
+	style:left={sidebarCollapsed ? '0px' : `${sidebarWidth - 10}px`}
 	aria-controls="app-sidebar"
 	aria-expanded={!sidebarCollapsed}
 	aria-label={sidebarCollapsed ? 'Open sidebar' : 'Collapse sidebar'}
@@ -504,7 +680,7 @@
 </button>
 
 	  {#if showLibraryModal}
-		<div class="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4 relative" role="dialog" aria-modal="true" tabindex="-1">
+		<div class="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4" role="dialog" aria-modal="true" tabindex="-1">
 			<button
 				type="button"
 				class="absolute inset-0 z-0"
@@ -513,7 +689,7 @@
 			></button>
 			<div class="relative z-10 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl">
 			<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add Library</h3>
+				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">{editingLibrary ? 'Edit Library' : 'Add Library'}</h3>
 			</div>
 			<div class="p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-120px)]">
 					<div class="grid grid-cols-2 gap-4">
@@ -571,7 +747,7 @@
 									<path d="M12 5v14"></path>
 									<path d="M5 12h14"></path>
 								</svg>
-								+ Select icon
+								Select icon
 							</button>
 						{/if}
 					</div>
@@ -663,12 +839,14 @@
 					</button>
 					<button
 						type="button"
-						onclick={createLibrary}
+						onclick={saveLibrary}
 						disabled={!libraryForm.name.trim() || libraryForm.paths.filter(p => p.trim()).length === 0 || isCreating}
 						class="px-4 py-2 rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 				>
 					{#if isCreating}
-						Creating...
+						Saving...
+					{:else if editingLibrary}
+						Save Library
 					{:else}
 						Create Library
 					{/if}
@@ -696,7 +874,12 @@
 					</p>
 				</div>
 				<div class="p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0">
-					{#if directoryContents.length === 0}
+					{#if directoryLoading}
+						<div class="text-center py-8">
+							<div class="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-[var(--color-surface-border)] border-t-[var(--color-primary-500)]"></div>
+							<p class="text-[var(--color-surface-text-muted)]">Loading directories...</p>
+						</div>
+					{:else if directoryContents.length === 0}
 						<div class="text-center py-8">
 							<svg class="w-8 h-8 text-[var(--color-surface-text-muted)] mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>

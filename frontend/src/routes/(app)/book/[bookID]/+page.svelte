@@ -281,6 +281,14 @@
 		return path.split(/[/\\]/).pop() || path;
 	}
 
+	function getPrimaryFilePath(): string {
+		const preferredFormat = getPreferredBookFormat(files);
+		const preferredFile = preferredFormat
+			? files.find((file) => file.format === preferredFormat)
+			: null;
+		return preferredFile?.path || files[0]?.path || '';
+	}
+
 	function toggleConvertMenu(fileId: number) {
 		convertMenuFileId = convertMenuFileId === fileId ? null : fileId;
 	}
@@ -1002,6 +1010,14 @@
 								</dd>
 							</div>
 						{/if}
+						{#if getPrimaryFilePath()}
+							<div class="flex items-start gap-2 col-span-2">
+								<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Path</dt>
+								<dd class="min-w-0 break-all font-mono text-xs text-[var(--color-surface-text)]">
+									{getPrimaryFilePath()}
+								</dd>
+							</div>
+						{/if}
 								{#if book.series}
 									<div class="flex items-start gap-2 col-span-2">
 										<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Series</dt>
@@ -1250,9 +1266,9 @@
 								<p class="text-[var(--color-surface-text-muted)]">No similar books found</p>
 							</div>
 						{:else}
-							<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+							<div class="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-4 justify-items-center">
 										{#each similarBooks as similar}
-										<a href="/book/{similar.id}" class="group block rounded-xl p-2 transition-all duration-200 ease-out hover:-translate-y-1 hover:bg-[var(--color-surface-overlay)] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
+										<a href="/book/{similar.id}" class="group block w-full max-w-[12rem] min-w-0 rounded-xl p-2 transition-all duration-200 ease-out hover:-translate-y-1 hover:bg-[var(--color-surface-overlay)] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
 											<BookCoverFrame
 												src={similar.cover_path ? `/api/covers/${similar.id}` : null}
 												alt={similar.title}

@@ -1623,17 +1623,91 @@ func TriggerScanHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
-		for _, lib := range appConfig.Libraries {
-			var libraryID int64
-			appDB.QueryRow("SELECT id FROM library WHERE name = ? AND owner_user_id = ?", lib.Name, 1).Scan(&libraryID)
-			if libraryID > 0 {
-				appScanner.ScanLibrary(libraryID, lib.Paths)
+	ownerClause, ownerArgs := userOwnershipClause(current, "l")
+	rows, err := appDB.Query(`
+		SELECT l.id
+		FROM library l
+		WHERE `+ownerClause+`
+		ORDER BY l.name
+	`, ownerArgs...)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to fetch libraries")
+		return
+	}
+
+	libraryIDs := []int64{}
+	for rows.Next() {
+		var libraryID int64
+		if err := rows.Scan(&libraryID); err != nil {
+			continue
+		}
+		libraryIDs = append(libraryIDs, libraryID)
+	}
+	readErr := rows.Err()
+	rows.Close()
+	if readErr != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to read libraries")
+		return
+	}
+
+	queuedJobs := []int64{}
+	queuedLibraryIDs := []int64{}
+	skipped := 0
+	for _, libraryID := range libraryIDs {
+		pathRows, err := appDB.Query(`SELECT path FROM library_path WHERE library_id = ?`, libraryID)
+		if err != nil {
+			slog.Warn("Failed to fetch library paths for scan", "library_id", libraryID, "error", err)
+			skipped++
+			continue
+		}
+		paths := []string{}
+		for pathRows.Next() {
+			var path string
+			if err := pathRows.Scan(&path); err == nil {
+				paths = append(paths, path)
 			}
 		}
-	}()
+		pathRows.Close()
+		if err := pathRows.Err(); err != nil {
+			slog.Warn("Failed to read library paths for scan", "library_id", libraryID, "error", err)
+			skipped++
+			continue
+		}
+		if len(paths) == 0 {
+			skipped++
+			continue
+		}
 
-	jsonResponse(w, http.StatusOK, map[string]string{"status": "scanning"})
+		jobID, queued, err := queueLibraryScanWithWorker(libraryID, paths, false)
+		if err != nil {
+			slog.Warn("Failed to queue library scan", "library_id", libraryID, "error", err)
+			skipped++
+			continue
+		}
+		if queued {
+			queuedJobs = append(queuedJobs, jobID)
+			queuedLibraryIDs = append(queuedLibraryIDs, libraryID)
+		} else {
+			skipped++
+		}
+	}
+
+	if len(queuedJobs) > 0 {
+		go func() {
+			// Let clients observe the full queued batch before the worker starts draining fast scans.
+			time.Sleep(750 * time.Millisecond)
+			signalLibraryScanWorker()
+		}()
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"status":             "scanning",
+		"library_count":      len(libraryIDs),
+		"queued_jobs":        queuedJobs,
+		"queued_library_ids": queuedLibraryIDs,
+		"queued_count":       len(queuedJobs),
+		"skipped":            skipped,
+	})
 }
 
 // RebuildFTSHandler rebuilds the FTS index for search

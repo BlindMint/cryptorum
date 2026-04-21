@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { readerSettings, cbxFitModes, cbxScrollModes, type CbxReaderSetting } from '$lib/stores/readerSettings';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
+	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
 
 	let book = $state<any>(null);
 	let loading = $state(true);
@@ -27,6 +28,7 @@
 		spreadHandling: 'auto',
 		pageTransitionSound: false,
 		autoHideControls: true,
+		useStandardFullscreen: false,
 		vibrance: 100,
 		saturation: 100
 	});
@@ -373,11 +375,7 @@
 	}
 
 	function toggleFullscreen() {
-		if (!document.fullscreenElement) {
-			document.documentElement.requestFullscreen().catch(console.error);
-		} else {
-			document.exitFullscreen().catch(console.error);
-		}
+		toggleReaderFullscreen(settings.useStandardFullscreen).catch(console.error);
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -775,6 +773,17 @@
 							/>
 							<span class="color-value">{settings.backgroundColor}</span>
 						</div>
+					</div>
+
+					<div class="settings-section">
+						<label class="toggle-option">
+							<span>Use Standard Fullscreen</span>
+							<input
+								type="checkbox"
+								checked={settings.useStandardFullscreen}
+								onchange={(e) => updateSetting('useStandardFullscreen', e.currentTarget.checked)}
+							/>
+						</label>
 					</div>
 
 				{:else if activeSettingsTab === 'comic'}

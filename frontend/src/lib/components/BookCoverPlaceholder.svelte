@@ -21,7 +21,6 @@
 		class="absolute inset-0"
 		style="background: radial-gradient(circle at 28% 18%, rgba(255, 255, 255, 0.14), transparent 46%), radial-gradient(circle at 72% 84%, rgba(0, 0, 0, 0.14), transparent 36%);"
 	></div>
-	<div class="absolute left-[12%] top-[12%] bottom-[12%] w-[6%] rounded-full bg-white/10"></div>
 	<div class="relative flex h-full w-full items-center justify-center">
 		<svg
 			class="{sizeClasses[size]} text-[var(--color-cover-placeholder-icon)] drop-shadow-sm"

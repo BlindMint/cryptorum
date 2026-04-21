@@ -76,6 +76,40 @@ function createShowFormatOnCoverStore() {
 
 export const showFormatOnCover = createShowFormatOnCoverStore();
 
+function createNotificationVisualIndicatorStore() {
+	const defaultValue = true;
+	const { subscribe, set, update } = writable<boolean>(defaultValue);
+
+	return {
+		subscribe,
+		set: (value: boolean) => {
+			if (browser) {
+				localStorage.setItem('notificationVisualIndicator', JSON.stringify(value));
+			}
+			set(value);
+		},
+		update: (fn: (value: boolean) => boolean) => {
+			update(value => {
+				const newValue = fn(value);
+				if (browser) {
+					localStorage.setItem('notificationVisualIndicator', JSON.stringify(newValue));
+				}
+				return newValue;
+			});
+		},
+		init: () => {
+			if (browser) {
+				const stored = localStorage.getItem('notificationVisualIndicator');
+				if (stored !== null) {
+					set(JSON.parse(stored));
+				}
+			}
+		}
+	};
+}
+
+export const notificationVisualIndicator = createNotificationVisualIndicatorStore();
+
 // File format colors for badges
 export const formatColors: Record<string, { bg: string; text: string }> = {
 	epub: { bg: '#10b981', text: '#ffffff' },   // emerald-500
