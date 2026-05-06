@@ -4,11 +4,14 @@ A personal digital library application for self-hosting. Organize, read, and man
 
 ## Features
 
-- **Multiple Format Support**: EPUB, PDF, CBZ/CBR (comics), MP3/M4B/M4A (audiobooks)
-- **Library Organization**: Organize books by custom libraries and shelves
-- **Built-in Readers**: Read books directly in the app with dedicated readers for each format
+- **Multiple Format Support**: EPUB/text ebooks, PDF, CBZ/CBR/CB7/CBT comics, and MP3/M4B/M4A/other audiobooks
+- **Library Organization**: Organize books by custom libraries and shelves, with per-library discovery exclusions
+- **Built-in Readers**: Read books directly in the app with dedicated readers for ebooks, PDFs, comics, audiobooks, and speed reading
+- **EmbedPDF PDF Reader**: PDF reading is powered by EmbedPDF/PDFium, not PDF.js, with app-integrated progress, resume, search access, auto-hiding chrome, and theme-aware controls
 - **Full-Text Search**: Find books quickly with SQLite FTS5 search
-- **Reading Progress**: Track your reading progress across all books
+- **Reading Progress**: Track and resume progress across supported readers, with cover progress bars for opened books
+- **Discovery**: Dashboard discovery and similar-book recommendations can exclude selected libraries while keeping those books searchable and readable
+- **Cover Metadata**: Optional file-format chips on covers, including library/dashboard/shelf cards and similar books
 - **Speed Reader**: RSVP word-at-a-time reading mode for text formats
 - **Single-User Design**: Simple authentication with password protection
 
@@ -45,7 +48,7 @@ server:
 
 auth:
   mode: password            # Use "none" to disable authentication
-  username: your_username
+  username: username
   password_hash: "$2a$10$..."  # bcrypt hash of your password
   session_duration: 720h
 
@@ -95,6 +98,21 @@ The Docker image installs a prebuilt Calibre binary and uses `ebook-convert` to 
 text-first ebooks into a cached canonical EPUB package that powers both continuous and
 paginated reading modes.
 
+## Readers
+
+Cryptorum includes separate reader experiences for each major format family:
+
+- **EPUB/text ebooks** use epub.js plus the app's processed EPUB cache for continuous or paginated reading.
+- **PDFs** use EmbedPDF's Svelte viewer, backed by PDFium WebAssembly. The current PDF reader does not use PDF.js.
+- **Comics** use the app's CBX reader for archive formats such as CBZ, CBR, CB7, and CBT.
+- **Audiobooks** use the app's audio reader for common audio formats.
+- **Speed Reader** provides an RSVP-style mode for text-readable formats.
+
+Reader controls are designed to stay out of the way while reading. PDF, EPUB, and comic
+readers include auto-hiding top controls, center-tap show/hide behavior, draggable/tappable
+progress sliders, manual fullscreen controls, and progress saving/resume support. PDF and
+speed reader settings also include a "keep screen on" option for long mobile reading sessions.
+
 ## Volume Mounts
 
 | Path | Description |
@@ -108,7 +126,7 @@ paginated reading modes.
 By default, authentication is enabled. Set `auth.mode: none` in config.yaml to disable.
 
 **Default credentials** (change these!):
-- Username: `samurai`
+- Username: `username`
 - Password: `password`
 
 ## Development
@@ -129,7 +147,8 @@ npm run dev
 
 - **Backend**: Go + chi router + SQLite
 - **Frontend**: SvelteKit + Tailwind CSS
-- **Readers**: epub.js, PDF.js
+- **Readers**: epub.js, EmbedPDF/PDFium, custom CBX/audio/speed readers
+- **Processing**: Calibre `ebook-convert` for text-ebook normalization
 
 ## License
 
