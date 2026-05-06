@@ -15,6 +15,22 @@ A personal digital library application for self-hosting. Organize, read, and man
 - **Speed Reader**: RSVP word-at-a-time reading mode for text formats
 - **Single-User Design**: Simple authentication with password protection
 
+## Screenshots
+
+A quick tour of the main library, reader, and settings views:
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/01-dashboard.png" alt="Cryptorum dashboard" width="900">
+</p>
+
+| Dashboard | Book Details | Reader |
+|-----------|--------------|--------|
+| <a href="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/01-dashboard.png"><img src="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/01-dashboard.png" alt="Dashboard" width="260"></a> | <a href="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/02-book-details.png"><img src="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/02-book-details.png" alt="Book details" width="260"></a> | <a href="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/03-reader.png"><img src="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/03-reader.png" alt="Reader" width="260"></a> |
+
+| Settings | Reader Settings | Reading History | Statistics |
+|----------|-----------------|-----------------|------------|
+| <a href="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/04-settings-01.png"><img src="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/04-settings-01.png" alt="Settings" width="200"></a> | <a href="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/05-settings-02.png"><img src="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/05-settings-02.png" alt="Reader settings" width="200"></a> | <a href="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/06-reading-history.png"><img src="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/06-reading-history.png" alt="Reading history" width="200"></a> | <a href="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/07-statistics.png"><img src="https://raw.githubusercontent.com/BlindMint/cryptorum/refs/heads/master/docs/images/07-statistics.png" alt="Statistics" width="200"></a> |
+
 ## Quick Start
 
 ### Prerequisites
