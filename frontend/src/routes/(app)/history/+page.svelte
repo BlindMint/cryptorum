@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { getCoverThumbUrl } from '$lib/utils/covers';
 	
 	let history = $state<any[]>([]);
 	let loading = $state(true);
@@ -104,7 +105,13 @@
 								<div class="flex items-start space-x-4">
 									<div class="w-16 h-24 bg-[var(--color-surface-overlay)] rounded overflow-hidden flex-shrink-0">
 										{#if item.cover_path}
-											<img src="/api/covers/{item.book_id}" alt={item.title} class="w-full h-full object-cover">
+											<img
+												src={getCoverThumbUrl(item.book_id, 'small')}
+												alt={item.title}
+												class="w-full h-full object-cover"
+												loading="lazy"
+												decoding="async"
+											>
 										{:else}
 											<div class="w-full h-full flex items-center justify-center">
 												<svg class="w-8 h-8 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
