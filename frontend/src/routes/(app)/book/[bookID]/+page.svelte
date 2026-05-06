@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import AutocompleteInput from '$lib/components/AutocompleteInput.svelte';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
+	import { showFormatOnCover, getFormatColor } from '$lib/stores';
 	import { getCoverThumbUrl } from '$lib/utils/covers';
 	import {
 		getBookReaderHref,
@@ -35,6 +37,7 @@
 	let shelfActionInProgress = $state(false);
 	let shelfActionMessage = $state('');
 	let formatMenuOpen = $state(false);
+	let formatOnCover = $state(true);
 	let convertMenuFileId = $state<number | null>(null);
 	let selectedConvertFormat = $state<'epub' | 'fb2' | 'txt' | 'rtf'>('epub');
 
@@ -46,6 +49,15 @@
 		{ value: 'reading', label: 'Currently Reading' },
 		{ value: 'finished', label: 'Already Read' }
 	];
+
+	$effect(() => {
+		const unsub = showFormatOnCover.subscribe((value: boolean) => formatOnCover = value);
+		return unsub;
+	});
+
+	onMount(() => {
+		showFormatOnCover.init();
+	});
 
 	$effect(() => {
 		const bookId = $page.params.bookID;
@@ -1274,7 +1286,7 @@
 						{:else}
 							<div class="grid grid-cols-2 gap-4 sm:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] sm:justify-items-center">
 										{#each similarBooks as similar}
-										<a href="/book/{similar.id}" class="group block w-full min-w-0 rounded-xl p-2 transition-all duration-200 ease-out hover:-translate-y-1 hover:bg-[var(--color-surface-overlay)] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:max-w-[12rem]">
+										<a href="/book/{similar.id}" class="group relative block w-full min-w-0 rounded-xl p-2 transition-all duration-200 ease-out hover:-translate-y-1 hover:bg-[var(--color-surface-overlay)] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:max-w-[12rem]">
 											<BookCoverFrame
 												src={similar.cover_path ? getCoverThumbUrl(similar.id, 'medium', similar.cover_updated_on) : null}
 												alt={similar.title}
@@ -1283,6 +1295,15 @@
 												imageClass="transition-all duration-200 ease-out group-hover:scale-[1.02] group-hover:opacity-80"
 												placeholderSize="md"
 											/>
+											{#if formatOnCover && similar.format}
+												{@const formatColor = getFormatColor(similar.format)}
+												<div
+													class="absolute left-4 top-4 z-10 rounded border border-black/20 px-1.5 py-0.5 text-[10px] font-medium uppercase shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+													style="background-color: {formatColor.bg}; color: {formatColor.text};"
+												>
+													{similar.format}
+												</div>
+											{/if}
 											<h4 class="truncate text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 group-hover:text-[var(--color-primary-400)]">{similar.title}</h4>
 											<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{parseAuthors(similar.authors).join(', ')}</p>
 										</a>

@@ -20,7 +20,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	});
 	let localReaderSettings = $state<ReaderSettings>({
 		epub: { fontFamily: 'serif', fontSize: 18, fontWeight: 400, fontStyle: 'normal' as const, lineHeight: 1.6, letterSpacing: 0, paragraphSpacing: 0, paragraphIndent: 0, justify: true, hyphenate: false, hyphenationLanguage: 'en', maxColumnCount: 1, gap: 5, theme: 'dark', isDark: true, flow: 'paginated' as const, maxInlineSize: 680, maxBlockSize: 1440, margin: 5, continuousMaxWidth: 720, brightness: 100, contrast: 100, pageAnimation: 'slide' as const, autoAdvance: false, autoAdvanceTimer: 0, fullscreenLock: false, useStandardFullscreen: false, autoHideControls: true, customCss: '', showTextLayer: true, originalLayout: false, continuousMode: true, showImages: true, imageSize: 'fit-width' as const, imageGrayscale: false },
-		pdf: { pageSpread: 'off' as const, pageLayout: 'single' as const, pageZoom: 'auto', zoomLevel: 100, renderQuality: 'high' as const, autoHideControls: true, showSidebar: false, scrollDirection: 'vertical' as const, scrollMode: 'paged' as const, pageRotation: 0 as const, backgroundColor: '#111111', brightness: 100, contrast: 100, grayscale: 0, readingDirection: 'ltr' as const, autoCropMargins: false, textLayerEnabled: true, annotationsEnabled: true, viewMode: 'dark' as const, showChapterMarkers: false, showQuoteMarks: false, panMode: false, useStandardFullscreen: false },
+		pdf: { pageSpread: 'off' as const, pageLayout: 'single' as const, pageZoom: 'auto', zoomLevel: 100, renderQuality: 'high' as const, autoHideControls: true, showSidebar: false, scrollDirection: 'vertical' as const, scrollMode: 'paged' as const, pageRotation: 0 as const, backgroundColor: '#111111', brightness: 100, contrast: 100, grayscale: 0, readingDirection: 'ltr' as const, autoCropMargins: false, textLayerEnabled: true, annotationsEnabled: true, viewMode: 'dark' as const, showChapterMarkers: false, showQuoteMarks: false, panMode: false, useStandardFullscreen: false, keepScreenOn: true },
 		cbx: { pageSpread: 'auto' as const, pageLayout: 'single' as const, fitMode: 'fit-width' as const, scrollMode: 'paginated' as const, backgroundColor: '#111111', readingDirection: 'ltr' as const, stripMaxWidthPercent: 100, mangaMode: false, panelViewEnabled: false, spreadHandling: 'auto' as const, pageTransitionSound: false, autoHideControls: true, useStandardFullscreen: false, vibrance: 100, saturation: 100 },
 		audio: { playbackSpeed: 1.0, skipForward: 15, skipBackward: 15, autoAdvance: false, autoHideControls: true, gaplessPlayback: true, sleepTimer: 'off' as const, sleepTimerCustom: 30, theme: 'cover-focused' as const, waveformStyle: 'line' as const, backgroundStyle: 'cover-blur' as const, voiceBoost: false, equalizerLow: 50, equalizerMid: 50, equalizerHigh: 50 },
 		speedReader: { wpm: 300, wordSize: 48, fontFamily: 'serif', focalPoint: 0.38, centerWord: false, accentEnabled: true, accentColor: '#ef4444', accentOpacity: 1.0, focusIndicator: 'lines' as const, focusIndicatorDistance: 20, horizontalBars: true, horizontalBarsColor: '#666666', horizontalBarsOpacity: 1.0, verticalIndicator: 'off' as const, sentencePause: 350, autoSentencePause: true, keepScreenOn: true, theme: 'dark', letterSpacing: 0, focusIndicatorLength: 20 }
@@ -1504,6 +1504,18 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 								>
 								<label for="pdfAutoHideControls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
+							</div>
+
+							<!-- Keep Screen On -->
+							<div class="flex items-center space-x-3">
+								<input
+									type="checkbox"
+									id="pdfKeepScreenOn"
+									checked={localReaderSettings.pdf.keepScreenOn}
+									onchange={(e) => updatePdfSetting('keepScreenOn', e.currentTarget.checked)}
+									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+								>
+								<label for="pdfKeepScreenOn" class="text-sm font-medium text-[var(--color-surface-text)]">Keep screen on</label>
 							</div>
 						</div>
 					</div>

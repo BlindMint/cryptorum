@@ -6,7 +6,7 @@
 	import { readerSettings, pdfZoomModes } from '$lib/stores/readerSettings';
 	import type { PdfReaderSetting, PdfViewMode } from '$lib/stores/readerSettings';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
-	import { enterReaderFullscreen, toggleReaderFullscreen } from '$lib/utils/fullscreen';
+	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
 	import EmbedPDFViewer from '$lib/components/EmbedPDFViewer.svelte';
 
 	let book = $state<any>(null);
@@ -59,7 +59,8 @@
 		showChapterMarkers: false,
 		showQuoteMarks: false,
 		panMode: false,
-		useStandardFullscreen: false
+		useStandardFullscreen: false,
+		keepScreenOn: true
 	});
 
 	type SidebarTab = 'thumbnails' | 'bookmarks' | 'search';
@@ -132,7 +133,7 @@
 	let fitWidthActive = $state(false);
 	let viewportResizeTimeout: ReturnType<typeof setTimeout> | null = null;
 	let topBarHideTimeout: ReturnType<typeof setTimeout> | null = null;
-	let topBarVisible = $state(true);
+	let topBarVisible = $state(false);
 	let lastContinuousScrollTop = 0;
 	let sessionEnded = false;
 	let handlePageExit: (() => void) | null = null;
@@ -143,8 +144,8 @@
 	let lastSavedPage = 0;
 	let closeTasksStarted = false;
 	let readerClosing = false;
-	let fullscreenAutoSatisfied = false;
-	let fullscreenAutoRequestInFlight = false;
+	let wakeLock: WakeLockSentinel | null = null;
+	let wakeLockRequestInFlight = false;
 	let readerPointerStart: { id: number; x: number; y: number } | null = null;
 	let readerPointerMoved = false;
 	let backgroundWarmupTimer: ReturnType<typeof setTimeout> | null = null;
@@ -153,6 +154,7 @@
 	const progress = $derived(numPages > 0 ? (currentPage / numPages) * 100 : 0);
 	const pageTotalLabel = $derived(numPages > 0 ? String(numPages) : '...');
 	const pageNavigationReady = $derived(numPages > 0 && !readerClosing);
+	const readerChromeReady = $derived(embedPdfViewerReady && !loading && !error);
 
 	const renderQualityScale: Record<PdfReaderSetting['renderQuality'], number> = {
 		standard: 1,
@@ -212,7 +214,7 @@
 		return value;
 	}
 
-	function getReaderReturnUrl() {
+	function getLaunchReturnPath() {
 		const queryReturnTo = getSafeReturnPath($page.url.searchParams.get('returnTo'));
 		if (queryReturnTo) return queryReturnTo;
 
@@ -227,6 +229,13 @@
 				// Ignore invalid referrers and fall back to the book or library route.
 			}
 		}
+
+		return null;
+	}
+
+	function getReaderReturnUrl() {
+		const launchReturnPath = getLaunchReturnPath();
+		if (launchReturnPath) return launchReturnPath;
 
 		return book?.id ? `/book/${book.id}` : '/library';
 	}
@@ -425,6 +434,7 @@
 		clearSearchTimer();
 		clearSearchFlashTimer();
 		destroyPdfLoading();
+		releasePdfWakeLock();
 		if (handlePageExit) {
 			window.removeEventListener('pagehide', handlePageExit);
 			window.removeEventListener('beforeunload', handlePageExit);
@@ -654,10 +664,10 @@
 	}
 
 	function controlsNeedToStayVisible() {
+		if (!readerChromeReady) return false;
+
 		return (
 			!settings.autoHideControls ||
-			loading ||
-			!!error ||
 			leftSidebarOpen ||
 			rightSidebarOpen ||
 			isEditingPage ||
@@ -703,12 +713,21 @@
 	}
 
 	function hideTopBar() {
+		if (!readerChromeReady) {
+			topBarVisible = false;
+			clearTopBarHideTimer();
+			return;
+		}
 		if (controlsNeedToStayVisible()) return;
 		topBarVisible = false;
 	}
 
 	function scheduleTopBarAutoHide() {
 		clearTopBarHideTimer();
+		if (!readerChromeReady) {
+			topBarVisible = false;
+			return;
+		}
 		if (controlsNeedToStayVisible()) return;
 
 		topBarHideTimeout = setTimeout(() => {
@@ -718,6 +737,11 @@
 	}
 
 	function showTopBar(scheduleHide = true) {
+		if (!readerChromeReady) {
+			topBarVisible = false;
+			clearTopBarHideTimer();
+			return;
+		}
 		topBarVisible = true;
 		if (scheduleHide) {
 			scheduleTopBarAutoHide();
@@ -727,6 +751,7 @@
 	}
 
 	function toggleTopBarFromCenterTap() {
+		if (!readerChromeReady) return;
 		if (controlsNeedToStayVisible()) return;
 		if (topBarVisible) {
 			hideTopBar();
@@ -735,29 +760,63 @@
 		}
 	}
 
-	async function requestDefaultTrueFullscreen() {
+	async function requestPdfWakeLock() {
 		if (
 			!browser ||
-			fullscreenAutoSatisfied ||
-			fullscreenAutoRequestInFlight ||
-			!document.fullscreenEnabled ||
-			document.fullscreenElement
+			!settings.keepScreenOn ||
+			!readerChromeReady ||
+			readerClosing ||
+			wakeLock ||
+			wakeLockRequestInFlight ||
+			!('wakeLock' in navigator) ||
+			document.visibilityState !== 'visible'
 		) {
 			return;
 		}
 
-		fullscreenAutoRequestInFlight = true;
+		wakeLockRequestInFlight = true;
 		try {
-			await enterReaderFullscreen(settings.useStandardFullscreen);
-			fullscreenAutoSatisfied = Boolean(document.fullscreenElement);
-		} catch {
-			fullscreenAutoSatisfied = false;
+			wakeLock = await navigator.wakeLock.request('screen');
+			wakeLock.addEventListener('release', () => {
+				wakeLock = null;
+			});
+		} catch (e) {
+			console.warn('Failed to keep PDF reader screen awake:', e);
 		} finally {
-			fullscreenAutoRequestInFlight = false;
+			wakeLockRequestInFlight = false;
+		}
+	}
+
+	function releasePdfWakeLock() {
+		if (!wakeLock) return;
+		const lock = wakeLock;
+		wakeLock = null;
+		lock.release().catch(() => undefined);
+	}
+
+	function syncPdfWakeLock() {
+		if (settings.keepScreenOn && readerChromeReady && !readerClosing) {
+			void requestPdfWakeLock();
+		} else {
+			releasePdfWakeLock();
+		}
+	}
+
+	function handleVisibilityChange() {
+		if (document.visibilityState === 'visible') {
+			syncPdfWakeLock();
+		} else {
+			releasePdfWakeLock();
 		}
 	}
 
 	function resetTopBarBehavior() {
+		if (!readerChromeReady) {
+			topBarVisible = false;
+			clearTopBarHideTimer();
+			return;
+		}
+
 		if (!settings.autoHideControls || controlsNeedToStayVisible()) {
 			showTopBar(false);
 			return;
@@ -1235,9 +1294,6 @@
 		if (!e.isPrimary) return;
 		readerPointerStart = { id: e.pointerId, x: e.clientX, y: e.clientY };
 		readerPointerMoved = false;
-		if (!isInteractiveReaderTarget(e.target)) {
-			void requestDefaultTrueFullscreen();
-		}
 	}
 
 	function handlePdfContainerPointerUp(e: PointerEvent) {
@@ -2034,67 +2090,86 @@
 	function handleMouseUp() {
 		isDragging = false;
 		activePanScrollContainer = null;
-		isDraggingProgress = false;
 	}
 
 	let isDraggingProgress = $state(false);
 	let pendingProgressPage = $state<number | null>(null);
+	let pdfProgressBarEl = $state<HTMLElement | null>(null);
+	let activeProgressPointerId: number | null = null;
 
-	function handleProgressThumbMouseDown(e: MouseEvent) {
+	function getProgressPageFromClientX(clientX: number) {
+		if (!pdfProgressBarEl || numPages <= 0) return null;
+
+		const rect = pdfProgressBarEl.getBoundingClientRect();
+		if (rect.width <= 0) return null;
+
+		const x = clientX - rect.left;
+		const percentage = Math.max(0, Math.min(1, x / rect.width));
+		return clampPage(Math.round(percentage * numPages), numPages);
+	}
+
+	function updateProgressDrag(clientX: number) {
+		const newPage = getProgressPageFromClientX(clientX);
+		if (newPage === null) return;
+
+		pendingProgressPage = newPage;
+		currentPage = newPage;
+	}
+
+	function handleProgressPointerDown(e: PointerEvent) {
+		if (numPages <= 0) return;
 		e.preventDefault();
 		e.stopPropagation();
 		showTopBar(false);
 		isDraggingProgress = true;
 		pendingProgressPage = null;
-		window.addEventListener('mousemove', handleProgressMouseMove);
-		window.addEventListener('mouseup', handleProgressMouseUp);
+		activeProgressPointerId = e.pointerId;
+		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+		updateProgressDrag(e.clientX);
 	}
 
-	function handleProgressMouseMove(e: MouseEvent) {
+	function handleProgressPointerMove(e: PointerEvent) {
 		if (!isDraggingProgress) return;
+		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
 
-		const progressBar = document.querySelector('.progress-bar') as HTMLElement;
-		if (!progressBar) return;
-
-		const rect = progressBar.getBoundingClientRect();
-		const x = e.clientX - rect.left;
-		const percentage = Math.max(0, Math.min(1, x / rect.width));
-		const newPage = Math.round(percentage * numPages);
-		if (newPage >= 1 && newPage <= numPages) {
-			pendingProgressPage = newPage;
-			currentPage = newPage;
-		}
+		e.preventDefault();
+		updateProgressDrag(e.clientX);
 	}
 
-	function handleProgressMouseUp() {
-		isDraggingProgress = false;
-		window.removeEventListener('mousemove', handleProgressMouseMove);
-		window.removeEventListener('mouseup', handleProgressMouseUp);
+	function finishProgressPointer(e?: PointerEvent) {
+		if (!isDraggingProgress) return;
+		const targetPage = pendingProgressPage;
 
-		if (pendingProgressPage !== null) {
-			jumpToPage(pendingProgressPage);
-			pendingProgressPage = null;
+		if (e && activeProgressPointerId !== null) {
+			(e.currentTarget as HTMLElement).releasePointerCapture?.(activeProgressPointerId);
+		}
+
+		isDraggingProgress = false;
+		activeProgressPointerId = null;
+		pendingProgressPage = null;
+
+		if (targetPage !== null) {
+			jumpToPage(targetPage);
 		}
 		resetTopBarBehavior();
 	}
 
-	function jumpToPage(pageNum: number) {
-		if (pageNum >= 1 && pageNum <= numPages) {
-			showTopBar(settings.scrollMode === 'paged');
-			navigateToPage(pageNum, 'auto');
-		}
+	function handleProgressPointerUp(e: PointerEvent) {
+		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
+		e.preventDefault();
+		e.stopPropagation();
+		finishProgressPointer(e);
 	}
 
-	function handleProgressBarClick(e: MouseEvent) {
-		const progressBar = document.querySelector('.progress-bar') as HTMLElement;
-		if (!progressBar) return;
+	function handleProgressPointerCancel(e: PointerEvent) {
+		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
+		finishProgressPointer(e);
+	}
 
-		const rect = progressBar.getBoundingClientRect();
-		const x = e.clientX - rect.left;
-		const percentage = Math.max(0, Math.min(1, x / rect.width));
-		const newPage = Math.round(percentage * numPages);
-		if (newPage >= 1 && newPage <= numPages) {
-			jumpToPage(newPage);
+	function jumpToPage(pageNum: number) {
+		if (pageNum >= 1 && pageNum <= numPages) {
+			showTopBar(true);
+			navigateToPage(pageNum, 'auto');
 		}
 	}
 
@@ -2260,6 +2335,7 @@
 		e?.preventDefault();
 		const targetUrl = getReaderReturnUrl();
 		readerClosing = true;
+		releasePdfWakeLock();
 		startCloseBackgroundTasks(true);
 		void goto(targetUrl, { replaceState: true });
 	}
@@ -2449,8 +2525,15 @@
 		}
 	});
 
+	$effect(() => {
+		settings.keepScreenOn;
+		readerChromeReady;
+		if (browser) {
+			syncPdfWakeLock();
+		}
+	});
+
 	onMount(() => {
-		void requestDefaultTrueFullscreen();
 		window.addEventListener('keydown', handleKeydown);
 		window.addEventListener('wheel', handleWheelNavigation, { passive: false });
 		window.addEventListener('mousemove', handleMouseMove);
@@ -2459,6 +2542,7 @@
 		window.addEventListener('pointermove', handleReaderPointerMove);
 		window.addEventListener('pointerup', handlePdfContainerPointerUp);
 		window.addEventListener('resize', handleViewportResize);
+		document.addEventListener('visibilitychange', handleVisibilityChange);
 		pdfContainerEl?.addEventListener('touchstart', handleTouchStart, { passive: false });
 		pdfContainerEl?.addEventListener('touchmove', handleTouchMove, { passive: false });
 		pdfContainerEl?.addEventListener('touchend', handleTouchEnd);
@@ -2472,6 +2556,7 @@
 			window.removeEventListener('pointermove', handleReaderPointerMove);
 			window.removeEventListener('pointerup', handlePdfContainerPointerUp);
 			window.removeEventListener('resize', handleViewportResize);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			pdfContainerEl?.removeEventListener('touchstart', handleTouchStart);
 			pdfContainerEl?.removeEventListener('touchmove', handleTouchMove);
 			pdfContainerEl?.removeEventListener('touchend', handleTouchEnd);
@@ -2529,7 +2614,9 @@
 		console.log('EmbedPDF ready, registry:', registry);
 		embedPdfScroll = registry.getPlugin?.('scroll')?.provides?.() ?? null;
 		embedPdfViewerReady = true;
+		topBarVisible = true;
 		resetTopBarBehavior();
+		syncPdfWakeLock();
 	}
 </script>
 
@@ -2541,6 +2628,7 @@
 	bind:this={pdfReaderEl}
 	class="pdf-reader"
 	class:controls-hidden={!topBarVisible}
+	class:reader-loading={!readerChromeReady}
 	style="background-color: {viewModeBgColors[settings.viewMode]};"
 	role="application"
 >
@@ -2552,7 +2640,7 @@
 	></div>
 
 	<div class="embedpdf-wrapper">
-			{#if embedPdfViewerReady}
+			{#if readerChromeReady}
 				<a
 					href={getReaderReturnUrl()}
 					onclick={closeReader}
@@ -2577,8 +2665,12 @@
 					</svg>
 				</button>
 				<div
+					bind:this={pdfProgressBarEl}
 					class="embedpdf-progress progress-bar"
-					onclick={(e) => handleProgressBarClick(e)}
+					onpointerdown={(e) => handleProgressPointerDown(e)}
+					onpointermove={(e) => handleProgressPointerMove(e)}
+					onpointerup={(e) => handleProgressPointerUp(e)}
+					onpointercancel={(e) => handleProgressPointerCancel(e)}
 					onkeydown={(e) => handleProgressBarKeydown(e)}
 					role="slider"
 					aria-label="Reading progress"
@@ -2591,7 +2683,6 @@
 					<div
 						class="progress-thumb"
 						style="left: calc({progress}% - 6px);"
-						onmousedown={(e) => handleProgressThumbMouseDown(e)}
 						role="presentation"
 					></div>
 				</div>
@@ -2607,7 +2698,7 @@
 						src={`/api/books/${book.id}/file${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`}
 						title={book.title || 'Untitled'}
 						initialPage={embedPdfInitialPage}
-						toolbarVisible={topBarVisible}
+						toolbarVisible={readerChromeReady && topBarVisible}
 						onScrollActivity={handleEmbedPdfScrollActivity}
 						onPageChange={handleEmbedPdfPageChange}
 						onReady={handleEmbedPdfReady}
@@ -2643,6 +2734,10 @@
 		right: 0;
 		height: 16px;
 		z-index: 99;
+	}
+
+	.pdf-reader.reader-loading .top-reveal-zone {
+		pointer-events: none;
 	}
 
 	.nav-btn {
@@ -2684,6 +2779,7 @@
 		display: flex;
 		align-items: flex-end;
 		padding-bottom: 0;
+		touch-action: none;
 	}
 
 	.progress-fill {
@@ -2720,6 +2816,7 @@
 		z-index: 10;
 		transition: left 0.05s ease, transform 0.1s ease;
 		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+		touch-action: none;
 	}
 
 	.progress-thumb:hover {
@@ -2734,7 +2831,7 @@
 	.reader-loading-overlay {
 		position: absolute;
 		inset: 0;
-		z-index: 120;
+		z-index: 200;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
@@ -2820,7 +2917,7 @@
 	}
 
 	:global([data-epdf-i="center-group"]) {
-		transform: translateX(calc(56px + max(0px, env(safe-area-inset-left))));
+		transform: translateX(0);
 		transition: opacity 0.18s ease, transform 0.18s ease;
 	}
 
@@ -2832,7 +2929,11 @@
 	}
 
 	:global([data-epdf-i="comment-button"]),
-	:global([data-epdf-cat~="panel-comment"]) {
+	:global([data-epdf-cat~="panel-comment"]),
+	:global([data-epdf-i="document-menu-button"]),
+	:global([data-epdf-cat~="document-menu"]),
+	:global(button[aria-label="Document Menu"]),
+	:global([data-epdf-i="divider-1"]) {
 		display: none !important;
 		visibility: hidden !important;
 		pointer-events: none !important;
@@ -2920,6 +3021,14 @@
 		opacity: 0;
 		pointer-events: none;
 		transform: translateY(-10px);
+	}
+
+	:global(.pdf-reader.controls-hidden [data-overlay-id="page-controls"]),
+	:global(.pdf-reader.controls-hidden [data-overlay-id="page-controls"] *) {
+		opacity: 0 !important;
+		visibility: hidden !important;
+		pointer-events: none !important;
+		transform: translateY(8px) !important;
 	}
 
 	@media (max-width: 640px) {
