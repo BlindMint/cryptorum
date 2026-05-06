@@ -1,0 +1,302 @@
+<script lang="ts">
+	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
+	import { onDestroy, onMount } from 'svelte';
+	import { desktopSidebarCollapsed, mobileMenuOpen } from '$lib/stores';
+	import AppLogo from '$lib/components/AppLogo.svelte';
+	import FullscreenToggle from './FullscreenToggle.svelte';
+	import ThemeSelector from './ThemeSelector.svelte';
+	import NotificationBell from './NotificationBell.svelte';
+
+	let searchQuery = $state('');
+	let showMobileActions = $state(false);
+	let scanRunning = $state(false);
+	let scanPollTimer: number | null = null;
+
+	function handleSearch(e: Event) {
+		e.preventDefault();
+		if (searchQuery.trim()) {
+			const params = new URLSearchParams();
+			params.set('q', searchQuery.trim());
+			const library = $page.url.searchParams.get('library');
+			if (library) params.set('library', library);
+			goto(`/search?${params.toString()}`);
+			searchQuery = '';
+			showMobileActions = false;
+		}
+	}
+
+	function closeMobileActions() {
+		showMobileActions = false;
+	}
+
+	function toggleDesktopSidebar() {
+		desktopSidebarCollapsed.update((collapsed) => !collapsed);
+	}
+
+	async function loadScanStatus() {
+		try {
+			const [notificationRes, librariesRes] = await Promise.all([
+				fetch('/api/notifications?unread=true&limit=50', { cache: 'no-store' }),
+				fetch('/api/libraries', { cache: 'no-store' })
+			]);
+			const notificationData = notificationRes.ok ? await notificationRes.json() : { items: [] };
+			const libraries = librariesRes.ok ? await librariesRes.json() : [];
+			const jobRunning = (notificationData.items ?? []).some((item: any) =>
+				item.source === 'job' &&
+				item.job?.job_type === 'library_scan' &&
+				['queued', 'running'].includes(item.job.status)
+			);
+			const libraryRunning = Array.isArray(libraries) && libraries.some((library: any) => library.is_importing);
+			scanRunning = jobRunning || libraryRunning;
+		} catch (e) {
+			console.error('Failed to load scan status:', e);
+		}
+	}
+
+	async function scanLibraries() {
+		scanRunning = true;
+		try {
+			const response = await fetch('/api/scan', { method: 'POST' });
+			const data = response.ok ? await response.json().catch(() => null) : null;
+			const queued = (data?.queued_count ?? 0) > 0;
+			scanRunning = queued || scanRunning;
+			await loadScanStatus();
+			scanRunning = queued || scanRunning;
+			if ((window as any).refreshSidebar) {
+				(window as any).refreshSidebar();
+			}
+			if ((window as any).refreshSettingsScans) {
+				(window as any).refreshSettingsScans();
+			}
+		} catch (e) {
+			console.error('Scan failed:', e);
+			await loadScanStatus();
+		}
+	}
+
+	onMount(() => {
+		void loadScanStatus();
+		(window as any).refreshScanStatus = loadScanStatus;
+		scanPollTimer = window.setInterval(loadScanStatus, 5000);
+	});
+
+	onDestroy(() => {
+		if (scanPollTimer !== null) {
+			window.clearInterval(scanPollTimer);
+		}
+		if ((window as any).refreshScanStatus === loadScanStatus) {
+			delete (window as any).refreshScanStatus;
+		}
+	});
+</script>
+
+<header class="relative z-50 overflow-visible border-b border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] backdrop-blur-sm">
+	<div class="flex items-center gap-3 px-3 py-3 lg:px-6 h-16">
+		<button
+			class="lg:hidden shrink-0 rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+			aria-label="Toggle navigation menu"
+			onclick={() => $mobileMenuOpen = !$mobileMenuOpen}
+		>
+			<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+			</svg>
+		</button>
+
+		<div class="hidden items-center space-x-3 shrink-0 lg:flex">
+			<AppLogo sizeClass="h-10 w-10" roundedClass="rounded-xl" />
+			<div>
+				<h1 class="text-lg font-bold text-[var(--color-surface-text)]">Cryptorum</h1>
+				<p class="text-xs text-[var(--color-surface-text-muted)]">Personal Library</p>
+			</div>
+		</div>
+
+		<button
+			type="button"
+			class={`hidden shrink-0 rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]/70 lg:inline-flex ${$desktopSidebarCollapsed ? 'bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)]' : ''}`}
+			aria-controls="app-sidebar"
+			aria-expanded={!$desktopSidebarCollapsed}
+			aria-label={$desktopSidebarCollapsed ? 'Open sidebar' : 'Collapse sidebar'}
+			title={$desktopSidebarCollapsed ? 'Open sidebar' : 'Collapse sidebar'}
+			onclick={toggleDesktopSidebar}
+		>
+			<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+			</svg>
+		</button>
+
+		<form onsubmit={handleSearch} class="min-w-0 flex-1 lg:flex">
+			<div class="relative w-full">
+				<input
+					type="text"
+					bind:value={searchQuery}
+					placeholder="Search books..."
+					autocomplete="off"
+					autocapitalize="none"
+					autocorrect="off"
+					spellcheck="false"
+					class="w-full min-w-0 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] py-2.5 pl-10 pr-4 text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+				/>
+				<svg class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+				</svg>
+			</div>
+		</form>
+
+		<div class="hidden items-center space-x-3 lg:flex">
+			<FullscreenToggle />
+			<NotificationBell />
+			<ThemeSelector />
+
+			<a
+				href="/history"
+				class="rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+				title="Reading History"
+			>
+				<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+				</svg>
+			</a>
+
+			<a
+				href="/stats"
+				class="rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+				title="Statistics"
+			>
+				<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+				</svg>
+			</a>
+
+			<button
+				onclick={scanLibraries}
+				class="rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+				title={scanRunning ? 'Library scan running' : 'Scan Libraries'}
+			>
+				<svg class="h-5 w-5 {scanRunning ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+				</svg>
+			</button>
+
+			<a
+				href="/settings"
+				class="rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+				title="Settings"
+			>
+				<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+				</svg>
+			</a>
+		</div>
+
+		<div class="lg:hidden">
+			<FullscreenToggle />
+		</div>
+
+		<button
+			type="button"
+			class="lg:hidden shrink-0 rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+			aria-label="Open quick actions"
+			aria-expanded={showMobileActions}
+			onclick={() => showMobileActions = !showMobileActions}
+		>
+			<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6h.01M12 12h.01M12 18h.01"></path>
+			</svg>
+		</button>
+	</div>
+
+</header>
+
+{#if showMobileActions}
+	<button
+		type="button"
+		class="fixed inset-0 z-[80] bg-black/80 lg:hidden"
+		aria-label="Close quick actions"
+		onclick={closeMobileActions}
+	></button>
+	<div class="fixed right-3 top-[3.75rem] z-[90] lg:hidden w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-sm">
+		<div class="grid gap-2 p-3">
+			<div class="mobile-action-row">
+				<NotificationBell mobileMenu />
+			</div>
+			<div class="mobile-action-row">
+				<ThemeSelector mobileMenu />
+			</div>
+			<a
+				href="/history"
+				onclick={closeMobileActions}
+				class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all"
+			>
+				<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+				</svg>
+				<span>Reading History</span>
+			</a>
+			<a
+				href="/stats"
+				onclick={closeMobileActions}
+				class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all"
+			>
+				<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+				</svg>
+				<span>Statistics</span>
+			</a>
+			<button
+				onclick={async () => {
+					closeMobileActions();
+					await scanLibraries();
+				}}
+				class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-[var(--color-surface-text)] transition-all"
+			>
+				<svg class="h-5 w-5 text-[var(--color-surface-text-muted)] {scanRunning ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+				</svg>
+				<span>{scanRunning ? 'Scanning Libraries' : 'Scan Libraries'}</span>
+			</button>
+			<a
+				href="/settings"
+				onclick={closeMobileActions}
+				class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all"
+			>
+				<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+				</svg>
+				<span>Settings</span>
+			</a>
+		</div>
+	</div>
+{/if}
+
+<style>
+	.mobile-action-row {
+		display: flex;
+		align-items: center;
+		justify-content: flex-start;
+		gap: 0.5rem;
+		border: 1px solid var(--color-surface-border);
+		border-radius: 0.5rem;
+		background: var(--color-surface-base);
+		padding: 0.5rem 0.75rem;
+		transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+	}
+
+	.mobile-action-row:hover {
+		border-color: color-mix(in srgb, var(--color-primary-500) 55%, var(--color-surface-border));
+		box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary-500) 28%, transparent);
+	}
+
+	.mobile-action-link {
+		border: 1px solid var(--color-surface-border);
+		background: var(--color-surface-base);
+	}
+
+	.mobile-action-link:hover {
+		background: var(--color-surface-base);
+		border-color: color-mix(in srgb, var(--color-primary-500) 55%, var(--color-surface-border));
+		box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary-500) 22%, transparent);
+	}
+</style>
