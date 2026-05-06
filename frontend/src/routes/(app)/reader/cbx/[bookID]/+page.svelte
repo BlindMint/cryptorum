@@ -37,6 +37,8 @@
 	let activeSettingsTab = $state<'display' | 'comic' | 'advanced'>('display');
 	let isDraggingProgress = $state(false);
 	let pendingProgressPage = $state<number | null>(null);
+	let progressBarEl = $state<HTMLElement | null>(null);
+	let activeProgressPointerId: number | null = null;
 	let lastWheelNavigationAt = 0;
 	let topBarHideTimeout: ReturnType<typeof setTimeout> | null = null;
 	let lastLongStripScrollTop = 0;
@@ -471,50 +473,69 @@
 		resetTopBarBehavior();
 	}
 
-	function handleProgressThumbMouseDown(e: MouseEvent) {
+	function getProgressPageFromClientX(clientX: number) {
+		if (!progressBarEl || numPages <= 0) return null;
+		const rect = progressBarEl.getBoundingClientRect();
+		if (rect.width <= 0) return null;
+		const x = clientX - rect.left;
+		const percentage = Math.max(0, Math.min(1, x / rect.width));
+		const newPage = Math.round(percentage * numPages);
+		return newPage >= 1 && newPage <= numPages ? newPage : null;
+	}
+
+	function updateProgressDrag(clientX: number) {
+		const newPage = getProgressPageFromClientX(clientX);
+		if (newPage === null) return;
+		pendingProgressPage = newPage;
+	}
+
+	function handleProgressPointerDown(e: PointerEvent) {
 		e.preventDefault();
 		e.stopPropagation();
 		resetTopBarBehavior();
 		isDraggingProgress = true;
 		pendingProgressPage = null;
-		window.addEventListener('mousemove', handleProgressMouseMove);
-		window.addEventListener('mouseup', handleProgressMouseUp);
+		activeProgressPointerId = e.pointerId;
+		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+		updateProgressDrag(e.clientX);
 	}
 
-	function handleProgressMouseMove(e: MouseEvent) {
+	function handleProgressPointerMove(e: PointerEvent) {
 		if (!isDraggingProgress) return;
-		const progressBar = document.querySelector('.progress-bar') as HTMLElement;
-		if (!progressBar) return;
-		const rect = progressBar.getBoundingClientRect();
-		const x = e.clientX - rect.left;
-		const percentage = Math.max(0, Math.min(1, x / rect.width));
-		const newPage = Math.round(percentage * numPages);
-		if (newPage >= 1 && newPage <= numPages) {
-			pendingProgressPage = newPage;
-		}
+		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
+
+		e.preventDefault();
+		updateProgressDrag(e.clientX);
 	}
 
-	function handleProgressMouseUp() {
+	function finishProgressPointer(e?: PointerEvent) {
+		if (!isDraggingProgress) return;
+		const targetPage = pendingProgressPage;
+
+		if (e && activeProgressPointerId !== null) {
+			(e.currentTarget as HTMLElement).releasePointerCapture?.(activeProgressPointerId);
+		}
+
 		isDraggingProgress = false;
-		window.removeEventListener('mousemove', handleProgressMouseMove);
-		window.removeEventListener('mouseup', handleProgressMouseUp);
-		if (pendingProgressPage !== null) {
-			goToPage(pendingProgressPage);
-			pendingProgressPage = null;
+		activeProgressPointerId = null;
+		pendingProgressPage = null;
+
+		if (targetPage !== null) {
+			goToPage(targetPage);
 		}
 	}
 
-	function handleProgressBarClick(e: MouseEvent) {
+	function handleProgressPointerUp(e: PointerEvent) {
+		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
+		e.preventDefault();
+		e.stopPropagation();
 		resetTopBarBehavior();
-		const progressBar = document.querySelector('.progress-bar') as HTMLElement;
-		if (!progressBar) return;
-		const rect = progressBar.getBoundingClientRect();
-		const x = e.clientX - rect.left;
-		const percentage = Math.max(0, Math.min(1, x / rect.width));
-		const newPage = Math.round(percentage * numPages);
-		if (newPage >= 1 && newPage <= numPages) {
-			goToPage(newPage);
-		}
+		finishProgressPointer(e);
+	}
+
+	function handleProgressPointerCancel(e: PointerEvent) {
+		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
+		finishProgressPointer(e);
 	}
 
 	function handleProgressBarKeydown(e: KeyboardEvent) {
@@ -749,8 +770,12 @@
 		</div>
 
 		<div
+			bind:this={progressBarEl}
 			class="progress-bar"
-			onclick={(e) => handleProgressBarClick(e)}
+			onpointerdown={(e) => handleProgressPointerDown(e)}
+			onpointermove={(e) => handleProgressPointerMove(e)}
+			onpointerup={(e) => handleProgressPointerUp(e)}
+			onpointercancel={(e) => handleProgressPointerCancel(e)}
 			role="slider"
 			aria-label="Reading progress"
 			aria-valuemin="0"
@@ -763,7 +788,6 @@
 			<div
 				class="progress-thumb"
 				style="left: calc({progress}% - 6px);"
-				onmousedown={(e) => handleProgressThumbMouseDown(e)}
 				role="presentation"
 			></div>
 		</div>
@@ -1161,6 +1185,7 @@
 		cursor: pointer;
 		display: flex;
 		align-items: flex-end;
+		touch-action: none;
 	}
 
 	.progress-fill {
@@ -1195,6 +1220,7 @@
 		cursor: grab;
 		z-index: 10;
 		transition: left 0.05s ease;
+		touch-action: none;
 	}
 
 	.progress-thumb:hover { transform: scale(1.2); }

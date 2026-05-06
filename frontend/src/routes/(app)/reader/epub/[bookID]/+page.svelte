@@ -8,7 +8,7 @@
 	import { currentTheme, resolveThemeColors, type FullTheme } from '$lib/stores/theme';
 	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 	import { getPreferredTextFormat, getReaderRouteKind, normalizeBookFormat } from '$lib/utils/book-formats';
-	import { enterReaderFullscreen, toggleReaderFullscreen } from '$lib/utils/fullscreen';
+	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
 	import {
 		getCachedBook,
 		cacheBook,
@@ -97,6 +97,8 @@
 	let isSearching = $state(false);
 	let isDraggingProgress = $state(false);
 	let pendingProgressPage = $state<number | null>(null);
+	let progressBarEl = $state<HTMLElement | null>(null);
+	let activeProgressPointerId: number | null = null;
 	let currentProgress = $state(0);
 	let lastSavedProgress: number | null = null;
 	let progressSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -107,8 +109,6 @@
 	let lastContinuousScrollTop = 0;
 	let wheelNavigationTarget: Document | null = null;
 	let sessionEnded = false;
-	let fullscreenAutoSatisfied = false;
-	let fullscreenAutoRequestInFlight = false;
 	let readerPointerStart: { id: number; x: number; y: number } | null = null;
 	let readerPointerMoved = false;
 
@@ -365,28 +365,6 @@
 		}
 	}
 
-	async function requestDefaultTrueFullscreen() {
-		if (
-			!browser ||
-			fullscreenAutoSatisfied ||
-			fullscreenAutoRequestInFlight ||
-			!document.fullscreenEnabled ||
-			document.fullscreenElement
-		) {
-			return;
-		}
-
-		fullscreenAutoRequestInFlight = true;
-		try {
-			await enterReaderFullscreen(settings.useStandardFullscreen);
-			fullscreenAutoSatisfied = Boolean(document.fullscreenElement);
-		} catch {
-			fullscreenAutoSatisfied = false;
-		} finally {
-			fullscreenAutoRequestInFlight = false;
-		}
-	}
-
 	function scheduleTopBarAutoHide() {
 		clearTopBarHideTimeout();
 		if (controlsNeedToStayVisible() || settings.continuousMode) return;
@@ -418,9 +396,6 @@
 		if (!e.isPrimary) return;
 		readerPointerStart = { id: e.pointerId, x: e.clientX, y: e.clientY };
 		readerPointerMoved = false;
-		if (!(e.target instanceof Element) || !e.target.closest('button, a, input, textarea, select, label, [contenteditable="true"], .left-sidebar, .right-sidebar, .progress-bar')) {
-			void requestDefaultTrueFullscreen();
-		}
 	}
 
 	function handleReaderPointerMove(e: PointerEvent) {
@@ -911,22 +886,17 @@
 		}
 	}
 
-	function handleProgressThumbMouseDown(e: MouseEvent) {
-		e.preventDefault();
-		e.stopPropagation();
-		isDraggingProgress = true;
-		pendingProgressPage = null;
-		window.addEventListener('mousemove', handleProgressMouseMove);
-		window.addEventListener('mouseup', handleProgressMouseUp);
+	function getProgressPercentageFromClientX(clientX: number) {
+		if (!progressBarEl) return null;
+		const rect = progressBarEl.getBoundingClientRect();
+		if (rect.width <= 0) return null;
+		const x = clientX - rect.left;
+		return Math.max(0, Math.min(1, x / rect.width));
 	}
 
-	function handleProgressMouseMove(e: MouseEvent) {
-		if (!isDraggingProgress) return;
-		const progressBar = document.querySelector('.progress-bar') as HTMLElement;
-		if (!progressBar) return;
-		const rect = progressBar.getBoundingClientRect();
-		const x = e.clientX - rect.left;
-		const percentage = Math.max(0, Math.min(1, x / rect.width));
+	function updateProgressDrag(clientX: number) {
+		const percentage = getProgressPercentageFromClientX(clientX);
+		if (percentage === null) return;
 
 		if (settings.continuousMode && continuousScrollEl) {
 			const scrollHeight = continuousScrollEl.scrollHeight - continuousScrollEl.clientHeight;
@@ -941,36 +911,52 @@
 		}
 	}
 
-	function handleProgressMouseUp() {
+	function handleProgressPointerDown(e: PointerEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		isDraggingProgress = true;
+		pendingProgressPage = null;
+		activeProgressPointerId = e.pointerId;
+		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+		updateProgressDrag(e.clientX);
+	}
+
+	function handleProgressPointerMove(e: PointerEvent) {
+		if (!isDraggingProgress) return;
+		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
+
+		e.preventDefault();
+		updateProgressDrag(e.clientX);
+	}
+
+	function finishProgressPointer(e?: PointerEvent) {
+		if (!isDraggingProgress) return;
+		const targetPage = pendingProgressPage;
+
+		if (e && activeProgressPointerId !== null) {
+			(e.currentTarget as HTMLElement).releasePointerCapture?.(activeProgressPointerId);
+		}
+
 		isDraggingProgress = false;
-		window.removeEventListener('mousemove', handleProgressMouseMove);
-		window.removeEventListener('mouseup', handleProgressMouseUp);
-		if (pendingProgressPage !== null) {
-			jumpToPage(pendingProgressPage);
-			pendingProgressPage = null;
+		activeProgressPointerId = null;
+		pendingProgressPage = null;
+
+		if (targetPage !== null) {
+			jumpToPage(targetPage);
 		}
 	}
 
-	function handleProgressBarClick(e: MouseEvent) {
+	function handleProgressPointerUp(e: PointerEvent) {
+		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
+		e.preventDefault();
+		e.stopPropagation();
 		resetTopBarBehavior();
-		if (isDraggingProgress) return;
-		const progressBar = document.querySelector('.progress-bar') as HTMLElement;
-		if (!progressBar) return;
-		const rect = progressBar.getBoundingClientRect();
-		const x = e.clientX - rect.left;
-		const percentage = Math.max(0, Math.min(1, x / rect.width));
+		finishProgressPointer(e);
+	}
 
-		if (settings.continuousMode && continuousScrollEl) {
-			const scrollHeight = continuousScrollEl.scrollHeight - continuousScrollEl.clientHeight;
-			if (scrollHeight > 0) {
-				continuousScrollEl.scrollTop = percentage * scrollHeight;
-			}
-		} else {
-			const newPage = Math.round(percentage * numChapters());
-			if (newPage >= 1 && newPage <= numChapters()) {
-				jumpToPage(newPage);
-			}
-		}
+	function handleProgressPointerCancel(e: PointerEvent) {
+		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
+		finishProgressPointer(e);
 	}
 
 	function handleProgressBarKeydown(e: KeyboardEvent) {
@@ -1520,7 +1506,6 @@
 	}
 
 	onMount(() => {
-		void requestDefaultTrueFullscreen();
 		const handlePageExit = () => {
 			if (closeTasksStarted) return;
 			flushProgressSave();
@@ -1749,8 +1734,12 @@
 		</div>
 
 		<div
+			bind:this={progressBarEl}
 			class="progress-bar"
-			onclick={(e) => handleProgressBarClick(e)}
+			onpointerdown={(e) => handleProgressPointerDown(e)}
+			onpointermove={(e) => handleProgressPointerMove(e)}
+			onpointerup={(e) => handleProgressPointerUp(e)}
+			onpointercancel={(e) => handleProgressPointerCancel(e)}
 			role="slider"
 			aria-label="Reading progress"
 			aria-valuemin="0"
@@ -1763,7 +1752,6 @@
 			<div
 				class="progress-thumb"
 				style="left: calc({progress}% - 6px);"
-				onmousedown={(e) => handleProgressThumbMouseDown(e)}
 				role="presentation"
 			></div>
 		</div>
@@ -2408,6 +2396,7 @@
 		cursor: pointer;
 		display: flex;
 		align-items: flex-end;
+		touch-action: none;
 	}
 
 	.progress-fill {
@@ -2443,6 +2432,7 @@
 		cursor: grab;
 		z-index: 10;
 		transition: left 0.05s ease, transform 0.1s ease;
+		touch-action: none;
 	}
 
 	.progress-thumb:hover { transform: scale(1.2); }

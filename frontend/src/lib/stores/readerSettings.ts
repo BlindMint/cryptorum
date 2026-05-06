@@ -69,6 +69,7 @@ export interface PdfReaderSetting {
 	showQuoteMarks: boolean;
 	panMode: boolean;
 	useStandardFullscreen: boolean;
+	keepScreenOn: boolean;
 }
 
 export interface CbxReaderSetting {
@@ -199,7 +200,8 @@ export const defaultReaderSettings: ReaderSettings = {
 		showChapterMarkers: false,
 		showQuoteMarks: false,
 		panMode: false,
-		useStandardFullscreen: false
+		useStandardFullscreen: false,
+		keepScreenOn: true
 	},
 	cbx: {
 		pageSpread: 'auto',

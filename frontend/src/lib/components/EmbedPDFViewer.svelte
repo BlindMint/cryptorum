@@ -312,7 +312,14 @@
 			'calc(var(--embedpdf-right-clearance, 48px) + max(0px, env(safe-area-inset-right)))';
 
 		for (const element of queryAllDeep(
-			'[data-epdf-i="comment-button"], [data-epdf-cat~="panel-comment"]',
+			[
+				'[data-epdf-i="comment-button"]',
+				'[data-epdf-cat~="panel-comment"]',
+				'[data-epdf-i="document-menu-button"]',
+				'[data-epdf-cat~="document-menu"]',
+				'button[aria-label="Document Menu"]',
+				'[data-epdf-i="divider-1"]'
+			].join(', '),
 			root
 		)) {
 			if (element instanceof HTMLElement) {
@@ -340,20 +347,45 @@
 		for (const group of toolbarGroups) {
 			setStyle(group, 'transition', 'opacity 0.18s ease, transform 0.18s ease');
 			setStyle(group, 'opacity', toolbarVisible ? '1' : '0', 'important');
+			setStyle(group, 'visibility', toolbarVisible ? 'visible' : 'hidden', 'important');
 			setStyle(group, 'pointer-events', toolbarVisible ? 'auto' : 'none', 'important');
 		}
 
 		if (activeToolbarRoot) {
-			if (toolbarVisible) {
-				setStyle(activeToolbarRoot, 'display', '', 'important');
-			}
-			setStyle(activeToolbarRoot, 'transition', 'opacity 0.18s ease');
+			setStyle(activeToolbarRoot, 'position', 'absolute', 'important');
+			setStyle(activeToolbarRoot, 'top', '0', 'important');
+			setStyle(activeToolbarRoot, 'left', '0', 'important');
+			setStyle(activeToolbarRoot, 'right', '0', 'important');
+			setStyle(activeToolbarRoot, 'z-index', '80', 'important');
+			setStyle(activeToolbarRoot, 'transition', 'opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease');
 			setStyle(activeToolbarRoot, 'opacity', toolbarVisible ? '1' : '0', 'important');
+			setStyle(activeToolbarRoot, 'visibility', toolbarVisible ? 'visible' : 'hidden', 'important');
 			setStyle(activeToolbarRoot, 'pointer-events', toolbarVisible ? 'auto' : 'none', 'important');
-			if (!toolbarVisible) {
-				setStyle(activeToolbarRoot, 'display', 'none', 'important');
-			}
+			setStyle(activeToolbarRoot, 'transform', toolbarVisible ? 'translateY(0)' : 'translateY(-100%)', 'important');
 			activeToolbarRoot.dataset.cryptorumEmbedpdfToolbar = 'true';
+		}
+
+		for (const element of queryAllDeep(
+			[
+				'[data-overlay-id="page-controls"]',
+				'[data-epdf-i="page-controls"]',
+				'[data-epdf-cat~="page-controls"]'
+			].join(', '),
+			root
+		)) {
+			if (element instanceof HTMLElement) {
+				setStyle(element, 'transition', 'opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease');
+				setStyle(element, 'opacity', toolbarVisible ? '1' : '0', 'important');
+				setStyle(element, 'visibility', toolbarVisible ? 'visible' : 'hidden', 'important');
+				setStyle(element, 'pointer-events', toolbarVisible ? 'auto' : 'none', 'important');
+				setStyle(element, 'transform', toolbarVisible ? 'translateY(0)' : 'translateY(-8px)', 'important');
+			}
+		}
+
+		for (const element of queryAllDeep('[data-overlay-id="page-controls"] *', root)) {
+			if (element instanceof HTMLElement) {
+				setStyle(element, 'pointer-events', toolbarVisible ? '' : 'none', toolbarVisible ? '' : 'important');
+			}
 		}
 
 		if (embedPdfContainerEl) {
@@ -602,8 +634,8 @@
 
 <style>
 	.embedpdf-container {
-		--embedpdf-left-clearance: 48px;
-		--embedpdf-center-shift: 0px;
+		--embedpdf-left-clearance: 44px;
+		--embedpdf-center-shift: -4px;
 		--embedpdf-right-clearance: 48px;
 		--embedpdf-title-left-clearance: clamp(240px, 32vw, 440px);
 		--embedpdf-title-right-clearance: 112px;
@@ -634,11 +666,32 @@
 		display: none !important;
 	}
 
+	.embedpdf-container :global([data-epdf-i="document-menu-button"]),
+	.embedpdf-container :global([data-epdf-cat~="document-menu"]),
+	.embedpdf-container :global(button[aria-label="Document Menu"]),
+	.embedpdf-container :global([data-epdf-i="divider-1"]) {
+		display: none !important;
+		visibility: hidden !important;
+		pointer-events: none !important;
+	}
+
+	.embedpdf-container :global([data-overlay-id="page-controls"]) {
+		transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+	}
+
 	:global(.pdf-reader.controls-hidden) .embedpdf-container :global([data-epdf-i="left-group"]),
 	:global(.pdf-reader.controls-hidden) .embedpdf-container :global([data-epdf-i="right-group"]) {
 		opacity: 0;
 		pointer-events: none;
 		transform: translateY(-10px);
+	}
+
+	:global(.pdf-reader.controls-hidden) .embedpdf-container :global([data-overlay-id="page-controls"]),
+	:global(.pdf-reader.controls-hidden) .embedpdf-container :global([data-overlay-id="page-controls"] *) {
+		opacity: 0 !important;
+		visibility: hidden !important;
+		pointer-events: none !important;
+		transform: translateY(8px) !important;
 	}
 
 	.embedpdf-document-title {
@@ -707,7 +760,8 @@
 
 	@media (max-width: 640px) {
 		.embedpdf-container {
-			--embedpdf-left-clearance: 44px;
+			--embedpdf-left-clearance: 42px;
+			--embedpdf-center-shift: -2px;
 			--embedpdf-right-clearance: 44px;
 			--embedpdf-title-left-clearance: 132px;
 			--embedpdf-title-right-clearance: 108px;
