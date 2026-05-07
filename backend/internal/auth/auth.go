@@ -1,11 +1,11 @@
 package auth
 
 import (
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
-	"sync"
+	"errors"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -20,90 +20,108 @@ type Session struct {
 }
 
 type Store struct {
-	sessions        map[string]*Session
-	secretKey       []byte
+	db              *sql.DB
 	sessionDuration time.Duration
-	mu              sync.RWMutex
 }
 
-func NewStore(secretKey string, sessionDuration time.Duration) *Store {
+func NewStore(db *sql.DB, sessionDuration time.Duration) *Store {
+	if sessionDuration <= 0 {
+		sessionDuration = 720 * time.Hour
+	}
 	return &Store{
-		sessions:        make(map[string]*Session),
-		secretKey:       []byte(secretKey),
+		db:              db,
 		sessionDuration: sessionDuration,
 	}
 }
 
-func (s *Store) GenerateSessionID() string {
+func (s *Store) GenerateSessionID() (string, error) {
 	b := make([]byte, 32)
-	rand.Read(b)
-	return base64.URLEncoding.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func hashSessionID(sessionID string) string {
+	sum := sha256.Sum256([]byte(sessionID))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 func (s *Store) CreateSession(userID int64, username string) (*Session, error) {
-	sessionID := s.GenerateSessionID()
+	sessionID, err := s.GenerateSessionID()
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now()
+	expiresAt := now.Add(s.sessionDuration)
 
 	session := &Session{
 		ID:        sessionID,
 		UserID:    userID,
 		Username:  username,
 		CreatedAt: now,
-		ExpiresAt: now.Add(s.sessionDuration),
+		ExpiresAt: expiresAt,
 	}
 
-	s.mu.Lock()
-	s.sessions[sessionID] = session
-	s.mu.Unlock()
+	_, err = s.db.Exec(`
+		INSERT INTO auth_session (token_hash, user_id, created_at, expires_at, last_seen_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, hashSessionID(sessionID), userID, now.Unix(), expiresAt.Unix(), now.Unix())
+	if err != nil {
+		return nil, err
+	}
 
 	return session, nil
 }
 
 func (s *Store) ValidateSession(sessionID string) (*Session, error) {
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
+	now := time.Now()
+	tokenHash := hashSessionID(sessionID)
 
-	if !ok {
+	var session Session
+	var createdAt int64
+	var expiresAt int64
+	err := s.db.QueryRow(`
+		SELECT s.user_id, u.username, s.created_at, s.expires_at
+		FROM auth_session s
+		JOIN app_user u ON u.id = s.user_id
+		WHERE s.token_hash = ?
+		  AND s.revoked_at IS NULL
+		  AND s.expires_at > ?
+	`, tokenHash, now.Unix()).Scan(&session.UserID, &session.Username, &createdAt, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-
-	if time.Now().After(session.ExpiresAt) {
-		s.mu.Lock()
-		delete(s.sessions, sessionID)
-		s.mu.Unlock()
-		return nil, nil
+	if err != nil {
+		return nil, err
 	}
 
-	return session, nil
+	session.ID = sessionID
+	session.CreatedAt = time.Unix(createdAt, 0)
+	session.ExpiresAt = time.Unix(expiresAt, 0)
+
+	_, _ = s.db.Exec(`
+		UPDATE auth_session
+		SET last_seen_at = ?
+		WHERE token_hash = ? AND last_seen_at < ?
+	`, now.Unix(), tokenHash, now.Add(-1*time.Minute).Unix())
+
+	return &session, nil
 }
 
 func (s *Store) DeleteSession(sessionID string) {
-	s.mu.Lock()
-	delete(s.sessions, sessionID)
-	s.mu.Unlock()
+	_, _ = s.db.Exec(`
+		UPDATE auth_session
+		SET revoked_at = ?
+		WHERE token_hash = ? AND revoked_at IS NULL
+	`, time.Now().Unix(), hashSessionID(sessionID))
 }
 
 func (s *Store) CleanupExpired() {
-	s.mu.Lock()
-	now := time.Now()
-	for id, session := range s.sessions {
-		if now.After(session.ExpiresAt) {
-			delete(s.sessions, id)
-		}
-	}
-	s.mu.Unlock()
-}
-
-func (s *Store) SignSession(sessionID string) string {
-	h := hmac.New(sha256.New, s.secretKey)
-	h.Write([]byte(sessionID))
-	return base64.URLEncoding.EncodeToString(h.Sum(nil))
-}
-
-func (s *Store) VerifySignature(sessionID, signature string) bool {
-	expected := s.SignSession(sessionID)
-	return hmac.Equal([]byte(expected), []byte(signature))
+	_, _ = s.db.Exec(`
+		DELETE FROM auth_session
+		WHERE expires_at <= ? OR revoked_at IS NOT NULL
+	`, time.Now().Unix())
 }
 
 func HashPassword(password string) (string, error) {

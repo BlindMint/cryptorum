@@ -43,6 +43,8 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	let coverSettingsSaving = $state(false);
 	let coverRegenerating = $state(false);
 	let coverActionMessage = $state('');
+	let settingsMainEl: HTMLElement | null = null;
+	let previousMainOverscrollBehaviorY = '';
 
 	let showLibraryModal = $state(false);
 	let showLibraryIconPicker = $state(false);
@@ -712,6 +714,11 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	}
 	
 	onMount(async () => {
+		settingsMainEl = document.querySelector('main');
+		if (settingsMainEl) {
+			previousMainOverscrollBehaviorY = settingsMainEl.style.overscrollBehaviorY;
+			settingsMainEl.style.overscrollBehaviorY = 'contain';
+		}
 		if (typeof window !== 'undefined') {
 			const tab = new URLSearchParams(window.location.search).get('tab');
 			if (tab === 'general' || tab === 'metadata' || tab === 'reader' || tab === 'appearance' || tab === 'users' || tab === 'admin') {
@@ -728,6 +735,9 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	});
 
 	onDestroy(() => {
+		if (settingsMainEl) {
+			settingsMainEl.style.overscrollBehaviorY = previousMainOverscrollBehaviorY;
+		}
 		stopScanPolling();
 		if ((window as any).refreshSettingsScans === refreshScanState) {
 			delete (window as any).refreshSettingsScans;
@@ -735,7 +745,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	});
 </script>
 
-<div class="space-y-6">
+<div class="min-h-full space-y-6 pb-[calc(1rem+env(safe-area-inset-bottom))]">
  	<div class="flex items-center justify-between">
  		<div>
  			<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">Settings</h1>

@@ -35,13 +35,19 @@
 		notifications.filter((item) => item.source !== 'job' && !item.read_at).length
 	);
 	let hasUnreadNotifications = $derived(unreadNotificationCount > 0);
-	let buttonRef: HTMLButtonElement | null = null;
+	let buttonRef = $state<HTMLButtonElement | null>(null);
 	let panelRef = $state<HTMLDivElement | null>(null);
 	let refreshTimer: number | null = null;
 	let {
-		mobileMenu = false
+		mobileMenu = false,
+		panelOnly = false,
+		hideHeader = false,
+		onClose
 	} = $props<{
 		mobileMenu?: boolean;
+		panelOnly?: boolean;
+		hideHeader?: boolean;
+		onClose?: () => void;
 	}>();
 
 	function formatTime(value: number) {
@@ -121,91 +127,124 @@
 		await loadNotifications();
 	}
 
+	function closePanel() {
+		open = false;
+		onClose?.();
+	}
+
 	function handleOpen(item: NotificationItem) {
 		if (!item.read_at) {
 			markNotificationRead(item.id);
 		}
-		open = false;
+		closePanel();
 		if (item.url) {
 			goto(item.url);
 		}
 	}
 
 	function handleDocumentClick(event: MouseEvent) {
+		if (panelOnly) return;
 		const target = event.target as Node;
 		if (!open) return;
 		if (buttonRef?.contains(target) || panelRef?.contains(target)) return;
-		open = false;
+		closePanel();
 	}
 
 	onMount(() => {
+		if (panelOnly) {
+			open = true;
+		}
 		notificationVisualIndicator.init();
 		refreshStatus();
 		refreshTimer = window.setInterval(refreshStatus, 5000);
-		document.addEventListener('click', handleDocumentClick);
+		if (!panelOnly) {
+			document.addEventListener('click', handleDocumentClick);
+		}
 		return () => {
 			if (refreshTimer) window.clearInterval(refreshTimer);
-			document.removeEventListener('click', handleDocumentClick);
+			if (!panelOnly) {
+				document.removeEventListener('click', handleDocumentClick);
+			}
 		};
 	});
 </script>
 
 <div class="relative">
-	<button
-		bind:this={buttonRef}
-		onclick={() => open = !open}
-		class={`relative rounded-lg text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors ${$notificationVisualIndicator && hasUnreadNotifications ? 'bg-[var(--color-primary-500)]/10 shadow-[0_0_18px_rgba(249,115,22,0.25)]' : ''} ${mobileMenu ? 'flex w-full items-center justify-between gap-3 px-0 py-0' : 'p-2'}`}
-		title="Notifications"
-		aria-label="Notifications"
-	>
-		{#if mobileMenu}
-			<span class="flex items-center gap-3">
-				<span class="relative">
-					<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
-					</svg>
-					{#if $notificationVisualIndicator && hasUnreadNotifications}
-						<span class="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[var(--color-primary-400)] ring-2 ring-[var(--color-surface-overlay)]"></span>
-					{/if}
+	{#if !panelOnly}
+		<button
+			bind:this={buttonRef}
+			onclick={() => open = !open}
+			class={`relative rounded-lg text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors ${$notificationVisualIndicator && hasUnreadNotifications ? 'bg-[var(--color-primary-500)]/10 shadow-[0_0_18px_rgba(249,115,22,0.25)]' : ''} ${mobileMenu ? 'flex w-full items-center justify-between gap-3 px-0 py-0' : 'p-2'}`}
+			title="Notifications"
+			aria-label="Notifications"
+		>
+			{#if mobileMenu}
+				<span class="flex items-center gap-3">
+					<span class="relative">
+						<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
+						</svg>
+						{#if $notificationVisualIndicator && hasUnreadNotifications}
+							<span class="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[var(--color-primary-400)] ring-2 ring-[var(--color-surface-overlay)]"></span>
+						{/if}
+					</span>
+					<span class="text-sm font-medium text-[var(--color-surface-text)]">Notifications</span>
 				</span>
-				<span class="text-sm font-medium text-[var(--color-surface-text)]">Notifications</span>
-			</span>
-			{#if unreadNotificationCount > 0}
-				<span class="min-w-5 h-5 px-1 rounded-full bg-[var(--color-primary-500)] text-white text-[10px] font-semibold flex items-center justify-center">{unreadNotificationCount}</span>
+				{#if unreadNotificationCount > 0}
+					<span class="min-w-5 h-5 px-1 rounded-full bg-[var(--color-primary-500)] text-white text-[10px] font-semibold flex items-center justify-center">{unreadNotificationCount}</span>
+				{/if}
+			{:else}
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
+				</svg>
+				{#if $notificationVisualIndicator && hasUnreadNotifications}
+					<span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--color-primary-400)] ring-2 ring-[var(--color-surface-overlay)]"></span>
+				{/if}
+				{#if unreadNotificationCount > 0}
+					<span class="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 rounded-full bg-[var(--color-primary-500)] text-white text-[10px] font-semibold flex items-center justify-center">{unreadNotificationCount}</span>
+				{/if}
 			{/if}
-		{:else}
-			<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
-			</svg>
-			{#if $notificationVisualIndicator && hasUnreadNotifications}
-				<span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--color-primary-400)] ring-2 ring-[var(--color-surface-overlay)]"></span>
-			{/if}
-			{#if unreadNotificationCount > 0}
-				<span class="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 rounded-full bg-[var(--color-primary-500)] text-white text-[10px] font-semibold flex items-center justify-center">{unreadNotificationCount}</span>
-			{/if}
-		{/if}
-	</button>
+		</button>
+	{/if}
 
 	{#if open}
 		<div
 			bind:this={panelRef}
-			class="absolute right-0 mt-3 w-80 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-sm overflow-hidden z-[80]"
+			class={panelOnly
+				? 'w-full overflow-hidden'
+				: mobileMenu
+					? 'fixed left-3 right-3 top-[7.75rem] max-h-[calc(100dvh-8.5rem)] rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-sm overflow-hidden z-[95]'
+					: 'absolute right-0 mt-3 w-80 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-sm overflow-hidden z-[80]'}
 		>
-			<div class="px-4 py-3 border-b border-[var(--color-surface-border)] flex items-center justify-between">
-				<div>
-					<div class="text-sm font-semibold text-[var(--color-surface-text)]">Notifications</div>
+			{#if !hideHeader}
+				<div class="px-4 py-3 border-b border-[var(--color-surface-border)] flex items-center justify-between">
+					<div>
+						<div class="text-sm font-semibold text-[var(--color-surface-text)]">Notifications</div>
+						<div class="text-xs text-[var(--color-surface-text-muted)]">{unreadNotificationCount} unread</div>
+					</div>
+					<div class="flex items-center gap-3">
+						{#if notifications.length > 0}
+							<button onclick={dismissAllNotifications} class="text-xs text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]">
+								Dismiss all
+							</button>
+						{/if}
+						<a href="/settings?tab=admin" class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Admin</a>
+					</div>
+				</div>
+			{:else}
+				<div class="px-4 py-2 border-b border-[var(--color-surface-border)] flex items-center justify-between">
 					<div class="text-xs text-[var(--color-surface-text-muted)]">{unreadNotificationCount} unread</div>
+					<div class="flex items-center gap-3">
+						{#if notifications.length > 0}
+							<button onclick={dismissAllNotifications} class="text-xs text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]">
+								Dismiss all
+							</button>
+						{/if}
+						<a href="/settings?tab=admin" class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Admin</a>
+					</div>
 				</div>
-				<div class="flex items-center gap-3">
-					{#if notifications.length > 0}
-						<button onclick={dismissAllNotifications} class="text-xs text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]">
-							Dismiss all
-						</button>
-					{/if}
-					<a href="/settings?tab=admin" class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Admin</a>
-				</div>
-			</div>
-			<div class="max-h-96 overflow-auto">
+			{/if}
+			<div class="{panelOnly ? '' : mobileMenu ? 'max-h-[calc(100dvh-13rem)]' : 'max-h-96'} overflow-auto">
 				{#if runningJobs.length > 0}
 					<div class="border-b border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/50 px-4 py-3">
 						<div class="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-primary-300)]">

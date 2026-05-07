@@ -82,6 +82,7 @@
 	let continuousLoading = $state(false);
 	let continuousScrollEl: HTMLElement | null = null;
 	let isRestoringContinuousProgress = $state(false);
+	let isRestoringPaginatedProgress = false;
 	let initialProcessing = $state(false);
 	let processingMessage = $state('Preparing book...');
 
@@ -1112,7 +1113,6 @@
 
 	async function reinitializeRendition() {
 		if (!epubInstance) return;
-		const savedCfi = getResumeCfi();
 		if (rendition) {
 			rendition.destroy();
 			rendition = null;
@@ -1142,17 +1142,20 @@
 				currentChapter = chapter?.label || '';
 			}
 			updateNavState();
-			queueProgressSave(cfi);
+			if (!isRestoringPaginatedProgress) {
+				queueProgressSave(cfi);
+			}
 		});
 		rendition.on('rendered', () => {
 			if (!settings.originalLayout) {
 				injectCssOverride();
 			}
 		});
-		if (savedCfi) {
-			await rendition.display(savedCfi);
-		} else {
-			await rendition.display();
+		isRestoringPaginatedProgress = true;
+		try {
+			await displaySavedPaginatedLocation();
+		} finally {
+			isRestoringPaginatedProgress = false;
 		}
 		injectCssOverride();
 		if (isScrolled) {
@@ -1228,22 +1231,11 @@
 			updateThemeOverrides();
 			applyVisualFilters();
 
-			if (savedProgress && savedProgress.cfi) {
-				setCurrentProgress(savedProgress.percent ?? 0);
-				await rendition.display(savedProgress.cfi);
-			} else if (savedProgress && typeof savedProgress.percent === 'number' && epubInstance.locations) {
-				const cfi = epubInstance.locations.cfiFromPercentage(
-					Math.max(0, Math.min(1, savedProgress.percent / 100))
-				);
-				if (cfi) {
-					setCurrentProgress(savedProgress.percent);
-					await rendition.display(cfi);
-				} else {
-					setCurrentProgress(savedProgress.percent);
-					await rendition.display();
-				}
-			} else {
-				await rendition.display();
+			isRestoringPaginatedProgress = true;
+			try {
+				await displaySavedPaginatedLocation();
+			} finally {
+				isRestoringPaginatedProgress = false;
 			}
 			injectCssOverride();
 			updateNavState();
@@ -1271,7 +1263,9 @@
 				}
 
 				updateNavState();
-				queueProgressSave(cfi);
+				if (!isRestoringPaginatedProgress) {
+					queueProgressSave(cfi);
+				}
 			});
 
 			rendition.on('rendered', (_section: any, view: any) => {
@@ -1446,10 +1440,6 @@
 	}
 
 	function getResumeCfi(): string | null {
-		if (savedProgress?.cfi) {
-			return savedProgress.cfi;
-		}
-
 		if (
 			epubInstance?.locations &&
 			typeof savedProgress?.percent === 'number' &&
@@ -1461,6 +1451,39 @@
 		}
 
 		return null;
+	}
+
+	async function displaySavedPaginatedLocation() {
+		if (!rendition) return;
+
+		const savedPercent = typeof savedProgress?.percent === 'number'
+			? Math.max(0, Math.min(100, savedProgress.percent))
+			: null;
+
+		if (savedPercent !== null) {
+			setCurrentProgress(savedPercent);
+		}
+
+		if (savedProgress?.cfi) {
+			try {
+				await rendition.display(savedProgress.cfi);
+				return;
+			} catch (error) {
+				console.warn('Saved EPUB CFI could not be restored; falling back to saved percent:', error);
+			}
+		}
+
+		const percentCfi = getResumeCfi();
+		if (percentCfi) {
+			try {
+				await rendition.display(percentCfi);
+				return;
+			} catch (error) {
+				console.warn('Saved EPUB percent could not be restored:', error);
+			}
+		}
+
+		await rendition.display();
 	}
 
 	async function loadContinuousToc() {
