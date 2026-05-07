@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/robfig/cron/v3"
 
+	"cryptorum/internal/auth"
 	"cryptorum/internal/config"
 	"cryptorum/internal/db"
 	"cryptorum/internal/scanner"
@@ -80,6 +81,9 @@ func main() {
 		slog.Error("Failed to initialize ownership", "error", err)
 		os.Exit(1)
 	}
+
+	sessionStore = auth.NewStore(appDB.DB, appConfig.Auth.SessionDuration)
+	sessionStore.CleanupExpired()
 
 	startupTime := time.Now().Unix()
 	if count, err := closeStaleReadingSessions(startupTime); err != nil {

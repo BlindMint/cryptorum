@@ -8,8 +8,11 @@
 	import ThemeSelector from './ThemeSelector.svelte';
 	import NotificationBell from './NotificationBell.svelte';
 
+	type MobileActionsView = 'menu' | 'notifications' | 'theme';
+
 	let searchQuery = $state('');
 	let showMobileActions = $state(false);
+	let mobileActionsView = $state<MobileActionsView>('menu');
 	let scanRunning = $state(false);
 	let scanPollTimer: number | null = null;
 
@@ -28,6 +31,35 @@
 
 	function closeMobileActions() {
 		showMobileActions = false;
+		mobileActionsView = 'menu';
+	}
+
+	function openMobileNotifications() {
+		mobileActionsView = 'notifications';
+	}
+
+	function openMobileTheme() {
+		mobileActionsView = 'theme';
+	}
+
+	function toggleMobileActions() {
+		if (showMobileActions) {
+			closeMobileActions();
+		} else {
+			mobileActionsView = 'menu';
+			showMobileActions = true;
+		}
+	}
+
+	function getMobileActionsTitle() {
+		switch (mobileActionsView) {
+			case 'notifications':
+				return 'Notifications';
+			case 'theme':
+				return 'Theme';
+			default:
+				return 'Quick Actions';
+		}
 	}
 
 	function toggleDesktopSidebar() {
@@ -199,7 +231,7 @@
 			class="lg:hidden shrink-0 rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
 			aria-label="Open quick actions"
 			aria-expanded={showMobileActions}
-			onclick={() => showMobileActions = !showMobileActions}
+			onclick={toggleMobileActions}
 		>
 			<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6h.01M12 12h.01M12 18h.01"></path>
@@ -216,62 +248,160 @@
 		aria-label="Close quick actions"
 		onclick={closeMobileActions}
 	></button>
-	<div class="fixed right-3 top-[3.75rem] z-[90] lg:hidden w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-sm">
-		<div class="grid gap-2 p-3">
-			<div class="mobile-action-row">
-				<NotificationBell mobileMenu />
+	<div class="mobile-actions-panel {mobileActionsView === 'menu' ? 'mobile-actions-panel-menu' : 'mobile-actions-panel-detail'}">
+		{#if mobileActionsView === 'menu'}
+			<div class="grid gap-2 p-3">
+				<button type="button" class="mobile-action-row w-full" onclick={openMobileNotifications}>
+					<span class="flex items-center gap-3">
+						<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
+						</svg>
+						<span class="text-sm font-medium text-[var(--color-surface-text)]">Notifications</span>
+					</span>
+				</button>
+				<button type="button" class="mobile-action-row w-full" onclick={openMobileTheme}>
+					<span class="flex items-center gap-3">
+						<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" viewBox="0 -960 960 960" fill="currentColor">
+							<path d="M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 32.5-156t88-127Q256-817 330-848.5T488-880q80 0 151 27.5t124.5 76q53.5 48.5 85 115T880-518q0 115-70 176.5T640-280h-74q-9 0-12.5 5t-3.5 11q0 12 15 34.5t15 51.5q0 50-27.5 74T480-80Zm0-400Zm-177 23q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120-160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm200 0q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120 160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17ZM480-160q9 0 14.5-5t5.5-13q0-14-15-33t-15-57q0-42 29-67t71-25h70q66 0 113-38.5T800-518q0-121-92.5-201.5T488-800q-136 0-232 93t-96 227q0 133 93.5 226.5T480-160Z"/>
+						</svg>
+						<span class="text-sm font-medium text-[var(--color-surface-text)]">Theme</span>
+					</span>
+				</button>
+				<a
+					href="/history"
+					onclick={closeMobileActions}
+					class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all"
+				>
+					<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+					</svg>
+					<span>Reading History</span>
+				</a>
+				<a
+					href="/stats"
+					onclick={closeMobileActions}
+					class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all"
+				>
+					<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+					</svg>
+					<span>Statistics</span>
+				</a>
+				<button
+					onclick={async () => {
+						closeMobileActions();
+						await scanLibraries();
+					}}
+					class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-[var(--color-surface-text)] transition-all"
+				>
+					<svg class="h-5 w-5 text-[var(--color-surface-text-muted)] {scanRunning ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+					</svg>
+					<span>{scanRunning ? 'Scanning Libraries' : 'Scan Libraries'}</span>
+				</button>
+				<a
+					href="/settings"
+					onclick={closeMobileActions}
+					class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all"
+				>
+					<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+					</svg>
+					<span>Settings</span>
+				</a>
 			</div>
-			<div class="mobile-action-row">
-				<ThemeSelector mobileMenu />
+		{:else}
+			<div class="mobile-actions-header">
+				<button type="button" class="mobile-actions-back" onclick={() => mobileActionsView = 'menu'}>
+					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+					</svg>
+					<span>Back</span>
+				</button>
+				<div class="text-sm font-semibold text-[var(--color-surface-text)]">{getMobileActionsTitle()}</div>
+				<button type="button" class="mobile-actions-close" aria-label="Close quick actions" onclick={closeMobileActions}>
+					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+					</svg>
+				</button>
 			</div>
-			<a
-				href="/history"
-				onclick={closeMobileActions}
-				class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all"
-			>
-				<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-				</svg>
-				<span>Reading History</span>
-			</a>
-			<a
-				href="/stats"
-				onclick={closeMobileActions}
-				class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all"
-			>
-				<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-				</svg>
-				<span>Statistics</span>
-			</a>
-			<button
-				onclick={async () => {
-					closeMobileActions();
-					await scanLibraries();
-				}}
-				class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-[var(--color-surface-text)] transition-all"
-			>
-				<svg class="h-5 w-5 text-[var(--color-surface-text-muted)] {scanRunning ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-				</svg>
-				<span>{scanRunning ? 'Scanning Libraries' : 'Scan Libraries'}</span>
-			</button>
-			<a
-				href="/settings"
-				onclick={closeMobileActions}
-				class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all"
-			>
-				<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-				</svg>
-				<span>Settings</span>
-			</a>
-		</div>
+			<div class="mobile-actions-content">
+				{#if mobileActionsView === 'notifications'}
+					<NotificationBell mobileMenu panelOnly hideHeader onClose={closeMobileActions} />
+				{:else if mobileActionsView === 'theme'}
+					<ThemeSelector mobileMenu panelOnly />
+				{/if}
+			</div>
+		{/if}
 	</div>
 {/if}
 
 <style>
+	.mobile-actions-panel {
+		position: fixed;
+		right: 0.75rem;
+		top: 4.25rem;
+		z-index: 90;
+		width: min(22rem, calc(100vw - 1.5rem));
+		max-height: calc(100dvh - 5rem);
+		overflow: hidden;
+		border: 1px solid var(--color-surface-border);
+		border-radius: 0.75rem;
+		background: var(--color-surface-overlay);
+		box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.55);
+		backdrop-filter: blur(10px);
+	}
+
+	.mobile-actions-panel-detail {
+		display: flex;
+		width: min(30rem, calc(100vw - 1.5rem));
+		flex-direction: column;
+	}
+
+	.mobile-actions-header {
+		display: flex;
+		flex-shrink: 0;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		border-bottom: 1px solid var(--color-surface-border);
+		padding: 0.75rem;
+	}
+
+	.mobile-actions-back,
+	.mobile-actions-close {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 0.5rem;
+		color: var(--color-surface-text-muted);
+		transition: background-color 160ms ease, color 160ms ease;
+	}
+
+	.mobile-actions-back {
+		gap: 0.25rem;
+		padding: 0.375rem 0.5rem;
+		font-size: 0.8125rem;
+		font-weight: 500;
+	}
+
+	.mobile-actions-close {
+		height: 2rem;
+		width: 2rem;
+	}
+
+	.mobile-actions-back:hover,
+	.mobile-actions-close:hover {
+		background: var(--color-surface-base);
+		color: var(--color-surface-text);
+	}
+
+	.mobile-actions-content {
+		min-height: 0;
+		overflow-y: auto;
+	}
+
 	.mobile-action-row {
 		display: flex;
 		align-items: center;
@@ -298,5 +428,13 @@
 		background: var(--color-surface-base);
 		border-color: color-mix(in srgb, var(--color-primary-500) 55%, var(--color-surface-border));
 		box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary-500) 22%, transparent);
+	}
+
+	@media (max-width: 30rem) {
+		.mobile-actions-panel {
+			left: 0.75rem;
+			right: 0.75rem;
+			width: auto;
+		}
 	}
 </style>

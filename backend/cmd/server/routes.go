@@ -82,11 +82,13 @@ func addHierarchicalJSONFilterCondition(
 ) {
 	addFilterCondition(
 		fmt.Sprintf(
-			`EXISTS (SELECT 1 FROM json_each(COALESCE(%s, '[]')) WHERE value = ? OR value LIKE ?)`,
+			`EXISTS (SELECT 1 FROM json_each(COALESCE(%s, '[]')) WHERE value = ? OR value LIKE ? OR value LIKE ? OR value LIKE ?)`,
 			column,
 		),
 		value,
 		value+".%",
+		"%."+value,
+		"%."+value+".%",
 	)
 }
 
@@ -3154,10 +3156,6 @@ func handleKoboSyncHandler(w http.ResponseWriter, r *http.Request) {
 // Global session store
 var sessionStore *auth.Store
 
-func init() {
-	sessionStore = auth.NewStore("cryptorum-secret-key-change-in-production", 720*time.Hour)
-}
-
 const sessionCookieName = "cryptorum_session"
 const sessionSignatureCookieName = "cryptorum_sig"
 
@@ -3187,14 +3185,8 @@ func authMiddleware(next http.Handler) http.Handler {
 		}
 
 		sessionID, _ := r.Cookie(sessionCookieName)
-		signature, _ := r.Cookie(sessionSignatureCookieName)
 
-		if sessionID == nil || signature == nil {
-			authFailure(w, r)
-			return
-		}
-
-		if !sessionStore.VerifySignature(sessionID.Value, signature.Value) {
+		if sessionStore == nil || sessionID == nil {
 			authFailure(w, r)
 			return
 		}
@@ -3273,6 +3265,11 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if sessionStore == nil {
+		errorResponse(w, http.StatusInternalServerError, "Session store unavailable")
+		return
+	}
+
 	session, err := sessionStore.CreateSession(user.ID, user.Username)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to create session")
@@ -3289,16 +3286,19 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		Value:    session.ID,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   shouldUseSecureCookies(r),
 		SameSite: http.SameSiteLaxMode,
+		Expires:  session.ExpiresAt,
+		MaxAge:   int(time.Until(session.ExpiresAt).Seconds()),
 	})
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionSignatureCookieName,
-		Value:    sessionStore.SignSession(session.ID),
+		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   shouldUseSecureCookies(r),
+		MaxAge:   -1,
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -3308,7 +3308,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
 	sessionID, _ := r.Cookie(sessionCookieName)
 
-	if sessionID != nil {
+	if sessionStore != nil && sessionID != nil {
 		sessionStore.DeleteSession(sessionID.Value)
 	}
 
@@ -3319,6 +3319,7 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   shouldUseSecureCookies(r),
 		MaxAge:   -1,
 		SameSite: http.SameSiteLaxMode,
 	})
@@ -3328,6 +3329,7 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   shouldUseSecureCookies(r),
 		MaxAge:   -1,
 		SameSite: http.SameSiteLaxMode,
 	})
@@ -3345,14 +3347,8 @@ func authCheckHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionID, _ := r.Cookie(sessionCookieName)
-	signature, _ := r.Cookie(sessionSignatureCookieName)
 
-	if sessionID == nil || signature == nil {
-		jsonResponse(w, http.StatusOK, map[string]bool{"authenticated": false})
-		return
-	}
-
-	if !sessionStore.VerifySignature(sessionID.Value, signature.Value) {
+	if sessionStore == nil || sessionID == nil {
 		jsonResponse(w, http.StatusOK, map[string]bool{"authenticated": false})
 		return
 	}
@@ -3368,4 +3364,12 @@ func authCheckHandler(w http.ResponseWriter, r *http.Request) {
 		"username":      session.Username,
 		"user_id":       session.UserID,
 	})
+}
+
+func shouldUseSecureCookies(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	proto := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")))
+	return proto == "https" || strings.HasPrefix(proto, "https,")
 }

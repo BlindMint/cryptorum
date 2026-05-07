@@ -567,6 +567,19 @@
 		}
 	}
 
+	function goBackToPreviousContext(event: MouseEvent) {
+		event.preventDefault();
+		if (typeof window !== 'undefined' && window.history.length > 1) {
+			window.history.back();
+			return;
+		}
+		if (book?.library_id) {
+			goto(`/library?library=${book.library_id}`);
+		} else {
+			goto('/library');
+		}
+	}
+
 	function handleTabChange(tab: 'similar' | 'sessions' | 'files') {
 		activeTab = tab;
 		if (tab === 'sessions') {
@@ -594,7 +607,7 @@
 				Back to Book Details
 			</button>
 		{:else}
-			<a href="/library" class="group inline-flex items-center text-[var(--color-surface-text-muted)] transition-colors duration-200 ease-out hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
+			<a href="/library" onclick={goBackToPreviousContext} class="group inline-flex items-center text-[var(--color-surface-text-muted)] transition-colors duration-200 ease-out hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
 				<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-surface-text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
 				</svg>

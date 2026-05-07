@@ -82,6 +82,9 @@
    	let longPressTimer: number | null = null;
    	let longPressThreshold = 500; // ms
   	let longPressActivated = $state(false);
+	let suppressNextClickBookId: number | null = null;
+	let longPressTouchStart: { x: number; y: number } | null = null;
+	const LONG_PRESS_MOVE_TOLERANCE = 10;
 
  	let libraryFilter = $derived($page.url.searchParams.get('library') || '');
  	let currentOffset = $state(0);
@@ -410,6 +413,12 @@
 
     function handleBookClick(event: MouseEvent) {
     		const bookId = Number((event.currentTarget as HTMLElement).dataset.bookId);
+			if (suppressNextClickBookId === bookId) {
+				event.preventDefault();
+				event.stopPropagation();
+				suppressNextClickBookId = null;
+				return;
+			}
     		if (bulkSelectMode) {
     			event.preventDefault();
     			event.stopPropagation();
@@ -448,40 +457,54 @@
     		handleBookClick(event as unknown as MouseEvent);
     }
 
-    function handleMouseDown(event: MouseEvent) {
-    		if ('ontouchstart' in window) return;
-    		const bookId = Number((event.currentTarget as HTMLElement).dataset.bookId);
-    		longPressTimer = window.setTimeout(() => {
-    			// Prevent the upcoming click event from firing
-    			event.stopImmediatePropagation();
-    			toggleBookSelection(bookId);
-    			longPressTimer = null;
-    		}, longPressThreshold);
-    }
+	function clearLongPressTimer() {
+		if (longPressTimer) {
+			clearTimeout(longPressTimer);
+			longPressTimer = null;
+		}
+	}
 
-    	function handleMouseUp() {
-    		if (longPressTimer) {
-    			clearTimeout(longPressTimer);
-    			longPressTimer = null;
-    		}
-    }
+	function handleMouseDown(event: MouseEvent) {
+		if ('ontouchstart' in window) return;
+		const bookId = Number((event.currentTarget as HTMLElement).dataset.bookId);
+		longPressTimer = window.setTimeout(() => {
+			suppressNextClickBookId = bookId;
+			toggleBookSelection(bookId);
+			longPressTimer = null;
+		}, longPressThreshold);
+	}
 
-    	function handleTouchStart(event: TouchEvent) {
-    		const bookId = Number((event.currentTarget as HTMLElement).dataset.bookId);
-    		longPressTimer = window.setTimeout(() => {
-    			// Prevent the upcoming click event from firing
-    			event.stopImmediatePropagation();
-    			toggleBookSelection(bookId);
-    			longPressTimer = null;
-    		}, longPressThreshold);
-    }
+	function handleMouseUp() {
+		clearLongPressTimer();
+	}
 
-    	function handleTouchEnd() {
-    		if (longPressTimer) {
-    			clearTimeout(longPressTimer);
-    			longPressTimer = null;
-    		}
-    }
+	function handleTouchStart(event: TouchEvent) {
+		const bookId = Number((event.currentTarget as HTMLElement).dataset.bookId);
+		const touch = event.touches[0];
+		longPressTouchStart = touch ? { x: touch.clientX, y: touch.clientY } : null;
+		longPressTimer = window.setTimeout(() => {
+			suppressNextClickBookId = bookId;
+			toggleBookSelection(bookId);
+			longPressTimer = null;
+		}, longPressThreshold);
+	}
+
+	function handleTouchMove(event: TouchEvent) {
+		if (!longPressTimer || !longPressTouchStart) return;
+		const touch = event.touches[0];
+		if (!touch) return;
+		const deltaX = Math.abs(touch.clientX - longPressTouchStart.x);
+		const deltaY = Math.abs(touch.clientY - longPressTouchStart.y);
+		if (deltaX > LONG_PRESS_MOVE_TOLERANCE || deltaY > LONG_PRESS_MOVE_TOLERANCE) {
+			clearLongPressTimer();
+			longPressTouchStart = null;
+		}
+	}
+
+	function handleTouchEnd() {
+		clearLongPressTimer();
+		longPressTouchStart = null;
+	}
 
  	function updateSelectAllMode() {
  		if (selectedBooks.size === 0) {
@@ -1002,8 +1025,13 @@
 
   <!-- Filter Side Panel (right side, under top bar) -->
   {#if showFilterPanel}
-  		<!-- Side Panel - attached to bottom of top bar, no backdrop -->
-  		<div class="fixed top-16 right-0 h-[calc(100vh-4rem)] w-80 bg-[var(--color-surface-overlay)] border-l border-[var(--color-surface-border)] z-30 overflow-y-auto shadow-xl transform transition-transform duration-300 ease-out translate-x-0">
+		<button
+			type="button"
+			class="fixed inset-x-0 bottom-0 top-16 z-[35] bg-black/80 lg:bg-black/50"
+			aria-label="Close filters"
+			onclick={() => showFilterPanel = false}
+		></button>
+		<div class="fixed top-16 right-0 z-40 h-[calc(100dvh-4rem)] w-full max-w-80 bg-[var(--color-surface-overlay)] border-l border-[var(--color-surface-border)] overflow-y-auto shadow-xl transform transition-transform duration-300 ease-out translate-x-0">
   			<div class="sticky top-0 h-[73px] bg-[var(--color-surface-overlay)] border-b border-[var(--color-surface-border)] px-4 flex items-center justify-between gap-3 z-10">
   				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Filters</h2>
 				<div class="relative grid grid-cols-3 flex-1 max-w-40 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
@@ -1260,7 +1288,9 @@
    						onclick={handleBookClick}
    						onmousedown={handleMouseDown}
    						onmouseup={handleMouseUp}
+						onmouseleave={handleMouseUp}
    						ontouchstart={handleTouchStart}
+						ontouchmove={handleTouchMove}
    						ontouchend={handleTouchEnd}
    						onkeydown={handleBookKeydown}
    						role="button"
@@ -1334,7 +1364,9 @@
   						onclick={handleBookClick}
   						onmousedown={handleMouseDown}
   						onmouseup={handleMouseUp}
+						onmouseleave={handleMouseUp}
   						ontouchstart={handleTouchStart}
+						ontouchmove={handleTouchMove}
   						ontouchend={handleTouchEnd}
   						onkeydown={handleBookKeydown}
   						role="button"
