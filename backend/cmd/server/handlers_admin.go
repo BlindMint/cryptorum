@@ -30,19 +30,20 @@ type MetadataLookupJobRequest struct {
 }
 
 type AdminJob struct {
-	ID             int64           `json:"id"`
-	JobType        string          `json:"job_type"`
-	Title          string          `json:"title"`
-	Status         string          `json:"status"`
-	Payload        json.RawMessage `json:"payload,omitempty"`
-	Result         json.RawMessage `json:"result,omitempty"`
-	TotalItems     int             `json:"total_items"`
-	CompletedItems int             `json:"completed_items"`
-	FailedItems    int             `json:"failed_items"`
-	Error          string          `json:"error,omitempty"`
-	CreatedAt      int64           `json:"created_at"`
-	StartedAt      *int64          `json:"started_at,omitempty"`
-	CompletedAt    *int64          `json:"completed_at,omitempty"`
+	ID                int64           `json:"id"`
+	JobType           string          `json:"job_type"`
+	Title             string          `json:"title"`
+	Status            string          `json:"status"`
+	Payload           json.RawMessage `json:"payload,omitempty"`
+	Result            json.RawMessage `json:"result,omitempty"`
+	TotalItems        int             `json:"total_items"`
+	CompletedItems    int             `json:"completed_items"`
+	FailedItems       int             `json:"failed_items"`
+	Error             string          `json:"error,omitempty"`
+	CreatedAt         int64           `json:"created_at"`
+	StartedAt         *int64          `json:"started_at,omitempty"`
+	CompletedAt       *int64          `json:"completed_at,omitempty"`
+	CancelRequestedAt *int64          `json:"cancel_requested_at,omitempty"`
 }
 
 type AdminNotification struct {
@@ -156,17 +157,17 @@ func scanOptionalInt(value sql.NullInt64) *int64 {
 func loadAdminJob(jobID int64) (AdminJob, error) {
 	var job AdminJob
 	var payload, result sql.NullString
-	var startedAt, completedAt sql.NullInt64
+	var startedAt, completedAt, cancelRequestedAt sql.NullInt64
 	err := appDB.QueryRow(`
 		SELECT id, job_type, title, status, payload_json, result_json,
 		       total_items, completed_items, failed_items, COALESCE(error, ''),
-		       created_at, started_at, completed_at
+		       created_at, started_at, completed_at, cancel_requested_at
 		FROM metadata_job
 		WHERE id = ?
 	`, jobID).Scan(
 		&job.ID, &job.JobType, &job.Title, &job.Status, &payload, &result,
 		&job.TotalItems, &job.CompletedItems, &job.FailedItems, &job.Error,
-		&job.CreatedAt, &startedAt, &completedAt,
+		&job.CreatedAt, &startedAt, &completedAt, &cancelRequestedAt,
 	)
 	if err != nil {
 		return AdminJob{}, err
@@ -176,6 +177,7 @@ func loadAdminJob(jobID int64) (AdminJob, error) {
 	job.Result = rawMessageOrNil(result)
 	job.StartedAt = scanOptionalInt(startedAt)
 	job.CompletedAt = scanOptionalInt(completedAt)
+	job.CancelRequestedAt = scanOptionalInt(cancelRequestedAt)
 	return job, nil
 }
 
@@ -187,7 +189,7 @@ func isJobNotificationKind(kind string) bool {
 }
 
 func isActiveJobStatus(status string) bool {
-	return status == "queued" || status == "running"
+	return status == "queued" || status == "running" || status == "cancelling"
 }
 
 func jobNotificationMessage(job AdminJob) string {
@@ -283,6 +285,38 @@ func notificationTextLine(item AdminNotification) string {
 		line += " - " + item.Message
 	}
 	return line
+}
+
+func splitCSVFilter(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func firstQueryValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func placeholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	values := make([]string, count)
+	for i := range values {
+		values[i] = "?"
+	}
+	return strings.Join(values, ", ")
 }
 
 func loadMetadataLookupSnapshot(bookID int64) (MetadataLookupBookSnapshot, error) {
@@ -573,7 +607,7 @@ func QueueMetadataApplyJobHandler(w http.ResponseWriter, r *http.Request) {
 		"job_queued",
 		title,
 		"Queued a background metadata job.",
-		"/settings?tab=admin",
+		"/settings?tab=jobs",
 	)
 	recordAppLog("info", "jobs", "Queued metadata apply job", map[string]any{
 		"job_id": jobID,
@@ -657,7 +691,7 @@ func QueueMetadataLookupJobHandler(w http.ResponseWriter, r *http.Request) {
 		"job_queued",
 		title,
 		"Queued a background metadata lookup job.",
-		"/settings?tab=admin",
+		"/settings?tab=jobs",
 	)
 	recordAppLog("info", "jobs", "Queued metadata lookup job", map[string]any{
 		"job_id": jobID,
@@ -800,7 +834,7 @@ func processMetadataLookupJob(jobID int64, req MetadataLookupJobRequest, title s
 		"job_completed",
 		title,
 		fmt.Sprintf("Metadata lookup finished: %d matches, %d failed.", matched, failed),
-		"/settings?tab=admin",
+		"/settings?tab=jobs",
 	)
 	recordAppLog("info", "jobs", "Completed metadata lookup job", map[string]any{
 		"job_id":  jobID,
@@ -874,7 +908,7 @@ func processMetadataApplyJob(jobID int64, req MetadataApplyJobRequest, title str
 		"job_completed",
 		title,
 		fmt.Sprintf("Metadata job finished: %d applied, %d failed.", completed, failed),
-		"/settings?tab=admin",
+		"/settings?tab=jobs",
 	)
 	recordAppLog("info", "jobs", "Completed metadata apply job", map[string]any{
 		"job_id":  jobID,
@@ -892,7 +926,8 @@ func ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
+	statusFilters := splitCSVFilter(r.URL.Query().Get("status"))
+	typeFilters := splitCSVFilter(firstQueryValue(r.URL.Query().Get("type"), r.URL.Query().Get("job_type")))
 	limit := 50
 	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 && parsed <= 200 {
@@ -903,13 +938,25 @@ func ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT id, job_type, title, status, payload_json, result_json,
 		       total_items, completed_items, failed_items, COALESCE(error, ''),
-		       created_at, started_at, completed_at
+		       created_at, started_at, completed_at, cancel_requested_at
 		FROM metadata_job
 	`
 	args := []any{}
-	if statusFilter != "" {
-		query += " WHERE status = ?"
-		args = append(args, statusFilter)
+	conditions := []string{}
+	if len(statusFilters) > 0 {
+		conditions = append(conditions, "status IN ("+placeholders(len(statusFilters))+")")
+		for _, status := range statusFilters {
+			args = append(args, status)
+		}
+	}
+	if len(typeFilters) > 0 {
+		conditions = append(conditions, "job_type IN ("+placeholders(len(typeFilters))+")")
+		for _, jobType := range typeFilters {
+			args = append(args, jobType)
+		}
+	}
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 	query += " ORDER BY created_at DESC LIMIT ?"
 	args = append(args, limit)
@@ -925,11 +972,11 @@ func ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var job AdminJob
 		var payload, result sql.NullString
-		var startedAt, completedAt sql.NullInt64
+		var startedAt, completedAt, cancelRequestedAt sql.NullInt64
 		if err := rows.Scan(
 			&job.ID, &job.JobType, &job.Title, &job.Status, &payload, &result,
 			&job.TotalItems, &job.CompletedItems, &job.FailedItems, &job.Error,
-			&job.CreatedAt, &startedAt, &completedAt,
+			&job.CreatedAt, &startedAt, &completedAt, &cancelRequestedAt,
 		); err != nil {
 			continue
 		}
@@ -937,10 +984,76 @@ func ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		job.Result = rawMessageOrNil(result)
 		job.StartedAt = scanOptionalInt(startedAt)
 		job.CompletedAt = scanOptionalInt(completedAt)
+		job.CancelRequestedAt = scanOptionalInt(cancelRequestedAt)
 		jobs = append(jobs, job)
 	}
 
 	jsonResponse(w, http.StatusOK, jobs)
+}
+
+func CancelJobHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionManageJobs) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
+	jobID, err := strconv.ParseInt(chi.URLParam(r, "jobID"), 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid job ID")
+		return
+	}
+
+	job, err := loadAdminJob(jobID)
+	if err != nil {
+		errorResponse(w, http.StatusNotFound, "Job not found")
+		return
+	}
+	if !isActiveJobStatus(job.Status) {
+		errorResponse(w, http.StatusConflict, "Job is not active")
+		return
+	}
+	if job.Status != "queued" && job.JobType != "library_scan" {
+		errorResponse(w, http.StatusConflict, "This running job type cannot be cancelled yet")
+		return
+	}
+
+	now := time.Now().Unix()
+	if job.Status == "queued" {
+		_, err = appDB.Exec(`
+			UPDATE metadata_job
+			SET status = 'cancelled', cancel_requested_at = ?, completed_at = ?
+			WHERE id = ? AND status = 'queued'
+		`, now, now, jobID)
+	} else {
+		_, err = appDB.Exec(`
+			UPDATE metadata_job
+			SET status = 'cancelling', cancel_requested_at = ?
+			WHERE id = ? AND status IN ('running', 'cancelling')
+		`, now, jobID)
+	}
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to cancel job")
+		return
+	}
+
+	recordAppLog("info", "jobs", "Requested job cancellation", map[string]any{"job_id": jobID})
+	jsonResponse(w, http.StatusAccepted, map[string]string{"status": "cancelling"})
+}
+
+func isJobCancelRequested(jobID int64) bool {
+	var exists bool
+	if err := appDB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1
+			FROM metadata_job
+			WHERE id = ?
+			  AND (cancel_requested_at IS NOT NULL OR status = 'cancelling')
+		)
+	`, jobID).Scan(&exists); err != nil {
+		return false
+	}
+	return exists
 }
 
 func DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
@@ -953,6 +1066,16 @@ func DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 	jobID, err := strconv.ParseInt(chi.URLParam(r, "jobID"), 10, 64)
 	if err != nil {
 		errorResponse(w, http.StatusBadRequest, "Invalid job ID")
+		return
+	}
+
+	job, err := loadAdminJob(jobID)
+	if err != nil {
+		errorResponse(w, http.StatusNotFound, "Job not found")
+		return
+	}
+	if isActiveJobStatus(job.Status) {
+		errorResponse(w, http.StatusConflict, "Cancel active jobs before deleting them")
 		return
 	}
 
@@ -982,6 +1105,7 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 
 	includeUnreadOnly := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("unread")), "true")
 	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
+	typeFilters := splitCSVFilter(firstQueryValue(r.URL.Query().Get("type"), r.URL.Query().Get("job_type")))
 
 	notifications := []AdminNotification{}
 	if statusFilter == "" {
@@ -994,6 +1118,17 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 		conditions := []string{}
 		if includeUnreadOnly {
 			conditions = append(conditions, "read_at IS NULL")
+		}
+		for _, typeFilter := range typeFilters {
+			switch typeFilter {
+			case "notification":
+				// no-op; keep app notifications
+			case "auth", "login", "logout", "user":
+				conditions = append(conditions, "1 = 0")
+			default:
+				conditions = append(conditions, "kind = ?")
+				args = append(args, typeFilter)
+			}
 		}
 		conditions = append(conditions, `
 			kind NOT LIKE 'job_%'
@@ -1023,13 +1158,35 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 			notifications = append(notifications, item)
 		}
 
-		if !includeUnreadOnly {
-			logRows, err := appDB.Query(`
+		includeLogs := !includeUnreadOnly
+		logCategoryFilters := []string{}
+		if len(typeFilters) > 0 {
+			includeLogs = false
+			for _, typeFilter := range typeFilters {
+				switch typeFilter {
+				case "auth", "login", "logout", "user":
+					includeLogs = true
+					logCategoryFilters = append(logCategoryFilters, "auth")
+				case "logs", "events":
+					includeLogs = true
+				}
+			}
+		}
+		if includeLogs {
+			logQuery := `
 				SELECT id, level, category, message, COALESCE(data_json, ''), created_at
 				FROM app_log
-				ORDER BY created_at DESC
-				LIMIT ?
-			`, limit)
+			`
+			logArgs := []any{}
+			if len(logCategoryFilters) > 0 {
+				logQuery += " WHERE category IN (" + placeholders(len(logCategoryFilters)) + ")"
+				for _, category := range logCategoryFilters {
+					logArgs = append(logArgs, category)
+				}
+			}
+			logQuery += " ORDER BY created_at DESC LIMIT ?"
+			logArgs = append(logArgs, limit)
+			logRows, err := appDB.Query(logQuery, logArgs...)
 			if err != nil {
 				errorResponse(w, http.StatusInternalServerError, "Failed to load log notifications")
 				return
@@ -1064,7 +1221,7 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 	jobQuery := `
 		SELECT id, job_type, title, status, payload_json, result_json,
 		       total_items, completed_items, failed_items, COALESCE(error, ''),
-		       created_at, started_at, completed_at
+		       created_at, started_at, completed_at, cancel_requested_at
 		FROM metadata_job
 	`
 	jobArgs := []any{}
@@ -1073,8 +1230,14 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 		jobConditions = append(jobConditions, "status = ?")
 		jobArgs = append(jobArgs, statusFilter)
 	}
+	if len(typeFilters) > 0 {
+		jobConditions = append(jobConditions, "job_type IN ("+placeholders(len(typeFilters))+")")
+		for _, jobType := range typeFilters {
+			jobArgs = append(jobArgs, jobType)
+		}
+	}
 	if includeUnreadOnly {
-		jobConditions = append(jobConditions, "status IN ('queued', 'running')")
+		jobConditions = append(jobConditions, "status IN ('queued', 'running', 'cancelling')")
 	}
 	if len(jobConditions) > 0 {
 		jobQuery += " WHERE " + strings.Join(jobConditions, " AND ")
@@ -1092,11 +1255,11 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 	for jobRows.Next() {
 		var job AdminJob
 		var payload, result sql.NullString
-		var startedAt, completedAt sql.NullInt64
+		var startedAt, completedAt, cancelRequestedAt sql.NullInt64
 		if err := jobRows.Scan(
 			&job.ID, &job.JobType, &job.Title, &job.Status, &payload, &result,
 			&job.TotalItems, &job.CompletedItems, &job.FailedItems, &job.Error,
-			&job.CreatedAt, &startedAt, &completedAt,
+			&job.CreatedAt, &startedAt, &completedAt, &cancelRequestedAt,
 		); err != nil {
 			continue
 		}
@@ -1104,6 +1267,7 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 		job.Result = rawMessageOrNil(result)
 		job.StartedAt = scanOptionalInt(startedAt)
 		job.CompletedAt = scanOptionalInt(completedAt)
+		job.CancelRequestedAt = scanOptionalInt(cancelRequestedAt)
 		jobCopy := job
 		notifications = append(notifications, AdminNotification{
 			ID:        -job.ID,
@@ -1111,7 +1275,7 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 			Kind:      job.JobType,
 			Title:     job.Title,
 			Message:   jobNotificationMessage(job),
-			URL:       "/settings?tab=admin",
+			URL:       "/settings?tab=jobs",
 			ReadAt:    jobNotificationReadAt(job),
 			CreatedAt: job.CreatedAt,
 			Job:       &jobCopy,
@@ -1145,7 +1309,7 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 		  AND kind NOT LIKE 'cover_regeneration_%'
 	`).Scan(&unreadCount)
 	var activeJobCount int64
-	_ = appDB.QueryRow(`SELECT COUNT(*) FROM metadata_job WHERE status IN ('queued', 'running')`).Scan(&activeJobCount)
+	_ = appDB.QueryRow(`SELECT COUNT(*) FROM metadata_job WHERE status IN ('queued', 'running', 'cancelling')`).Scan(&activeJobCount)
 	unreadCount += activeJobCount
 
 	jsonResponse(w, http.StatusOK, map[string]any{

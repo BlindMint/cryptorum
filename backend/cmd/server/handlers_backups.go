@@ -330,7 +330,7 @@ func queueDatabaseBackupJob(trigger string) (*AdminJob, error) {
 		"backup_queued",
 		title,
 		"Queued a background database backup.",
-		"/settings?tab=admin",
+		"/settings?tab=jobs",
 	)
 	recordAppLog("info", "backup", "Queued database backup", map[string]any{
 		"job_id":  jobID,
@@ -400,7 +400,7 @@ func processDatabaseBackupJob(jobID int64, trigger, title string) {
 		"backup_completed",
 		title,
 		fmt.Sprintf("Database backup completed: %s", filename),
-		"/settings?tab=admin",
+		"/settings?tab=jobs",
 	)
 	recordAppLog("info", "backup", "Completed database backup", map[string]any{
 		"job_id": jobID,
@@ -419,7 +419,7 @@ func markDatabaseBackupJobFailed(jobID int64, title, trigger string, err error) 
 		"backup_failed",
 		title,
 		fmt.Sprintf("Database backup failed: %v", err),
-		"/settings?tab=admin",
+		"/settings?tab=jobs",
 	)
 	recordAppLog("error", "backup", "Database backup failed", map[string]any{
 		"job_id":  jobID,

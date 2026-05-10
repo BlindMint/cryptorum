@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,6 +18,8 @@ import (
 	"cryptorum/internal/metadata"
 )
 
+var ErrScanCancelled = errors.New("scan cancelled")
+
 // Supported formats
 var supportedFormats = map[string]bool{
 	"epub": true, "pdf": true,
@@ -24,6 +27,7 @@ var supportedFormats = map[string]bool{
 	"mp3": true, "m4a": true, "m4b": true,
 	"flac": true, "ogg": true, "wav": true,
 	"mobi": true, "azw3": true,
+	"fb2": true, "rtf": true, "txt": true,
 }
 
 // Scanner handles library scanning
@@ -39,6 +43,8 @@ type ScanProgress struct {
 	ImportedBooks  int
 	FailedFiles    int
 	CurrentPath    string
+	CurrentStatus  string
+	CurrentError   string
 	UnchangedFiles int
 	MissingFiles   int
 	ChangedFiles   int
@@ -46,6 +52,7 @@ type ScanProgress struct {
 }
 
 type ScanProgressFunc func(progress ScanProgress)
+type ScanCancelFunc func() bool
 
 // New creates a new scanner
 func New(db *sql.DB, dataPath string, coversPath string) *Scanner {
@@ -63,11 +70,22 @@ func (s *Scanner) ScanLibrary(libraryID int64, paths []string) (int, error) {
 
 // ScanLibraryWithProgress scans a library path and reports per-file progress.
 func (s *Scanner) ScanLibraryWithProgress(libraryID int64, paths []string, onProgress ScanProgressFunc) (int, error) {
+	return s.ScanLibraryWithProgressAndCancel(libraryID, paths, onProgress, nil)
+}
+
+func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []string, onProgress ScanProgressFunc, shouldCancel ScanCancelFunc) (int, error) {
 	var ownerUserID int64 = 1
 	_ = s.db.QueryRow(`SELECT COALESCE(owner_user_id, 1) FROM library WHERE id = ?`, libraryID).Scan(&ownerUserID)
 
 	progress := ScanProgress{Phase: "inventory"}
-	files, err := collectProcessableFiles(paths)
+	files, err := collectProcessableFiles(paths, shouldCancel)
+	if errors.Is(err, ErrScanCancelled) {
+		progress.Phase = "cancelled"
+		if onProgress != nil {
+			onProgress(progress)
+		}
+		return 0, ErrScanCancelled
+	}
 	if err != nil {
 		slog.Warn("Library inventory completed with errors", "libraryID", libraryID, "error", err)
 	}
@@ -90,6 +108,13 @@ func (s *Scanner) ScanLibraryWithProgress(libraryID int64, paths []string, onPro
 	}
 	seenPaths := make(map[string]struct{}, len(files))
 	for _, file := range files {
+		if shouldCancel != nil && shouldCancel() {
+			progress.Phase = "cancelled"
+			if onProgress != nil {
+				onProgress(progress)
+			}
+			return imported, ErrScanCancelled
+		}
 		seenPaths[file.Path] = struct{}{}
 		if record, ok := existing[file.Path]; ok &&
 			record.Size == file.Size &&
@@ -98,13 +123,17 @@ func (s *Scanner) ScanLibraryWithProgress(libraryID int64, paths []string, onPro
 			progress.ScannedFiles++
 			progress.UnchangedFiles++
 			progress.CurrentPath = file.Path
+			progress.CurrentStatus = "unchanged"
+			progress.CurrentError = ""
 			if onProgress != nil {
 				onProgress(progress)
 			}
 			continue
 		}
 
+		wasExistingPath := false
 		if _, ok := existing[file.Path]; ok {
+			wasExistingPath = true
 			progress.ChangedFiles++
 		}
 		processed, err := s.processFileWithInfo(libraryID, file, ownerUserID, scanStartedAt)
@@ -112,6 +141,8 @@ func (s *Scanner) ScanLibraryWithProgress(libraryID int64, paths []string, onPro
 		progress.CurrentPath = file.Path
 		if err != nil {
 			progress.FailedFiles++
+			progress.CurrentStatus = "failed"
+			progress.CurrentError = err.Error()
 			slog.Error("Failed to process file", "path", file.Path, "error", err)
 			if onProgress != nil {
 				onProgress(progress)
@@ -121,10 +152,17 @@ func (s *Scanner) ScanLibraryWithProgress(libraryID int64, paths []string, onPro
 		if processed {
 			imported++
 			progress.ImportedBooks++
+			progress.CurrentStatus = "imported"
+		} else if wasExistingPath {
+			progress.CurrentStatus = "updated"
+		} else {
+			progress.CurrentStatus = "skipped"
 		}
+		progress.CurrentError = ""
 		if onProgress != nil {
 			onProgress(progress)
 		}
+		time.Sleep(5 * time.Millisecond)
 	}
 
 	missing, err := s.markMissingFiles(libraryID, seenPaths, scanStartedAt)
@@ -158,11 +196,14 @@ type existingFileRecord struct {
 	MissingAt    int64
 }
 
-func collectProcessableFiles(paths []string) ([]fileInventoryItem, error) {
+func collectProcessableFiles(paths []string, shouldCancel ScanCancelFunc) ([]fileInventoryItem, error) {
 	files := []fileInventoryItem{}
 	var firstErr error
 	for _, root := range paths {
 		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if shouldCancel != nil && shouldCancel() {
+				return ErrScanCancelled
+			}
 			if err != nil {
 				if firstErr == nil {
 					firstErr = err
@@ -191,6 +232,9 @@ func collectProcessableFiles(paths []string) ([]fileInventoryItem, error) {
 			})
 			return nil
 		})
+		if errors.Is(err, ErrScanCancelled) {
+			return files, ErrScanCancelled
+		}
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}
@@ -427,15 +471,17 @@ func (s *Scanner) processFileWithInfo(
 	// Check for existing file by hash (duplicate detection)
 	var duplicateFileID int64
 	var duplicateMissingAt int64
+	var duplicateLibraryID int64
 	err = s.db.QueryRow(`
-		SELECT bf.id, b.id, COALESCE(bf.missing_at, 0)
+		SELECT bf.id, b.id, b.library_id, COALESCE(bf.missing_at, 0)
 		FROM book_file bf
 		JOIN book b ON b.id = bf.book_id
 		WHERE bf.hash = ?
+		ORDER BY CASE WHEN b.library_id = ? THEN 0 ELSE 1 END, COALESCE(bf.missing_at, 0) DESC
 		LIMIT 1
-	`, hash).Scan(&duplicateFileID, &existingBookID, &duplicateMissingAt)
+	`, hash, libraryID).Scan(&duplicateFileID, &existingBookID, &duplicateLibraryID, &duplicateMissingAt)
 	if err == nil {
-		if duplicateMissingAt > 0 {
+		if duplicateMissingAt > 0 && duplicateLibraryID == libraryID {
 			if _, err := s.db.Exec(`
 				UPDATE book_file
 				SET path = ?, format = ?, size = ?, last_modified = ?, scan_seen_at = ?, missing_at = NULL
@@ -446,8 +492,11 @@ func (s *Scanner) processFileWithInfo(
 			slog.Info("Restored moved book file", "path", file.Path, "bookID", existingBookID)
 			return false, nil
 		}
-		slog.Debug("File already exists", "path", file.Path, "hash", hash)
-		return false, nil
+		if duplicateLibraryID == libraryID {
+			slog.Debug("File already exists in this library", "path", file.Path, "hash", hash)
+			return false, nil
+		}
+		slog.Debug("Importing duplicate content into a different library", "path", file.Path, "hash", hash, "sourceLibraryID", duplicateLibraryID)
 	}
 
 	now := time.Now().Unix()

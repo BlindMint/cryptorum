@@ -144,8 +144,6 @@
 	let lastSavedPage = 0;
 	let closeTasksStarted = false;
 	let readerClosing = false;
-	let wakeLock: WakeLockSentinel | null = null;
-	let wakeLockRequestInFlight = false;
 	let readerPointerStart: { id: number; x: number; y: number } | null = null;
 	let readerPointerMoved = false;
 	let backgroundWarmupTimer: ReturnType<typeof setTimeout> | null = null;
@@ -434,7 +432,6 @@
 		clearSearchTimer();
 		clearSearchFlashTimer();
 		destroyPdfLoading();
-		releasePdfWakeLock();
 		if (handlePageExit) {
 			window.removeEventListener('pagehide', handlePageExit);
 			window.removeEventListener('beforeunload', handlePageExit);
@@ -757,56 +754,6 @@
 			hideTopBar();
 		} else {
 			showTopBar(false);
-		}
-	}
-
-	async function requestPdfWakeLock() {
-		if (
-			!browser ||
-			!settings.keepScreenOn ||
-			!readerChromeReady ||
-			readerClosing ||
-			wakeLock ||
-			wakeLockRequestInFlight ||
-			!('wakeLock' in navigator) ||
-			document.visibilityState !== 'visible'
-		) {
-			return;
-		}
-
-		wakeLockRequestInFlight = true;
-		try {
-			wakeLock = await navigator.wakeLock.request('screen');
-			wakeLock.addEventListener('release', () => {
-				wakeLock = null;
-			});
-		} catch (e) {
-			console.warn('Failed to keep PDF reader screen awake:', e);
-		} finally {
-			wakeLockRequestInFlight = false;
-		}
-	}
-
-	function releasePdfWakeLock() {
-		if (!wakeLock) return;
-		const lock = wakeLock;
-		wakeLock = null;
-		lock.release().catch(() => undefined);
-	}
-
-	function syncPdfWakeLock() {
-		if (settings.keepScreenOn && readerChromeReady && !readerClosing) {
-			void requestPdfWakeLock();
-		} else {
-			releasePdfWakeLock();
-		}
-	}
-
-	function handleVisibilityChange() {
-		if (document.visibilityState === 'visible') {
-			syncPdfWakeLock();
-		} else {
-			releasePdfWakeLock();
 		}
 	}
 
@@ -2335,7 +2282,6 @@
 		e?.preventDefault();
 		const targetUrl = getReaderReturnUrl();
 		readerClosing = true;
-		releasePdfWakeLock();
 		startCloseBackgroundTasks(true);
 		void goto(targetUrl, { replaceState: true });
 	}
@@ -2525,14 +2471,6 @@
 		}
 	});
 
-	$effect(() => {
-		settings.keepScreenOn;
-		readerChromeReady;
-		if (browser) {
-			syncPdfWakeLock();
-		}
-	});
-
 	onMount(() => {
 		window.addEventListener('keydown', handleKeydown);
 		window.addEventListener('wheel', handleWheelNavigation, { passive: false });
@@ -2542,7 +2480,6 @@
 		window.addEventListener('pointermove', handleReaderPointerMove);
 		window.addEventListener('pointerup', handlePdfContainerPointerUp);
 		window.addEventListener('resize', handleViewportResize);
-		document.addEventListener('visibilitychange', handleVisibilityChange);
 		pdfContainerEl?.addEventListener('touchstart', handleTouchStart, { passive: false });
 		pdfContainerEl?.addEventListener('touchmove', handleTouchMove, { passive: false });
 		pdfContainerEl?.addEventListener('touchend', handleTouchEnd);
@@ -2556,7 +2493,6 @@
 			window.removeEventListener('pointermove', handleReaderPointerMove);
 			window.removeEventListener('pointerup', handlePdfContainerPointerUp);
 			window.removeEventListener('resize', handleViewportResize);
-			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			pdfContainerEl?.removeEventListener('touchstart', handleTouchStart);
 			pdfContainerEl?.removeEventListener('touchmove', handleTouchMove);
 			pdfContainerEl?.removeEventListener('touchend', handleTouchEnd);
@@ -2616,7 +2552,6 @@
 		embedPdfViewerReady = true;
 		topBarVisible = true;
 		resetTopBarBehavior();
-		syncPdfWakeLock();
 	}
 </script>
 
@@ -2718,7 +2653,7 @@
 
 <style>
 	.pdf-reader {
-		--reader-top-bar-height: 48px;
+		--reader-top-bar-height: 56px;
 		position: fixed;
 		inset: 0;
 		z-index: 9999;
@@ -2773,7 +2708,7 @@
 		bottom: 0;
 		left: 0;
 		right: 0;
-		height: 12px;
+		height: 8px;
 		background: transparent;
 		cursor: pointer;
 		display: flex;
@@ -2880,7 +2815,7 @@
 
 	@media (max-width: 768px) {
 		.pdf-reader {
-			--reader-top-bar-height: 64px;
+			--reader-top-bar-height: 72px;
 		}
 
 		.nav-btn {
@@ -2894,7 +2829,7 @@
 		}
 
 		.progress-bar {
-			height: 10px;
+			height: 8px;
 		}
 
 		.loading-spinner {
@@ -2953,8 +2888,8 @@
 		justify-content: center;
 		position: absolute;
 		top: 0;
-		width: 48px;
-		height: 48px;
+		width: 56px;
+		height: var(--reader-top-bar-height);
 		border-bottom: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
 		background: var(--color-surface-base, #0f172a);
 		color: var(--color-surface-text, #e2e8f0);
@@ -2994,9 +2929,9 @@
 	}
 
 	.embedpdf-progress.progress-bar {
-		top: 36px;
+		top: calc(var(--reader-top-bar-height) - 8px);
 		bottom: auto;
-		height: 12px;
+		height: 8px;
 		transition: opacity 0.18s ease, transform 0.18s ease;
 		z-index: 101;
 	}
@@ -3033,7 +2968,7 @@
 
 	@media (max-width: 640px) {
 		.embedpdf-progress.progress-bar {
-			top: 36px;
+			top: calc(var(--reader-top-bar-height) - 8px);
 		}
 	}
 </style>

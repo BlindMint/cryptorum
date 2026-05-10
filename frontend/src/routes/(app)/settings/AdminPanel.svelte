@@ -1,35 +1,6 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
-	import { notificationVisualIndicator } from '$lib/stores';
-
-	type AdminJob = {
-		id: number;
-		job_type: string;
-		title: string;
-		status: string;
-		total_items: number;
-		completed_items: number;
-		failed_items: number;
-		result?: any;
-		error?: string;
-		created_at: number;
-		started_at?: number;
-		completed_at?: number;
-	};
-
-	type AdminNotification = {
-		id: number;
-		source?: 'notification' | 'job' | 'log';
-		kind: string;
-		title: string;
-		message?: string;
-		url?: string;
-		read_at?: number;
-		created_at: number;
-		job?: AdminJob;
-	};
+	import UsersPanel from './UsersPanel.svelte';
 
 	type BackupItem = {
 		name: string;
@@ -46,23 +17,13 @@
 		keep_last: number;
 	};
 
-	let notifications = $state<AdminNotification[]>([]);
-	let unreadCount = $state(0);
-	let notificationsLoading = $state(false);
 	let backupsLoading = $state(false);
-	let notificationError = $state('');
 	let backupError = $state('');
-
-	let jobStatus = $state('');
 	let backups = $state<BackupItem[]>([]);
 	let backupSettings = $state<BackupSettings>({ enabled: true, cron: '', keep_last: 14 });
 	let savingBackupSettings = $state(false);
 	let creatingBackup = $state(false);
-	let coverJobQueueing = $state<'all' | 'missing' | ''>('');
-	let coverJobMessage = $state('');
 	let backupsExpanded = $state(false);
-	let notificationsExpanded = $state(false);
-	let reviewJob = $state<AdminJob | null>(null);
 
 	function formatTime(value: number) {
 		return new Intl.DateTimeFormat(undefined, {
@@ -72,23 +33,6 @@
 			hour: 'numeric',
 			minute: '2-digit'
 		}).format(new Date(value * 1000));
-	}
-
-	function formatDateOnly(value: number) {
-		return new Intl.DateTimeFormat(undefined, {
-			month: 'short',
-			day: 'numeric',
-			year: 'numeric'
-		}).format(new Date(value * 1000));
-	}
-
-	function formatDuration(startedAt?: number, completedAt?: number) {
-		if (!startedAt) return 'Pending';
-		if (!completedAt) return 'In progress';
-		const durationMs = Math.max(0, (completedAt - startedAt) * 1000);
-		const minutes = Math.floor(durationMs / 60000);
-		const seconds = Math.floor((durationMs % 60000) / 1000);
-		return `${minutes}m ${seconds}s`;
 	}
 
 	function formatFileSize(bytes: number) {
@@ -104,62 +48,12 @@
 		return `${size.toFixed(digits)} ${units[unit]}`;
 	}
 
-	function statusClass(status: string) {
-		switch (status) {
-			case 'completed':
-				return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
-			case 'running':
-				return 'bg-blue-500/15 text-blue-300 border-blue-500/30';
-			case 'queued':
-				return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
-			case 'failed':
-				return 'bg-red-500/15 text-red-300 border-red-500/30';
-			default:
-				return 'bg-[var(--color-surface-base)] text-[var(--color-surface-text-muted)] border-[var(--color-surface-border)]';
-		}
-	}
-
 	function sectionBodyClass(expanded: boolean): string {
 		return expanded ? 'max-h-[70vh] overflow-auto' : 'max-h-[22rem] overflow-auto';
 	}
 
 	function sectionButtonLabel(expanded: boolean): string {
 		return expanded ? 'Show less' : 'Show all';
-	}
-
-	function buildNotificationExportUrl(format: 'json' | 'text') {
-		const params = new URLSearchParams();
-		params.set('format', format);
-		params.set('limit', '200');
-		if (jobStatus.trim()) params.set('status', jobStatus.trim());
-		return `/api/notifications?${params.toString()}`;
-	}
-
-	async function loadNotifications(silent = false) {
-		if (!silent) {
-			notificationsLoading = notifications.length === 0;
-		}
-		notificationError = '';
-		try {
-			const params = new URLSearchParams();
-			params.set('limit', '50');
-			if (jobStatus.trim()) params.set('status', jobStatus.trim());
-			const res = await fetch(`/api/notifications?${params.toString()}`, { cache: 'no-store' });
-			if (res.ok) {
-				const data = await res.json();
-				notifications = data.items ?? [];
-				unreadCount = data.unread_count ?? 0;
-			} else {
-				notificationError = 'Unable to load notifications.';
-			}
-		} catch (error) {
-			console.error('Failed to load notifications:', error);
-			notificationError = 'Unable to load notifications.';
-		} finally {
-			if (!silent) {
-				notificationsLoading = false;
-			}
-		}
 	}
 
 	async function loadBackups() {
@@ -180,37 +74,6 @@
 		} finally {
 			backupsLoading = false;
 		}
-	}
-
-	async function refreshAll() {
-		await Promise.all([loadNotifications(), loadBackups()]);
-	}
-
-	async function deleteJob(jobId: number) {
-		if (!confirm('Delete this job entry?')) return;
-		await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
-		await loadNotifications();
-	}
-
-	function openMetadataReview(job: AdminJob) {
-		reviewJob = job;
-	}
-
-	async function markNotificationRead(notificationId: number) {
-		await fetch(`/api/notifications/${notificationId}/read`, { method: 'POST' });
-		await loadNotifications();
-	}
-
-	async function deleteNotification(notificationId: number) {
-		if (!confirm('Delete this notification?')) return;
-		await fetch(`/api/notifications/${notificationId}`, { method: 'DELETE' });
-		await loadNotifications();
-	}
-
-	async function deleteAllNotifications() {
-		if (!confirm('Dismiss all notifications?')) return;
-		await fetch('/api/notifications', { method: 'DELETE' });
-		await loadNotifications();
 	}
 
 	async function saveBackupSettings() {
@@ -247,38 +110,12 @@
 			if (!res.ok) {
 				throw new Error('Failed to create backup');
 			}
-			await refreshAll();
+			await loadBackups();
 		} catch (error) {
 			console.error('Failed to create backup:', error);
 			backupError = 'Unable to queue backup.';
 		} finally {
 			creatingBackup = false;
-		}
-	}
-
-	async function queueCoverJob(mode: 'all' | 'missing') {
-		coverJobQueueing = mode;
-		notificationError = '';
-		coverJobMessage = '';
-		try {
-			const res = await fetch('/api/settings/book-covers/regenerate', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ mode })
-			});
-			if (!res.ok) {
-				throw new Error('Failed to queue cover job');
-			}
-			coverJobMessage = mode === 'all'
-				? 'Cover regeneration job queued.'
-				: 'Missing cover regeneration job queued.';
-			await loadNotifications();
-		} catch (error) {
-			console.error('Failed to queue cover job:', error);
-			notificationError = 'Unable to queue cover regeneration.';
-		} finally {
-			coverJobQueueing = '';
-			setTimeout(() => coverJobMessage = '', 4000);
 		}
 	}
 
@@ -289,7 +126,7 @@
 			if (!res.ok) {
 				throw new Error('Failed to restore backup');
 			}
-			await refreshAll();
+			await loadBackups();
 		} catch (error) {
 			console.error('Failed to restore backup:', error);
 			backupError = 'Unable to restore backup.';
@@ -310,30 +147,17 @@
 		}
 	}
 
-	function openNotification(item: AdminNotification) {
-		if (item.url) {
-			goto(item.url);
-		}
-	}
-
-	onMount(() => {
-		notificationVisualIndicator.init();
-		refreshAll();
-		const interval = setInterval(() => {
-			void loadNotifications(true);
-		}, 5000);
-		return () => clearInterval(interval);
-	});
+	onMount(loadBackups);
 </script>
 
 <div class="space-y-6">
 	<div class="flex flex-wrap items-end justify-between gap-3">
 		<div>
 			<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Admin</h2>
-			<p class="text-sm text-[var(--color-surface-text-muted)]">Jobs, notifications, and app events for background operations</p>
+			<p class="text-sm text-[var(--color-surface-text-muted)]">Backups, restore actions, and user administration</p>
 		</div>
 		<button
-			onclick={refreshAll}
+			onclick={loadBackups}
 			class="px-4 py-2 rounded-lg border border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors"
 		>
 			Refresh
@@ -359,12 +183,6 @@
 					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors disabled:opacity-50"
 				>
 					{creatingBackup ? 'Queueing...' : 'Backup Now'}
-				</button>
-				<button
-					onclick={loadBackups}
-					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors"
-				>
-					Refresh
 				</button>
 			</div>
 		</div>
@@ -457,163 +275,5 @@
 		</div>
 	</section>
 
-	<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] overflow-hidden">
-		<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-6 py-4">
-			<div>
-				<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Notifications</h3>
-				<p class="text-sm text-[var(--color-surface-text-muted)]">{unreadCount} active or unread · includes job history and app events</p>
-				<label class="mt-3 flex items-center gap-3 text-sm text-[var(--color-surface-text-muted)]">
-					<input
-						type="checkbox"
-						checked={$notificationVisualIndicator}
-						onchange={(e) => notificationVisualIndicator.set(e.currentTarget.checked)}
-						class="h-4 w-4 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)]"
-					>
-					<span>Show top-bar indicator for new notifications</span>
-				</label>
-			</div>
-			<div class="flex flex-wrap items-center gap-2">
-				<button
-					onclick={() => queueCoverJob('missing')}
-					disabled={coverJobQueueing !== ''}
-					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors disabled:opacity-50"
-				>
-					{coverJobQueueing === 'missing' ? 'Queueing...' : 'Regenerate Missing Covers'}
-				</button>
-				<button
-					onclick={() => queueCoverJob('all')}
-					disabled={coverJobQueueing !== ''}
-					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors disabled:opacity-50"
-				>
-					{coverJobQueueing === 'all' ? 'Queueing...' : 'Regenerate Covers'}
-				</button>
-				<select
-					value={jobStatus}
-					onchange={async (e) => { jobStatus = e.currentTarget.value; await loadNotifications(); }}
-					class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)]"
-				>
-					<option value="">All job statuses</option>
-					<option value="queued">Queued</option>
-					<option value="running">Running</option>
-					<option value="completed">Completed</option>
-					<option value="failed">Failed</option>
-				</select>
-				{#if notifications.some((item) => item.source === 'notification')}
-					<button
-						onclick={deleteAllNotifications}
-						class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-red-500/50 hover:text-red-300 transition-colors"
-					>
-						Dismiss app notifications
-					</button>
-				{/if}
-				<button
-					onclick={() => notificationsExpanded = !notificationsExpanded}
-					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-[var(--color-primary-500)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] transition-colors"
-				>
-					{sectionButtonLabel(notificationsExpanded)}
-				</button>
-				<a href={buildNotificationExportUrl('text')} download class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors">
-					Export Text
-				</a>
-				<a href={buildNotificationExportUrl('json')} download class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors">
-					Export JSON
-				</a>
-			</div>
-		</div>
-		<div class={sectionBodyClass(notificationsExpanded) + ' p-6 space-y-3'}>
-			{#if coverJobMessage}
-				<div class="text-sm text-emerald-300">{coverJobMessage}</div>
-			{/if}
-			{#if notificationsLoading}
-				<div class="text-sm text-[var(--color-surface-text-muted)]">Loading notifications...</div>
-			{:else if notificationError}
-				<div class="text-sm text-red-300">{notificationError}</div>
-			{:else if notifications.length === 0}
-				<div class="text-sm text-[var(--color-surface-text-muted)]">No notifications yet.</div>
-			{:else}
-				{#each notifications as item}
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
-						<div class="flex items-start justify-between gap-3">
-							<button onclick={() => openNotification(item)} class="text-left flex-1">
-								<div class="flex flex-wrap items-center gap-2">
-									{#if item.job}
-										<span class="rounded-full border px-2.5 py-1 text-xs font-medium {statusClass(item.job.status)}">{item.job.status}</span>
-									{/if}
-									<span class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">
-										{item.source === 'job' ? `job · ${item.kind}` : item.source === 'log' ? `event · ${item.kind}` : item.kind}
-									</span>
-									{#if !item.read_at}
-										<span class="rounded-full bg-[var(--color-primary-500)] px-2 py-0.5 text-[10px] font-semibold text-white">New</span>
-									{/if}
-								</div>
-								<div class="mt-1 text-sm font-medium text-[var(--color-surface-text)]">{item.title}</div>
-								{#if item.message}
-									<div class="mt-1 text-xs text-[var(--color-surface-text-muted)]">{item.message}</div>
-								{/if}
-								{#if item.job}
-									<div class="mt-1 text-xs text-[var(--color-surface-text-muted)]">
-										{item.job.completed_items}/{item.job.total_items} completed · {item.job.failed_items} failed
-										{#if item.job.started_at || item.job.completed_at}
-											· {formatDuration(item.job.started_at, item.job.completed_at)}
-										{/if}
-									</div>
-									{#if item.job.error}
-										<div class="mt-1 text-xs text-red-300">{item.job.error}</div>
-									{/if}
-								{/if}
-								<div class="mt-2 text-xs text-[var(--color-surface-text-muted)]">{formatTime(item.created_at)}</div>
-							</button>
-							<div class="flex flex-col gap-2">
-								{#if item.job?.job_type === 'metadata_lookup' && item.job.status !== 'queued' && item.job.status !== 'running'}
-									<button
-										onclick={() => item.job && openMetadataReview(item.job)}
-										class="rounded-lg border border-[var(--color-surface-border)] px-2 py-1 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)]"
-									>
-										Review
-									</button>
-								{/if}
-								{#if item.source === 'job' && item.job}
-									<button
-										onclick={() => item.job && deleteJob(item.job.id)}
-										class="rounded-lg border border-[var(--color-surface-border)] px-2 py-1 text-xs text-red-300 hover:border-red-500/50"
-									>
-										Delete
-									</button>
-								{:else if item.source === 'log'}
-									<span class="rounded-lg border border-[var(--color-surface-border)] px-2 py-1 text-xs text-[var(--color-surface-text-muted)]">
-										Event
-									</span>
-								{:else}
-									{#if !item.read_at}
-										<button
-											onclick={() => markNotificationRead(item.id)}
-											class="rounded-lg border border-[var(--color-surface-border)] px-2 py-1 text-xs text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]"
-										>
-											Read
-										</button>
-									{/if}
-									<button
-										onclick={() => deleteNotification(item.id)}
-										class="rounded-lg border border-[var(--color-surface-border)] px-2 py-1 text-xs text-red-300 hover:border-red-500/50"
-									>
-										Dismiss
-									</button>
-								{/if}
-							</div>
-						</div>
-					</div>
-				{/each}
-			{/if}
-		</div>
-	</section>
-
+	<UsersPanel />
 </div>
-
-{#if reviewJob}
-	<BulkMetadataReviewModal
-		jobId={reviewJob.id}
-		initialJob={reviewJob}
-		onClose={() => reviewJob = null}
-		onApplied={loadNotifications}
-	/>
-{/if}

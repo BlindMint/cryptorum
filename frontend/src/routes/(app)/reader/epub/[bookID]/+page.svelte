@@ -2289,7 +2289,7 @@
 
 <style>
 	.epub-reader {
-		--reader-top-bar-height: 48px;
+		--reader-top-bar-height: 56px;
 		position: fixed;
 		inset: 0;
 		z-index: 9999;
@@ -2414,7 +2414,7 @@
 		bottom: 0;
 		left: 0;
 		right: 0;
-		height: 12px;
+		height: 8px;
 		background: transparent;
 		cursor: pointer;
 		display: flex;
@@ -3048,7 +3048,7 @@
 
 	@media (max-width: 768px) {
 		.epub-reader {
-			--reader-top-bar-height: 64px;
+			--reader-top-bar-height: 72px;
 		}
 
 		.top-nav {
@@ -3100,9 +3100,9 @@
 			gap: 2px;
 		}
 
-			.progress-bar {
-				height: 10px;
-			}
+		.progress-bar {
+			height: 8px;
+		}
 
 		.left-sidebar,
 		.right-sidebar {

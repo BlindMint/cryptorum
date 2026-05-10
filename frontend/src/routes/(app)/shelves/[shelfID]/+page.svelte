@@ -5,6 +5,7 @@
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
 	import { showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 
 	let shelf = $state<any>(null);
 	let books = $state<any[]>([]);
@@ -20,6 +21,8 @@
 	let longPressTimer: number | null = null;
 	let longPressThreshold = 500;
 	let suppressNextClickBookId: number | null = null;
+	let longPressTouchStart: { x: number; y: number } | null = null;
+	const LONG_PRESS_MOVE_TOLERANCE = 10;
 
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
 
@@ -48,6 +51,7 @@
 			console.error('Failed to fetch shelf:', error);
 		} finally {
 			loading = false;
+			restoreRouteScrollPosition();
 		}
 	}
 
@@ -105,15 +109,21 @@
 		}, longPressThreshold);
 	}
 
-	function handleMouseUp() {
+	function clearLongPressTimer() {
 		if (longPressTimer) {
 			clearTimeout(longPressTimer);
 			longPressTimer = null;
 		}
 	}
 
+	function handleMouseUp() {
+		clearLongPressTimer();
+	}
+
 	function handleTouchStart(event: TouchEvent) {
 		const bookId = Number((event.currentTarget as HTMLElement).dataset.bookId);
+		const touch = event.touches[0];
+		longPressTouchStart = touch ? { x: touch.clientX, y: touch.clientY } : null;
 		longPressTimer = window.setTimeout(() => {
 			suppressNextClickBookId = bookId;
 			toggleBookSelection(bookId);
@@ -121,11 +131,21 @@
 		}, longPressThreshold);
 	}
 
-	function handleTouchEnd() {
-		if (longPressTimer) {
-			clearTimeout(longPressTimer);
-			longPressTimer = null;
+	function handleTouchMove(event: TouchEvent) {
+		if (!longPressTimer || !longPressTouchStart) return;
+		const touch = event.touches[0];
+		if (!touch) return;
+		const deltaX = Math.abs(touch.clientX - longPressTouchStart.x);
+		const deltaY = Math.abs(touch.clientY - longPressTouchStart.y);
+		if (deltaX > LONG_PRESS_MOVE_TOLERANCE || deltaY > LONG_PRESS_MOVE_TOLERANCE) {
+			clearLongPressTimer();
+			longPressTouchStart = null;
 		}
+	}
+
+	function handleTouchEnd() {
+		clearLongPressTimer();
+		longPressTouchStart = null;
 	}
 
 	function selectAllPage() {
@@ -230,13 +250,16 @@
 						onclick={handleBookClick}
 						onmousedown={handleMouseDown}
 						onmouseup={handleMouseUp}
+						onmouseleave={handleMouseUp}
 						ontouchstart={handleTouchStart}
+						ontouchmove={handleTouchMove}
 						ontouchend={handleTouchEnd}
+						ontouchcancel={handleTouchEnd}
 						onkeydown={handleBookKeydown}
 						role="button"
 						tabindex="0"
 					>
-						<a href="/book/{book.id}" class="block">
+						<a href="/book/{book.id}" class="block" onclick={saveRouteScrollPosition}>
 							<div class="relative">
 								<BookCoverFrame
 									src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}

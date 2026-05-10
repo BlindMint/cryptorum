@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { onDestroy, onMount } from 'svelte';
 	import { desktopSidebarCollapsed, mobileMenuOpen } from '$lib/stores';
 	import AppLogo from '$lib/components/AppLogo.svelte';
 	import FullscreenToggle from './FullscreenToggle.svelte';
@@ -13,8 +12,7 @@
 	let searchQuery = $state('');
 	let showMobileActions = $state(false);
 	let mobileActionsView = $state<MobileActionsView>('menu');
-	let scanRunning = $state(false);
-	let scanPollTimer: number | null = null;
+	let lastRouteKey = '';
 
 	function handleSearch(e: Event) {
 		e.preventDefault();
@@ -23,15 +21,20 @@
 			params.set('q', searchQuery.trim());
 			const library = $page.url.searchParams.get('library');
 			if (library) params.set('library', library);
+			closeAllMobilePanels();
 			goto(`/search?${params.toString()}`);
 			searchQuery = '';
-			showMobileActions = false;
 		}
 	}
 
 	function closeMobileActions() {
 		showMobileActions = false;
 		mobileActionsView = 'menu';
+	}
+
+	function closeAllMobilePanels() {
+		$mobileMenuOpen = false;
+		closeMobileActions();
 	}
 
 	function openMobileNotifications() {
@@ -46,8 +49,18 @@
 		if (showMobileActions) {
 			closeMobileActions();
 		} else {
+			$mobileMenuOpen = false;
 			mobileActionsView = 'menu';
 			showMobileActions = true;
+		}
+	}
+
+	function toggleMobileNavigation() {
+		if ($mobileMenuOpen) {
+			$mobileMenuOpen = false;
+		} else {
+			closeMobileActions();
+			$mobileMenuOpen = true;
 		}
 	}
 
@@ -66,61 +79,14 @@
 		desktopSidebarCollapsed.update((collapsed) => !collapsed);
 	}
 
-	async function loadScanStatus() {
-		try {
-			const [notificationRes, librariesRes] = await Promise.all([
-				fetch('/api/notifications?unread=true&limit=50', { cache: 'no-store' }),
-				fetch('/api/libraries', { cache: 'no-store' })
-			]);
-			const notificationData = notificationRes.ok ? await notificationRes.json() : { items: [] };
-			const libraries = librariesRes.ok ? await librariesRes.json() : [];
-			const jobRunning = (notificationData.items ?? []).some((item: any) =>
-				item.source === 'job' &&
-				item.job?.job_type === 'library_scan' &&
-				['queued', 'running'].includes(item.job.status)
-			);
-			const libraryRunning = Array.isArray(libraries) && libraries.some((library: any) => library.is_importing);
-			scanRunning = jobRunning || libraryRunning;
-		} catch (e) {
-			console.error('Failed to load scan status:', e);
+	$effect(() => {
+		const routeKey = `${$page.url.pathname}${$page.url.search}`;
+		if (lastRouteKey && routeKey !== lastRouteKey) {
+			closeMobileActions();
 		}
-	}
-
-	async function scanLibraries() {
-		scanRunning = true;
-		try {
-			const response = await fetch('/api/scan', { method: 'POST' });
-			const data = response.ok ? await response.json().catch(() => null) : null;
-			const queued = (data?.queued_count ?? 0) > 0;
-			scanRunning = queued || scanRunning;
-			await loadScanStatus();
-			scanRunning = queued || scanRunning;
-			if ((window as any).refreshSidebar) {
-				(window as any).refreshSidebar();
-			}
-			if ((window as any).refreshSettingsScans) {
-				(window as any).refreshSettingsScans();
-			}
-		} catch (e) {
-			console.error('Scan failed:', e);
-			await loadScanStatus();
-		}
-	}
-
-	onMount(() => {
-		void loadScanStatus();
-		(window as any).refreshScanStatus = loadScanStatus;
-		scanPollTimer = window.setInterval(loadScanStatus, 5000);
+		lastRouteKey = routeKey;
 	});
 
-	onDestroy(() => {
-		if (scanPollTimer !== null) {
-			window.clearInterval(scanPollTimer);
-		}
-		if ((window as any).refreshScanStatus === loadScanStatus) {
-			delete (window as any).refreshScanStatus;
-		}
-	});
 </script>
 
 <header class="relative z-50 overflow-visible border-b border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] backdrop-blur-sm">
@@ -128,7 +94,7 @@
 		<button
 			class="lg:hidden shrink-0 rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
 			aria-label="Toggle navigation menu"
-			onclick={() => $mobileMenuOpen = !$mobileMenuOpen}
+			onclick={toggleMobileNavigation}
 		>
 			<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
@@ -200,16 +166,6 @@
 				</svg>
 			</a>
 
-			<button
-				onclick={scanLibraries}
-				class="rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
-				title={scanRunning ? 'Library scan running' : 'Scan Libraries'}
-			>
-				<svg class="h-5 w-5 {scanRunning ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-				</svg>
-			</button>
-
 			<a
 				href="/settings"
 				class="rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
@@ -269,7 +225,7 @@
 				</button>
 				<a
 					href="/history"
-					onclick={closeMobileActions}
+					onclick={closeAllMobilePanels}
 					class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all"
 				>
 					<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -279,7 +235,7 @@
 				</a>
 				<a
 					href="/stats"
-					onclick={closeMobileActions}
+					onclick={closeAllMobilePanels}
 					class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all"
 				>
 					<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -287,21 +243,9 @@
 					</svg>
 					<span>Statistics</span>
 				</a>
-				<button
-					onclick={async () => {
-						closeMobileActions();
-						await scanLibraries();
-					}}
-					class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-[var(--color-surface-text)] transition-all"
-				>
-					<svg class="h-5 w-5 text-[var(--color-surface-text-muted)] {scanRunning ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-					</svg>
-					<span>{scanRunning ? 'Scanning Libraries' : 'Scan Libraries'}</span>
-				</button>
 				<a
 					href="/settings"
-					onclick={closeMobileActions}
+					onclick={closeAllMobilePanels}
 					class="mobile-action-link flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all"
 				>
 					<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">

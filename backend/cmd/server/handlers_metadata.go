@@ -1652,6 +1652,8 @@ func TriggerScanHandler(w http.ResponseWriter, r *http.Request) {
 
 	queuedJobs := []int64{}
 	queuedLibraryIDs := []int64{}
+	existingJobs := []int64{}
+	existingLibraryIDs := []int64{}
 	skipped := 0
 	for _, libraryID := range libraryIDs {
 		pathRows, err := appDB.Query(`SELECT path FROM library_path WHERE library_id = ?`, libraryID)
@@ -1678,7 +1680,7 @@ func TriggerScanHandler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		jobID, queued, err := queueLibraryScanWithWorker(libraryID, paths, false)
+		jobID, queued, existing, err := queueLibraryScanWithWorker(libraryID, paths, false)
 		if err != nil {
 			slog.Warn("Failed to queue library scan", "library_id", libraryID, "error", err)
 			skipped++
@@ -1687,6 +1689,9 @@ func TriggerScanHandler(w http.ResponseWriter, r *http.Request) {
 		if queued {
 			queuedJobs = append(queuedJobs, jobID)
 			queuedLibraryIDs = append(queuedLibraryIDs, libraryID)
+		} else if existing {
+			existingJobs = append(existingJobs, jobID)
+			existingLibraryIDs = append(existingLibraryIDs, libraryID)
 		} else {
 			skipped++
 		}
@@ -1701,12 +1706,15 @@ func TriggerScanHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, http.StatusOK, map[string]any{
-		"status":             "scanning",
-		"library_count":      len(libraryIDs),
-		"queued_jobs":        queuedJobs,
-		"queued_library_ids": queuedLibraryIDs,
-		"queued_count":       len(queuedJobs),
-		"skipped":            skipped,
+		"status":               "scanning",
+		"library_count":        len(libraryIDs),
+		"queued_jobs":          queuedJobs,
+		"queued_library_ids":   queuedLibraryIDs,
+		"queued_count":         len(queuedJobs),
+		"existing_jobs":        existingJobs,
+		"existing_library_ids": existingLibraryIDs,
+		"existing_count":       len(existingJobs),
+		"skipped":              skipped,
 	})
 }
 

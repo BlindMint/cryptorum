@@ -5,6 +5,7 @@
 	import { gridSize, showFormatOnCover, getFormatColor } from '$lib/stores';
 	import { getCoverThumbUrl, getLibraryCoverThumbSize } from '$lib/utils/covers';
 	import { getBookReaderHref } from '$lib/utils/book-formats';
+	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
@@ -24,7 +25,8 @@
  	// Display controls
  	let viewMode = $state('grid');
   let localGridSize = $state(4);
-  let sortBy = $state('added_at');
+  let sortBy = $state('title');
+	let sortDir = $state<'asc' | 'desc'>('asc');
   let gridStyle = $derived(viewMode === 'grid' ? `grid-template-columns: repeat(${localGridSize}, minmax(0, 1fr))` : '');
   let libraryCoverThumbSize = $derived(getLibraryCoverThumbSize(localGridSize));
   let showSettingsMenu = $state(false);
@@ -161,6 +163,8 @@
 		if (tags.length > 0) queryParams.set('tags', tags.join(','));
 		for (const status of statuses) queryParams.append('status', status);
 		if (filterMode !== 'AND') queryParams.set('filter_mode', filterMode);
+		queryParams.set('sort', sortBy);
+		queryParams.set('sort_dir', sortDir);
 
 		return '/api/books?' + queryParams.toString();
 	}
@@ -199,6 +203,9 @@
   				if (loadMoreTrigger && hasMore) {
   					setupObserver();
   				}
+				if (reset) {
+					restoreRouteScrollPosition();
+				}
   			}, 200);
   		}
  	}
@@ -247,8 +254,9 @@
 		fetchBooks(true);
 	});
 
- 	$effect(() => {
+	$effect(() => {
   		sortBy;
+		sortDir;
   		if (books.length > 0) {
   			sortBooks();
   		}
@@ -371,22 +379,56 @@
 
   	function sortBooks() {
   		books.sort((a, b) => {
- 			switch (sortBy) {
- 				case 'title':
- 					return (a.title || '').localeCompare(b.title || '');
- 				case 'authors':
- 					return parseAuthors(a.authors).localeCompare(parseAuthors(b.authors));
- 				case 'added_at':
- 					return b.added_at - a.added_at;
- 				case 'last_read':
- 					if (a.status === 'reading' && b.status !== 'reading') return -1;
- 					if (b.status === 'reading' && a.status !== 'reading') return 1;
- 					return b.added_at - a.added_at;
- 				default:
- 					return 0;
- 			}
+			let comparison = 0;
+			switch (sortBy) {
+				case 'title':
+					comparison = (a.title || '').localeCompare(b.title || '');
+					break;
+				case 'authors':
+					comparison = parseAuthors(a.authors).localeCompare(parseAuthors(b.authors));
+					break;
+				case 'added_at':
+					comparison = (a.added_at || 0) - (b.added_at || 0);
+					break;
+				case 'last_read':
+					comparison = (a.last_read_at || a.added_at || 0) - (b.last_read_at || b.added_at || 0);
+					break;
+				default:
+					comparison = 0;
+			}
+			return sortDir === 'desc' ? -comparison : comparison;
  		});
  	}
+
+	const sortOptions = [
+		{ value: 'title', label: 'Title' },
+		{ value: 'authors', label: 'Author' },
+		{ value: 'added_at', label: 'Date Added' },
+		{ value: 'last_read', label: 'Last Read' }
+	];
+
+	function currentSortLabel() {
+		return sortOptions.find((option) => option.value === sortBy)?.label ?? 'Title';
+	}
+
+	function sortDirectionLabel() {
+		return sortDir === 'asc' ? 'Ascending' : 'Descending';
+	}
+
+	function sortDirectionArrow() {
+		return sortDir === 'asc' ? '↑' : '↓';
+	}
+
+	function setSort(value: string) {
+		sortBy = value;
+		showSortMenu = false;
+		void fetchBooks(true);
+	}
+
+	function toggleSortDirection() {
+		sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+		void fetchBooks(true);
+	}
 
  	function statusDot(status: string) {
  		switch (status) {
@@ -947,36 +989,34 @@
 						class="inline-flex h-10 items-center px-3 sm:px-4 rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors"
 					>
 						<span class="hidden sm:inline">Sort</span>
+						<span class="ml-0 sm:ml-2 text-sm text-[var(--color-surface-text-muted)]">{currentSortLabel()}</span>
+						<span class="ml-1 text-sm text-[var(--color-primary-400)]" aria-label={sortDirectionLabel()}>{sortDirectionArrow()}</span>
 						<svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 						</svg>
 					</button>
+					<button
+						type="button"
+						onclick={toggleSortDirection}
+						class="ml-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-400)] hover:bg-[var(--color-surface-700)] transition-colors"
+						aria-label="Toggle sort direction"
+						title={sortDirectionLabel()}
+					>
+						{sortDirectionArrow()}
+					</button>
 					{#if showSortMenu}
 						<div class="absolute right-0 top-full mt-2 w-48 bg-[var(--color-surface-overlay)] border border-[var(--color-surface-border)] rounded-lg shadow-lg z-40 py-1">
-							<button
-								onclick={() => { sortBy = 'added_at'; showSortMenu = false; }}
-								class="w-full text-left px-4 py-2 hover:bg-[var(--color-surface-700)] text-[var(--color-surface-text)] {sortBy === 'added_at' ? 'text-[var(--color-primary-400)]' : ''}"
-							>
-								Date Added
-							</button>
-							<button
-								onclick={() => { sortBy = 'title'; showSortMenu = false; }}
-								class="w-full text-left px-4 py-2 hover:bg-[var(--color-surface-700)] text-[var(--color-surface-text)] {sortBy === 'title' ? 'text-[var(--color-primary-400)]' : ''}"
-							>
-								Title
-							</button>
-							<button
-								onclick={() => { sortBy = 'authors'; showSortMenu = false; }}
-								class="w-full text-left px-4 py-2 hover:bg-[var(--color-surface-700)] text-[var(--color-surface-text)] {sortBy === 'authors' ? 'text-[var(--color-primary-400)]' : ''}"
-							>
-								Author
-							</button>
-							<button
-								onclick={() => { sortBy = 'last_read'; showSortMenu = false; }}
-								class="w-full text-left px-4 py-2 hover:bg-[var(--color-surface-700)] text-[var(--color-surface-text)] {sortBy === 'last_read' ? 'text-[var(--color-primary-400)]' : ''}"
-							>
-								Last Read
-							</button>
+							{#each sortOptions as option}
+								<button
+									onclick={() => setSort(option.value)}
+									class="flex w-full items-center justify-between px-4 py-2 text-left hover:bg-[var(--color-surface-700)] text-[var(--color-surface-text)] {sortBy === option.value ? 'text-[var(--color-primary-400)]' : ''}"
+								>
+									<span>{option.label}</span>
+									{#if sortBy === option.value}
+										<span class="text-xs">{sortDirectionArrow()}</span>
+									{/if}
+								</button>
+							{/each}
 						</div>
 					{/if}
 				</div>
@@ -1324,7 +1364,7 @@
 									</div>
 								{/if}
 								<div class="cover-action-overlay {activeBookActions === book.id ? 'is-active' : ''}">
-									<a href="/book/{book.id}" class="cover-action-button top-action" aria-label="View details for {book.title || 'book'}" onclick={(event) => event.stopPropagation()}>
+									<a href="/book/{book.id}" class="cover-action-button top-action" aria-label="View details for {book.title || 'book'}" onclick={(event) => { event.stopPropagation(); saveRouteScrollPosition(); }}>
 										<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11v5m0-8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
 										</svg>
@@ -1336,7 +1376,7 @@
 									</a>
 								</div>
 							</div>
-  							<a href="/book/{book.id}" class="block">
+							<a href="/book/{book.id}" class="block" onclick={saveRouteScrollPosition}>
 								<h3 class="text-sm font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
     							{#if book.authors && book.authors !== '[]'}
     								<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{parseAuthors(book.authors)}</p>
@@ -1372,7 +1412,7 @@
   						role="button"
   						tabindex="0"
   					>
-  						<a href="/book/{book.id}" class="block bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] {selectedBooks.has(book.id) ? 'border-[var(--color-primary-500)]' : ''} p-4 hover:border-[var(--color-primary-500)]/50 transition-colors">
+						<a href="/book/{book.id}" class="block bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] {selectedBooks.has(book.id) ? 'border-[var(--color-primary-500)]' : ''} p-4 hover:border-[var(--color-primary-500)]/50 transition-colors" onclick={saveRouteScrollPosition}>
   							<div class="flex items-center space-x-4">
 								<BookCoverFrame
 									src={book.cover_path ? getCoverThumbUrl(book.id, 'small', book.cover_updated_on) : null}

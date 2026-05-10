@@ -4,28 +4,115 @@
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import TopBar from '$lib/components/TopBar.svelte';
 	import { mobileMenuOpen } from '$lib/stores';
+	import { readerSettings } from '$lib/stores/readerSettings';
 
 	let { children } = $props();
 	let authenticated = $state(false);
 	let loading = $state(true);
+	let wakeLock: WakeLockSentinel | null = null;
+	let wakeLockRequestInFlight = false;
+	let lastRouteKey = '';
 
 	const isReaderPage = $derived($page.url.pathname.includes('/reader/'));
 	const isLibraryPage = $derived($page.url.pathname === '/library');
+	const keepScreenOn = $derived(
+		authenticated && (
+			$readerSettings.keepScreenOnWhileAppOpen ||
+			(isReaderPage && $readerSettings.keepScreenOnWhileReading)
+		)
+	);
 
-	onMount(async () => {
+	async function requestWakeLock() {
+		if (
+			!keepScreenOn ||
+			wakeLock ||
+			wakeLockRequestInFlight ||
+			!('wakeLock' in navigator) ||
+			document.visibilityState !== 'visible'
+		) {
+			return;
+		}
+
+		wakeLockRequestInFlight = true;
 		try {
-			const res = await fetch('/api/auth/check', { credentials: 'same-origin' });
-			const data = await res.json();
-			if (!data.authenticated) {
+			wakeLock = await navigator.wakeLock.request('screen');
+			wakeLock.addEventListener('release', () => {
+				wakeLock = null;
+			});
+		} catch (e) {
+			console.warn('Failed to keep screen awake:', e);
+		} finally {
+			wakeLockRequestInFlight = false;
+		}
+	}
+
+	function releaseWakeLock() {
+		if (!wakeLock) return;
+		const lock = wakeLock;
+		wakeLock = null;
+		lock.release().catch(() => undefined);
+	}
+
+	function syncWakeLock() {
+		if (keepScreenOn) {
+			void requestWakeLock();
+		} else {
+			releaseWakeLock();
+		}
+	}
+
+	function handleVisibilityChange() {
+		if (document.visibilityState === 'visible') {
+			syncWakeLock();
+		} else {
+			releaseWakeLock();
+		}
+	}
+
+	$effect(() => {
+		if (authenticated) {
+			syncWakeLock();
+		}
+	});
+
+	$effect(() => {
+		const routeKey = `${$page.url.pathname}${$page.url.search}`;
+		if (lastRouteKey && routeKey !== lastRouteKey) {
+			$mobileMenuOpen = false;
+		}
+		lastRouteKey = routeKey;
+	});
+
+	onMount(() => {
+		let disposed = false;
+
+		async function init() {
+			try {
+				const res = await fetch('/api/auth/check', { credentials: 'same-origin' });
+				const data = await res.json();
+				if (!data.authenticated) {
+					window.location.href = '/login';
+					return;
+				}
+				if (disposed) return;
+				authenticated = true;
+				await readerSettings.syncWithBackend();
+				if (disposed) return;
+				document.addEventListener('visibilitychange', handleVisibilityChange);
+			} catch (e) {
 				window.location.href = '/login';
 				return;
 			}
-			authenticated = true;
-		} catch (e) {
-			window.location.href = '/login';
-			return;
+			loading = false;
 		}
-		loading = false;
+
+		void init();
+
+		return () => {
+			disposed = true;
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+			releaseWakeLock();
+		};
 	});
  </script>
 

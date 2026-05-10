@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import JobListItem from './JobListItem.svelte';
 	import { notificationVisualIndicator } from '$lib/stores';
 
 	type NotificationItem = {
@@ -30,11 +31,12 @@
 
 	let open = $state(false);
 	let notifications = $state<NotificationItem[]>([]);
-	let runningJobs = $state<JobItem[]>([]);
+	let activeJobs = $state<JobItem[]>([]);
 	let unreadNotificationCount = $derived(
-		notifications.filter((item) => item.source !== 'job' && !item.read_at).length
+		notifications.filter((item) => item.source !== 'job' && !item.read_at).length + activeJobs.length
 	);
 	let hasUnreadNotifications = $derived(unreadNotificationCount > 0);
+	let hasActiveJobs = $derived(activeJobs.length > 0);
 	let buttonRef = $state<HTMLButtonElement | null>(null);
 	let panelRef = $state<HTMLDivElement | null>(null);
 	let refreshTimer: number | null = null;
@@ -59,47 +61,19 @@
 		}).format(new Date(value * 1000));
 	}
 
-	function formatJobDetail(job: JobItem) {
-		if (job.status === 'queued') {
-			return 'Waiting to start';
-		}
-		const result = job.result ?? {};
-		if (job.job_type === 'library_scan') {
-			const imported = result.imported_books ?? 0;
-			const total = job.total_items || result.total_files || 0;
-			const scanned = job.completed_items || result.scanned_files || 0;
-			return total > 0
-				? `${imported} books imported · ${scanned}/${total} files scanned`
-				: `${imported} books imported · scanning files`;
-		}
-		if (job.total_items > 0) {
-			return `${job.completed_items}/${job.total_items} completed · ${job.failed_items} failed`;
-		}
-		return job.status;
-	}
-
-	function jobStatusLabel(job: JobItem) {
-		if (job.status === 'queued') return 'Queued';
-		if (job.job_type === 'library_scan' && job.status === 'running') return 'Scanning';
-		return job.status;
-	}
-
-	function jobStatusClass(job: JobItem) {
-		return job.status === 'queued'
-			? 'bg-[var(--color-surface-base)] text-[var(--color-surface-text-muted)]'
-			: 'bg-[var(--color-primary-500)]/15 text-[var(--color-primary-300)]';
-	}
-
 	async function loadNotifications() {
 		try {
-			const res = await fetch('/api/notifications?limit=20', { cache: 'no-store' });
-			if (res.ok) {
-				const data = await res.json();
+			const [notificationsRes, jobsRes] = await Promise.all([
+				fetch('/api/notifications?limit=20', { cache: 'no-store' }),
+				fetch('/api/jobs?status=queued,running,cancelling&limit=20', { cache: 'no-store' })
+			]);
+			if (notificationsRes.ok) {
+				const data = await notificationsRes.json();
 				const items: NotificationItem[] = data.items ?? [];
-				runningJobs = items
-					.filter((item) => item.source === 'job' && item.job && ['queued', 'running'].includes(item.job.status))
-					.map((item) => item.job as JobItem);
-				notifications = items.filter((item) => !(item.source === 'job' && item.job && ['queued', 'running'].includes(item.job.status)));
+				notifications = items.filter((item) => item.source !== 'job');
+			}
+			if (jobsRes.ok) {
+				activeJobs = await jobsRes.json();
 			}
 		} catch (error) {
 			console.error('Failed to load notifications:', error);
@@ -181,7 +155,7 @@
 			{#if mobileMenu}
 				<span class="flex items-center gap-3">
 					<span class="relative">
-						<svg class="h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<svg class="h-5 w-5 text-[var(--color-surface-text-muted)] {hasActiveJobs ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
 						</svg>
 						{#if $notificationVisualIndicator && hasUnreadNotifications}
@@ -194,7 +168,7 @@
 					<span class="min-w-5 h-5 px-1 rounded-full bg-[var(--color-primary-500)] text-white text-[10px] font-semibold flex items-center justify-center">{unreadNotificationCount}</span>
 				{/if}
 			{:else}
-				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<svg class="w-5 h-5 {hasActiveJobs ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
 				</svg>
 				{#if $notificationVisualIndicator && hasUnreadNotifications}
@@ -214,66 +188,54 @@
 				? 'w-full overflow-hidden'
 				: mobileMenu
 					? 'fixed left-3 right-3 top-[7.75rem] max-h-[calc(100dvh-8.5rem)] rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-sm overflow-hidden z-[95]'
-					: 'absolute right-0 mt-3 w-80 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-sm overflow-hidden z-[80]'}
+					: 'absolute right-0 mt-3 w-[28rem] max-w-[calc(100vw-2rem)] rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-sm overflow-hidden z-[80]'}
 		>
 			{#if !hideHeader}
 				<div class="px-4 py-3 border-b border-[var(--color-surface-border)] flex items-center justify-between">
 					<div>
 						<div class="text-sm font-semibold text-[var(--color-surface-text)]">Notifications</div>
-						<div class="text-xs text-[var(--color-surface-text-muted)]">{unreadNotificationCount} unread</div>
+						<div class="text-xs text-[var(--color-surface-text-muted)]">{unreadNotificationCount} active or unread</div>
 					</div>
 					<div class="flex items-center gap-3">
-						{#if notifications.length > 0}
+						{#if notifications.some((item) => item.source === 'notification')}
 							<button onclick={dismissAllNotifications} class="text-xs text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]">
 								Dismiss all
 							</button>
 						{/if}
-						<a href="/settings?tab=admin" class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Admin</a>
+						<a href="/settings?tab=jobs" class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Jobs</a>
 					</div>
 				</div>
 			{:else}
 				<div class="px-4 py-2 border-b border-[var(--color-surface-border)] flex items-center justify-between">
-					<div class="text-xs text-[var(--color-surface-text-muted)]">{unreadNotificationCount} unread</div>
+					<div class="text-xs text-[var(--color-surface-text-muted)]">{unreadNotificationCount} active or unread</div>
 					<div class="flex items-center gap-3">
-						{#if notifications.length > 0}
+						{#if notifications.some((item) => item.source === 'notification')}
 							<button onclick={dismissAllNotifications} class="text-xs text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]">
 								Dismiss all
 							</button>
 						{/if}
-						<a href="/settings?tab=admin" class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Admin</a>
+						<a href="/settings?tab=jobs" class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Jobs</a>
 					</div>
 				</div>
 			{/if}
-			<div class="{panelOnly ? '' : mobileMenu ? 'max-h-[calc(100dvh-13rem)]' : 'max-h-96'} overflow-auto">
-				{#if runningJobs.length > 0}
+			<div class="{panelOnly ? '' : mobileMenu ? 'max-h-[calc(100dvh-13rem)]' : 'max-h-[32rem]'} overflow-auto">
+				{#if activeJobs.length > 0}
 					<div class="border-b border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/50 px-4 py-3">
 						<div class="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-primary-300)]">
-							<span class="h-2 w-2 rounded-full bg-[var(--color-primary-400)]"></span>
+							<svg class="h-3.5 w-3.5 animate-scan-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+							</svg>
 							Active Jobs
 						</div>
 						<div class="space-y-2">
-							{#each runningJobs as job}
-								<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2">
-									<div class="flex items-center justify-between gap-2">
-										<div class="truncate text-sm font-medium text-[var(--color-surface-text)]">{job.title}</div>
-										<span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase {jobStatusClass(job)}">{jobStatusLabel(job)}</span>
-									</div>
-									<div class="mt-1 text-xs text-[var(--color-surface-text-muted)]">{formatJobDetail(job)}</div>
-									{#if job.status === 'running' && job.total_items > 0}
-										<div class="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-surface-700)]">
-											<div
-												class="h-full rounded-full bg-[var(--color-primary-500)] transition-all"
-												style:width={`${Math.min(100, Math.round((job.completed_items / job.total_items) * 100))}%`}
-											></div>
-										</div>
-									{/if}
-								</div>
+							{#each activeJobs as job}
+								<JobListItem {job} compact />
 							{/each}
 						</div>
 					</div>
 				{/if}
 
-				{#if notifications.length === 0 && runningJobs.length === 0}
+				{#if notifications.length === 0 && activeJobs.length === 0}
 					<div class="px-4 py-6 text-sm text-[var(--color-surface-text-muted)]">No notifications.</div>
 				{:else}
 					{#each notifications as item}
