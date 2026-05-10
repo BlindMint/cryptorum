@@ -43,6 +43,7 @@
 		exclude_from_suggestions: false,
 		paths: ['']
 	});
+	let originalLibraryPaths = $state<string[]>([]);
 	let currentLibraryIcon = $derived(parseLibraryIcon(libraryForm.icon));
 
 	// Directory browser state
@@ -175,6 +176,7 @@
 
 	function openLibraryModal() {
 		editingLibrary = null;
+		originalLibraryPaths = [];
 		libraryForm = { name: '', icon: '', exclude_from_suggestions: false, paths: [''] };
 		showLibraryModal = true;
 	}
@@ -183,10 +185,16 @@
 		showLibraryModal = false;
 		editingLibrary = null;
 		showLibraryIconPicker = false;
+		originalLibraryPaths = [];
 	}
 
 	function closeLibraryMenu() {
 		activeLibraryMenu = null;
+	}
+
+	function closeMobileNavigation() {
+		$mobileMenuOpen = false;
+		closeLibraryMenu();
 	}
 
 	function openLibraryMenu(event: MouseEvent, library: Library) {
@@ -212,6 +220,7 @@
 			const response = await fetch(`/api/libraries/${library.id}`, { cache: 'no-store' });
 			const fullLibrary = response.ok ? await response.json() : library;
 			editingLibrary = fullLibrary;
+			originalLibraryPaths = normalizeLibraryPaths(fullLibrary.paths || []);
 			libraryForm = {
 				name: fullLibrary.name || '',
 				icon: fullLibrary.icon || '',
@@ -222,6 +231,16 @@
 		} catch (e) {
 			console.error('Failed to load library for editing:', e);
 		}
+	}
+
+	function normalizeLibraryPaths(paths: string[]): string[] {
+		return Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean))).sort();
+	}
+
+	function libraryFolderSetChanged(nextPaths: string[]): boolean {
+		const next = normalizeLibraryPaths(nextPaths);
+		if (next.length !== originalLibraryPaths.length) return true;
+		return next.some((path, index) => path !== originalLibraryPaths[index]);
 	}
 
 	function openLibraryIconPicker() {
@@ -254,6 +273,7 @@
 		try {
 			const filteredPaths = libraryForm.paths.filter(p => p.trim());
 			const libraryBeingEdited = editingLibrary;
+			const foldersChanged = !!libraryBeingEdited && libraryFolderSetChanged(filteredPaths);
 			const response = await fetch(libraryBeingEdited ? `/api/libraries/${libraryBeingEdited.id}` : '/api/libraries', {
 				method: libraryBeingEdited ? 'PUT' : 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -270,6 +290,8 @@
 				// Trigger a scan for the new library
 				if (!libraryBeingEdited) {
 					await scanLibrary(savedLibrary);
+				} else if (foldersChanged && !libraryBeingEdited.is_importing && confirm('Library folders changed. Scan this library now?')) {
+					await scanLibrary(libraryBeingEdited);
 				}
 			} else {
 				console.error(`Failed to ${libraryBeingEdited ? 'update' : 'create'} library`);
@@ -394,19 +416,12 @@
 
 	async function loadActiveLibraryScanJobs() {
 		try {
-			const res = await fetch('/api/notifications?unread=true&limit=100', { cache: 'no-store' });
+			const res = await fetch('/api/jobs?status=queued,running,cancelling&type=library_scan&limit=100', { cache: 'no-store' });
 			if (!res.ok) {
 				activeLibraryScanJobs = [];
 				return;
 			}
-			const data = await res.json();
-			activeLibraryScanJobs = (data.items ?? [])
-				.filter((item: any) =>
-					item.source === 'job' &&
-					item.job?.job_type === 'library_scan' &&
-					['queued', 'running'].includes(item.job.status)
-				)
-				.map((item: any) => item.job);
+			activeLibraryScanJobs = await res.json();
 		} catch (e) {
 			console.error('Failed to load active library scan jobs:', e);
 			activeLibraryScanJobs = [];
@@ -435,6 +450,7 @@
 	<div class="flex-shrink-0 p-4 pb-3 space-y-1">
 		<a
 			href="/"
+			onclick={closeMobileNavigation}
 			class="flex items-center space-x-3 px-3 py-2 rounded-lg transition-all duration-200 {isActive('/') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
 		>
 			<svg class="w-5 h-5 transition-transform duration-200 {isActive('/') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -445,6 +461,7 @@
 
 		<a
 			href="/library"
+			onclick={closeMobileNavigation}
 			class="flex items-center space-x-3 px-3 py-2 rounded-lg transition-all duration-200 {isActive('/library') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
 		>
 			<svg class="w-5 h-5 transition-transform duration-200 {isActive('/library') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -455,6 +472,7 @@
 
 		<a
 			href="/authors"
+			onclick={closeMobileNavigation}
 			class="flex items-center space-x-3 px-3 py-2 rounded-lg transition-all duration-200 {isActive('/authors') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
 		>
 			<svg class="w-5 h-5 transition-transform duration-200 {isActive('/authors') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -465,6 +483,7 @@
 
 		<a
 			href="/series"
+			onclick={closeMobileNavigation}
 			class="flex items-center space-x-3 px-3 py-2 rounded-lg transition-all duration-200 {isActive('/series') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
 		>
 			<svg class="w-5 h-5 transition-transform duration-200 {isActive('/series') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -502,7 +521,7 @@
 				>
 					<a
 						href="/library?library={library.id}"
-						onclick={() => $mobileMenuOpen = false}
+						onclick={closeMobileNavigation}
 						class="flex min-w-0 flex-1 items-center space-x-3 px-3 py-2"
 					>
 							{#if isLibraryScanActive(library)}
@@ -546,7 +565,7 @@
 				</div>
 				<a
 					href="/shelves"
-					onclick={() => $mobileMenuOpen = false}
+					onclick={closeMobileNavigation}
 					class="p-1 rounded text-[var(--color-surface-text-muted)] hover:text-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)] transition-colors"
 					title="Manage Shelves"
 				>
@@ -560,7 +579,7 @@
 				<a
 					href="/shelves/{shelf.id}"
 					class="flex items-center px-3 py-2 rounded-lg transition-all duration-200 {isActive('/shelves/' + shelf.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
-					onclick={() => $mobileMenuOpen = false}
+					onclick={closeMobileNavigation}
 				>
 					<div class="flex items-center space-x-3 flex-1 min-w-0">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)] flex-shrink-0 transition-transform duration-200 {isActive('/shelves/' + shelf.id) ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">

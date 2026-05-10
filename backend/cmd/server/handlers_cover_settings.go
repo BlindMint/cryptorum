@@ -141,10 +141,16 @@ func regenerateBookCoversHandler(w http.ResponseWriter, r *http.Request) {
 	if missingOnly {
 		title = "Regenerate missing book covers"
 	}
+	libraryName := ""
 	if req.LibraryID > 0 {
-		title += fmt.Sprintf(" for library %d", req.LibraryID)
+		_ = appDB.QueryRow(`SELECT name FROM library WHERE id = ?`, req.LibraryID).Scan(&libraryName)
+		if libraryName != "" {
+			title += fmt.Sprintf(" for %s", libraryName)
+		} else {
+			title += fmt.Sprintf(" for library %d", req.LibraryID)
+		}
 	}
-	payload, _ := json.Marshal(map[string]any{"mode": mode, "library_id": req.LibraryID})
+	payload, _ := json.Marshal(map[string]any{"mode": mode, "library_id": req.LibraryID, "library_name": libraryName})
 	now := time.Now().Unix()
 	res, err := appDB.Exec(`
 		INSERT INTO metadata_job (
@@ -164,7 +170,7 @@ func regenerateBookCoversHandler(w http.ResponseWriter, r *http.Request) {
 		"job_queued",
 		title,
 		"Queued a background cover regeneration job.",
-		"/settings?tab=admin",
+		"/settings?tab=jobs",
 	)
 	recordAppLog("info", "jobs", "Queued cover regeneration job", map[string]any{
 		"job_id":     jobID,
@@ -217,7 +223,7 @@ func processCoverRegenerationJob(jobID int64, title, mode string, libraryID int6
 			"job_failed",
 			title,
 			fmt.Sprintf("Cover regeneration failed: %s", err.Error()),
-			"/settings?tab=admin",
+			"/settings?tab=jobs",
 		)
 		return
 	}
@@ -228,6 +234,12 @@ func processCoverRegenerationJob(jobID int64, title, mode string, libraryID int6
 		"updated":    updated,
 		"failed":     failed,
 		"total":      total,
+	}
+	if libraryID > 0 {
+		var libraryName string
+		if err := appDB.QueryRow(`SELECT name FROM library WHERE id = ?`, libraryID).Scan(&libraryName); err == nil && libraryName != "" {
+			resultPayload["library_name"] = libraryName
+		}
 	}
 	resultJSON, _ := json.Marshal(resultPayload)
 	_, _ = appDB.Exec(`
@@ -248,6 +260,6 @@ func processCoverRegenerationJob(jobID int64, title, mode string, libraryID int6
 		"job_completed",
 		title,
 		fmt.Sprintf("Cover regeneration finished: %d updated, %d failed from %d checked.", updated, failed, total),
-		"/settings?tab=admin",
+		"/settings?tab=jobs",
 	)
 }

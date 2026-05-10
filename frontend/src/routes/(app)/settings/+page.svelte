@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import { readerSettings, epubThemes, fontFamilies, pdfZoomModes, cbxFitModes, cbxScrollModes, skipIntervalOptions, sleepTimerOptions, waveformStyles, type ReaderSettings } from '$lib/stores/readerSettings';
+	import { readerSettings, epubThemes, fontFamilies, fontWeightOptions, pdfZoomModes, cbxFitModes, cbxScrollModes, skipIntervalOptions, sleepTimerOptions, waveformStyles, type ReaderSettings } from '$lib/stores/readerSettings';
 	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, updateCustomTheme, removeCustomTheme, resetPrimaryToDefault, resetSurfaceToDefault, generateId, updateGlowEnabled, updateGlowAutoMode, updateGlowColor, updateGlowIntensity, updateBgImageEnabled, updateBgImageTransparency, updateBgImageDisplay, updateSelectedBgImage, addBackgroundImage, removeBackgroundImage, DEFAULT_THEME_PRIMARY, DEFAULT_THEME_SURFACE } from '$lib/stores/theme';
 	import type { BackgroundImageDisplay } from '$lib/stores/theme';
 import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 import AdminPanel from './AdminPanel.svelte';
 import MetadataManagerContent from '$lib/components/MetadataManagerContent.svelte';
-import UsersPanel from './UsersPanel.svelte';
+import JobsPanel from './JobsPanel.svelte';
 import LibraryIconPicker from '$lib/components/LibraryIconPicker.svelte';
 import { parseLibraryIcon } from '$lib/utils/library-icons';
 	
@@ -19,18 +19,20 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		}
 	});
 	let localReaderSettings = $state<ReaderSettings>({
+		keepScreenOnWhileReading: true,
+		keepScreenOnWhileAppOpen: false,
 		epub: { fontFamily: 'serif', fontSize: 18, fontWeight: 400, fontStyle: 'normal' as const, lineHeight: 1.6, letterSpacing: 0, paragraphSpacing: 0, paragraphIndent: 0, justify: true, hyphenate: false, hyphenationLanguage: 'en', maxColumnCount: 1, gap: 5, theme: 'dark', isDark: true, flow: 'paginated' as const, maxInlineSize: 680, maxBlockSize: 1440, margin: 5, continuousMaxWidth: 720, brightness: 100, contrast: 100, pageAnimation: 'slide' as const, autoAdvance: false, autoAdvanceTimer: 0, fullscreenLock: false, useStandardFullscreen: false, autoHideControls: true, customCss: '', showTextLayer: true, originalLayout: false, continuousMode: true, showImages: true, imageSize: 'fit-width' as const, imageGrayscale: false },
 		pdf: { pageSpread: 'off' as const, pageLayout: 'single' as const, pageZoom: 'auto', zoomLevel: 100, renderQuality: 'high' as const, autoHideControls: true, showSidebar: false, scrollDirection: 'vertical' as const, scrollMode: 'paged' as const, pageRotation: 0 as const, backgroundColor: '#111111', brightness: 100, contrast: 100, grayscale: 0, readingDirection: 'ltr' as const, autoCropMargins: false, textLayerEnabled: true, annotationsEnabled: true, viewMode: 'dark' as const, showChapterMarkers: false, showQuoteMarks: false, panMode: false, useStandardFullscreen: false, keepScreenOn: true },
 		cbx: { pageSpread: 'auto' as const, pageLayout: 'single' as const, fitMode: 'fit-width' as const, scrollMode: 'paginated' as const, backgroundColor: '#111111', readingDirection: 'ltr' as const, stripMaxWidthPercent: 100, mangaMode: false, panelViewEnabled: false, spreadHandling: 'auto' as const, pageTransitionSound: false, autoHideControls: true, useStandardFullscreen: false, vibrance: 100, saturation: 100 },
 		audio: { playbackSpeed: 1.0, skipForward: 15, skipBackward: 15, autoAdvance: false, autoHideControls: true, gaplessPlayback: true, sleepTimer: 'off' as const, sleepTimerCustom: 30, theme: 'cover-focused' as const, waveformStyle: 'line' as const, backgroundStyle: 'cover-blur' as const, voiceBoost: false, equalizerLow: 50, equalizerMid: 50, equalizerHigh: 50 },
-		speedReader: { wpm: 300, wordSize: 48, fontFamily: 'serif', focalPoint: 0.38, centerWord: false, accentEnabled: true, accentColor: '#ef4444', accentOpacity: 1.0, focusIndicator: 'lines' as const, focusIndicatorDistance: 20, horizontalBars: true, horizontalBarsColor: '#666666', horizontalBarsOpacity: 1.0, verticalIndicator: 'off' as const, sentencePause: 350, autoSentencePause: true, keepScreenOn: true, theme: 'dark', letterSpacing: 0, focusIndicatorLength: 20 }
+		speedReader: { wpm: 300, wordSize: 48, fontFamily: 'serif', fontWeight: 400, focalPoint: 0.38, centerWord: false, accentEnabled: true, accentColor: '#ef4444', accentOpacity: 1.0, focusIndicator: 'lines' as const, focusIndicatorDistance: 20, horizontalBars: true, horizontalBarsColor: '#666666', horizontalBarsOpacity: 1.0, verticalIndicator: 'off' as const, sentencePause: 350, autoSentencePause: true, keepScreenOn: true, theme: 'dark', letterSpacing: 0, focusIndicatorLength: 20 }
 	});
 	let loading = $state(true);
 	let scanning = $state(false);
 	let deletingLibraryId = $state<number | null>(null);
 	let scanPollTimer: number | null = null;
 	let activeLibraryScanJobs = $state<any[]>([]);
-	let activeTab = $state<'general' | 'metadata' | 'reader' | 'appearance' | 'users' | 'admin'>('general');
+	let activeTab = $state<'general' | 'metadata' | 'reader' | 'appearance' | 'jobs' | 'admin'>('general');
 	let settingsSaved = $state(false);
 	let bookCoverSettings = $state({
 		preserve_full_cover: true,
@@ -59,6 +61,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		exclude_from_suggestions: false,
 		paths: ['']
 	});
+	let originalLibraryPaths = $state<string[]>([]);
 	let currentLibraryIcon = $derived(parseLibraryIcon(libraryForm.icon));
 	let anyLibraryScanning = $derived(
 		!!settings.libraries?.some((library: any) => library.is_importing)
@@ -309,13 +312,15 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
   	function openLibraryModal(library: any = null) {
   		editingLibrary = library;
   		if (library) {
+			originalLibraryPaths = normalizeLibraryPaths(library.paths || []);
   			libraryForm = {
   				name: library.name,
   				icon: library.icon || '',
 				exclude_from_suggestions: !!library.exclude_from_suggestions,
-  				paths: library.paths.filter((p: string) => p.trim())
+				paths: (library.paths || []).filter((p: string) => p.trim())
   			};
   		} else {
+			originalLibraryPaths = [];
   			libraryForm = {
   				name: '',
   				icon: '',
@@ -330,6 +335,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		showLibraryModal = false;
 		showLibraryIconPicker = false;
 		editingLibrary = null;
+		originalLibraryPaths = [];
 	}
 
 	function openLibraryIconPicker() {
@@ -363,6 +369,10 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 
 	function updateEpubSetting(key: string, value: any) {
 		localReaderSettings.epub = { ...localReaderSettings.epub, [key]: value };
+	}
+
+	function updateReaderWakeSetting(key: 'keepScreenOnWhileReading' | 'keepScreenOnWhileAppOpen', value: boolean) {
+		localReaderSettings = { ...localReaderSettings, [key]: value };
 	}
 
 	function updatePdfSetting(key: string, value: any) {
@@ -483,11 +493,23 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		closeDirectoryModal();
 	}
 
+	function normalizeLibraryPaths(paths: string[]): string[] {
+		return Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean))).sort();
+	}
+
+	function libraryFolderSetChanged(nextPaths: string[]): boolean {
+		const next = normalizeLibraryPaths(nextPaths);
+		if (next.length !== originalLibraryPaths.length) return true;
+		return next.some((path, index) => path !== originalLibraryPaths[index]);
+	}
+
 	async function saveLibrary() {
 		if (!libraryForm.name.trim()) return;
 
 		const filteredPaths = libraryForm.paths.filter(p => p.trim());
 		if (filteredPaths.length === 0) return;
+		const libraryBeingEdited = editingLibrary;
+		const foldersChanged = !!libraryBeingEdited && libraryFolderSetChanged(filteredPaths);
 
 		const data = {
 			name: libraryForm.name.trim(),
@@ -498,8 +520,8 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 
 		try {
 			let response;
-			if (editingLibrary) {
-				response = await fetch(`/api/libraries/${editingLibrary.id}`, {
+			if (libraryBeingEdited) {
+				response = await fetch(`/api/libraries/${libraryBeingEdited.id}`, {
 					method: 'PUT',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify(data)
@@ -513,11 +535,22 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 			}
 
 			if (response.ok) {
+				const savedLibrary = libraryBeingEdited ? libraryBeingEdited : await response.json().catch(() => null);
 				await loadSettings();
 				if ((window as any).refreshSidebar) {
 					(window as any).refreshSidebar();
 				}
 				closeLibraryModal();
+				if (!libraryBeingEdited && savedLibrary?.id) {
+					await scanLibrary(savedLibrary);
+				} else if (libraryBeingEdited && foldersChanged) {
+					const scanTarget = { ...libraryBeingEdited, id: Number(libraryBeingEdited.id) };
+					if (isLibraryScanActive(scanTarget)) {
+						setActiveTab('jobs');
+					} else if (confirm('Library folders changed. Scan this library now?')) {
+						await scanLibrary(scanTarget);
+					}
+				}
 			}
 		} catch (e) {
 			console.error('Failed to save library:', e);
@@ -607,19 +640,12 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 
 	async function loadActiveLibraryScanJobs() {
 		try {
-			const res = await fetch('/api/notifications?unread=true&limit=100', { cache: 'no-store' });
+			const res = await fetch('/api/jobs?status=queued,running,cancelling&type=library_scan&limit=100', { cache: 'no-store' });
 			if (!res.ok) {
 				activeLibraryScanJobs = [];
 				return [];
 			}
-			const data = await res.json();
-			const jobs = (data.items ?? [])
-				.filter((item: any) =>
-					item.source === 'job' &&
-					item.job?.job_type === 'library_scan' &&
-					['queued', 'running'].includes(item.job.status)
-				)
-				.map((item: any) => item.job);
+			const jobs = await res.json();
 			activeLibraryScanJobs = jobs;
 			return jobs;
 		} catch (e) {
@@ -636,9 +662,6 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 				if ((window as any).refreshSidebar) {
 					(window as any).refreshSidebar();
 				}
-				if ((window as any).refreshScanStatus) {
-					(window as any).refreshScanStatus();
-				}
 				await Promise.all([loadSettings(), loadActiveLibraryScanJobs()]);
 				scanning = true;
 				startScanPolling();
@@ -653,9 +676,6 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		scanPollTimer = window.setInterval(async () => {
 			if ((window as any).refreshSidebar) {
 				(window as any).refreshSidebar();
-			}
-			if ((window as any).refreshScanStatus) {
-				(window as any).refreshScanStatus();
 			}
 			const [data, activeJobs] = await Promise.all([loadSettings(), loadActiveLibraryScanJobs()]);
 			const libraryScanning = !!data?.libraries?.some((library: any) => library.is_importing);
@@ -679,6 +699,13 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	}
 
 	async function triggerScan() {
+		if (scanActive) {
+			setActiveTab('jobs');
+			return;
+		}
+		if (!confirm('Scan all configured libraries? This can take a while and may slow background storage access while it runs.')) {
+			return;
+		}
 		scanning = true;
 		try {
 			const response = await fetch('/api/scan', { method: 'POST' });
@@ -688,10 +715,14 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 			}
 			const [data, activeJobs] = await Promise.all([loadSettings(), loadActiveLibraryScanJobs()]);
 			const queued = result?.queued_count ?? 0;
+			const existing = result?.existing_count ?? 0;
 			const libraryScanning = !!data?.libraries?.some((library: any) => library.is_importing);
-			scanning = queued > 0 || libraryScanning || activeJobs.length > 0;
+			scanning = queued > 0 || existing > 0 || libraryScanning || activeJobs.length > 0;
 			if (scanning) {
 				startScanPolling();
+				if (existing > 0 && queued === 0) {
+					setActiveTab('jobs');
+				}
 			} else {
 				stopScanPolling();
 			}
@@ -701,7 +732,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		}
 	}
 
-	function setActiveTab(tab: 'general' | 'metadata' | 'reader' | 'appearance' | 'users' | 'admin') {
+	function setActiveTab(tab: 'general' | 'metadata' | 'reader' | 'appearance' | 'jobs' | 'admin') {
 		activeTab = tab;
 		if (typeof window === 'undefined') return;
 		const url = new URL(window.location.href);
@@ -721,7 +752,9 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		}
 		if (typeof window !== 'undefined') {
 			const tab = new URLSearchParams(window.location.search).get('tab');
-			if (tab === 'general' || tab === 'metadata' || tab === 'reader' || tab === 'appearance' || tab === 'users' || tab === 'admin') {
+			if (tab === 'users') {
+				activeTab = 'admin';
+			} else if (tab === 'general' || tab === 'metadata' || tab === 'reader' || tab === 'appearance' || tab === 'jobs' || tab === 'admin') {
 				activeTab = tab;
 			}
 		}
@@ -744,6 +777,10 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		}
 	});
 </script>
+
+<svelte:head>
+	<link rel="stylesheet" href="/fonts/spectral.css" />
+</svelte:head>
 
 <div class="min-h-full space-y-6 pb-[calc(1rem+env(safe-area-inset-bottom))]">
  	<div class="flex items-center justify-between">
@@ -779,12 +816,12 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
   		>
   			Metadata
   		</button>
-  		<button
-  			onclick={() => setActiveTab('users')}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors border-b-2 {activeTab === 'users' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
-  		>
-  			Users
-  		</button>
+		<button
+			onclick={() => setActiveTab('jobs')}
+			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors border-b-2 {activeTab === 'jobs' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+		>
+			Jobs
+		</button>
   		<button
   			onclick={() => setActiveTab('admin')}
   			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors border-b-2 {activeTab === 'admin' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
@@ -1069,6 +1106,41 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		</div>
 	{:else if activeTab === 'reader'}
 		<div class="space-y-6">
+			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
+				<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
+					<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Screen Wake</h2>
+					<p class="text-sm text-[var(--color-surface-text-muted)]">Control when Cryptorum prevents the display from sleeping.</p>
+				</div>
+				<div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+					<label for="keep-screen-reading" class="flex items-start gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
+						<input
+							id="keep-screen-reading"
+							type="checkbox"
+							checked={localReaderSettings.keepScreenOnWhileReading}
+							onchange={(e) => updateReaderWakeSetting('keepScreenOnWhileReading', e.currentTarget.checked)}
+							class="mt-1 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+						>
+						<span>
+							<span class="block text-sm font-medium text-[var(--color-surface-text)]">Keep screen on while reading</span>
+							<span class="mt-1 block text-xs leading-5 text-[var(--color-surface-text-muted)]">Applies to EPUB, PDF, comics, audio, and speed reader.</span>
+						</span>
+					</label>
+					<label for="keep-screen-app" class="flex items-start gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
+						<input
+							id="keep-screen-app"
+							type="checkbox"
+							checked={localReaderSettings.keepScreenOnWhileAppOpen}
+							onchange={(e) => updateReaderWakeSetting('keepScreenOnWhileAppOpen', e.currentTarget.checked)}
+							class="mt-1 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+						>
+						<span>
+							<span class="block text-sm font-medium text-[var(--color-surface-text)]">Keep screen on while app is open</span>
+							<span class="mt-1 block text-xs leading-5 text-[var(--color-surface-text-muted)]">Applies across library, settings, search, book details, and readers.</span>
+						</span>
+					</label>
+				</div>
+			</div>
+
 			<!-- EPUB Reader Settings -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
 				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
@@ -1516,17 +1588,6 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 								<label for="pdfAutoHideControls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
 							</div>
 
-							<!-- Keep Screen On -->
-							<div class="flex items-center space-x-3">
-								<input
-									type="checkbox"
-									id="pdfKeepScreenOn"
-									checked={localReaderSettings.pdf.keepScreenOn}
-									onchange={(e) => updatePdfSetting('keepScreenOn', e.currentTarget.checked)}
-									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
-								>
-								<label for="pdfKeepScreenOn" class="text-sm font-medium text-[var(--color-surface-text)]">Keep screen on</label>
-							</div>
 						</div>
 					</div>
 				</div>
@@ -1777,6 +1838,20 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 							</div>
 						</div>
 
+						<!-- Font Thickness -->
+						<div>
+							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Font Thickness</div>
+							<select
+								value={localReaderSettings.speedReader.fontWeight}
+								onchange={(e) => updateSpeedReaderSetting('fontWeight', parseInt(e.currentTarget.value))}
+								class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+							>
+								{#each fontWeightOptions as option}
+									<option value={option.value}>{option.label}</option>
+								{/each}
+							</select>
+						</div>
+
 						<!-- Focal Point -->
 						<div>
 							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Focal Point</div>
@@ -1849,18 +1924,6 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 								class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 							>
 							<label for="accent-enabled" class="text-sm font-medium text-[var(--color-surface-text)]">Enable accent character</label>
-						</div>
-
-						<!-- Keep Screen On -->
-						<div class="flex items-center space-x-3">
-							<input
-								type="checkbox"
-								id="keep-screen-on"
-								checked={localReaderSettings.speedReader.keepScreenOn}
-								onchange={(e) => updateSpeedReaderSetting('keepScreenOn', e.currentTarget.checked)}
-								class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
-							>
-							<label for="keep-screen-on" class="text-sm font-medium text-[var(--color-surface-text)]">Keep screen on</label>
 						</div>
 
 						<!-- Horizontal Bars -->
@@ -1975,14 +2038,13 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 					<div class="flex w-full items-center gap-2 sm:w-auto">
 						<button
 							onclick={triggerScan}
-							disabled={scanActive}
 							class="inline-flex h-10 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)] disabled:cursor-not-allowed disabled:opacity-70 sm:flex-none"
-							title="Scan all libraries"
+							title={scanActive ? 'View active jobs' : 'Scan all libraries'}
 						>
 							<svg class="h-4 w-4 {scanActive ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
 							</svg>
-							<span>{scanActive ? 'Scanning...' : 'Scan Libraries'}</span>
+							<span>{scanActive ? 'View Jobs' : 'Scan Libraries'}</span>
 						</button>
 						<button
 							onclick={() => openLibraryModal()}
@@ -2286,8 +2348,8 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		</div>
 	{:else if activeTab === 'metadata'}
 		<MetadataManagerContent showHeader={false} />
-	{:else if activeTab === 'users'}
-		<UsersPanel />
+	{:else if activeTab === 'jobs'}
+		<JobsPanel />
 	{:else if activeTab === 'admin'}
 		<AdminPanel />
 	{/if}
@@ -2599,7 +2661,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 									<path d="M12 5v14"></path>
 									<path d="M5 12h14"></path>
 								</svg>
-								+ Select icon
+								Select icon
 							</button>
 						{/if}
 					</div>
@@ -2628,7 +2690,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 							Book Folders
 						</div>
 						<button
-							onclick={() => openDirectoryModal('bookdrop')}
+							onclick={() => openDirectoryModal('library')}
 							class="px-3 py-1.5 text-sm bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white rounded-lg transition-colors"
 						>
 							Add Folder

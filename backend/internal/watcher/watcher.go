@@ -220,6 +220,7 @@ func isProcessableFile(filename string) bool {
 		"mp3": true, "m4a": true, "m4b": true,
 		"flac": true, "ogg": true, "wav": true,
 		"mobi": true, "azw3": true,
+		"fb2": true, "rtf": true, "txt": true,
 	}
 
 	return supportedFormats[ext]

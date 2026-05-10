@@ -1,7 +1,7 @@
 import { writable, derived } from 'svelte/store';
 import { browser } from '$app/environment';
 
-const READER_SETTINGS_VERSION = 2;
+const READER_SETTINGS_VERSION = 4;
 const READER_SETTINGS_VERSION_KEY = 'readerSettingsVersion';
 
 export interface EpubReaderSetting {
@@ -112,6 +112,7 @@ export interface SpeedReaderSetting {
 	wpm: number;
 	wordSize: number;
 	fontFamily: string;
+	fontWeight: number;
 	focalPoint: number;
 	centerWord: boolean;
 	accentEnabled: boolean;
@@ -132,6 +133,8 @@ export interface SpeedReaderSetting {
 }
 
 export interface ReaderSettings {
+	keepScreenOnWhileReading: boolean;
+	keepScreenOnWhileAppOpen: boolean;
 	epub: EpubReaderSetting;
 	pdf: PdfReaderSetting;
 	cbx: CbxReaderSetting;
@@ -140,6 +143,8 @@ export interface ReaderSettings {
 }
 
 export const defaultReaderSettings: ReaderSettings = {
+	keepScreenOnWhileReading: true,
+	keepScreenOnWhileAppOpen: false,
 	epub: {
 		fontFamily: 'serif',
 		fontSize: 18,
@@ -241,6 +246,7 @@ export const defaultReaderSettings: ReaderSettings = {
 		wpm: 300,
 		wordSize: 48,
 		fontFamily: 'serif',
+		fontWeight: 400,
 		focalPoint: 0.38,
 		centerWord: false,
 		accentEnabled: true,
@@ -287,6 +293,8 @@ function migrateSettings(settings: ReaderSettings): ReaderSettings {
 
 	return {
 		...settings,
+		keepScreenOnWhileReading: settings.keepScreenOnWhileReading ?? true,
+		keepScreenOnWhileAppOpen: settings.keepScreenOnWhileAppOpen ?? false,
 		epub: {
 			...settings.epub,
 			flow: 'scrolled',
@@ -295,6 +303,10 @@ function migrateSettings(settings: ReaderSettings): ReaderSettings {
 		pdf: {
 			...settings.pdf,
 			scrollMode: settings.pdf.scrollMode === 'paged' ? 'continuous-vertical' : settings.pdf.scrollMode
+		},
+		speedReader: {
+			...settings.speedReader,
+			fontWeight: settings.speedReader.fontWeight ?? 400
 		}
 	};
 }
@@ -417,6 +429,8 @@ function createReaderSettingsStore() {
 					};
 				} else {
 					return {
+						keepScreenOnWhileReading: defaultReaderSettings.keepScreenOnWhileReading,
+						keepScreenOnWhileAppOpen: defaultReaderSettings.keepScreenOnWhileAppOpen,
 						epub: { ...defaultReaderSettings.epub },
 						pdf: { ...defaultReaderSettings.pdf },
 						cbx: { ...defaultReaderSettings.cbx },
@@ -468,6 +482,11 @@ export const fontFamilies = [
 	{ id: 'cursive', name: 'Cursive', family: 'cursive' },
 	{ id: 'monospace', name: 'Monospace', family: '"Courier New", Courier, monospace' }
 ];
+
+export function resolveFontFamily(fontId: string): string {
+	const font = fontFamilies.find(f => f.id === fontId);
+	return font ? font.family : (fontId || 'Georgia, "Times New Roman", serif');
+}
 
 export const fontWeightOptions = [
 	{ value: 200, label: 'ExtraLight' },

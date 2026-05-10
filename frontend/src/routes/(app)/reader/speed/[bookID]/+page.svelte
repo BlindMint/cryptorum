@@ -3,7 +3,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
-	import { readerSettings, speedReaderThemes, fontFamilies, type SpeedReaderSetting } from '$lib/stores/readerSettings';
+	import { readerSettings, speedReaderThemes, fontFamilies, fontWeightOptions, resolveFontFamily, type SpeedReaderSetting } from '$lib/stores/readerSettings';
 	import { currentTheme as appThemeStore, resolveThemeColors, type FullTheme } from '$lib/stores/theme';
 	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
@@ -28,6 +28,8 @@
 	let settingsPanelRef: HTMLDivElement | null = $state(null);
 	let wpmMenuRef: HTMLDivElement | null = $state(null);
 	let wordContainerEl = $state<HTMLDivElement | null>(null);
+	let accentCharEl = $state<HTMLSpanElement | null>(null);
+	let accentWidth = $state(0);
 	let currentSessionId = $state<number | null>(null);
 	let lastWheelNavigationAt = 0;
 	let sessionEnded = false;
@@ -124,6 +126,7 @@
 		wpm: 300,
 		wordSize: 64,
 		fontFamily: 'serif',
+		fontWeight: 400,
 		focalPoint: 0.50,
 		centerWord: false,
 		accentEnabled: true,
@@ -145,7 +148,7 @@
 
 	let readerTheme = $state(speedReaderThemes[0]);
 	let appTheme = $state<FullTheme | null>(null);
-	let wakeLock: WakeLockSentinel | null = null;
+	let currentFontFamily = $derived(resolveFontFamily(settings.fontFamily));
 
 	function updateReaderTheme() {
 		const theme = resolveThemeColors(
@@ -271,9 +274,6 @@
 		if (!closeTasksStarted) {
 			void endSession(true);
 		}
-		if (wakeLock) {
-			wakeLock.release();
-		}
 	});
 
 	async function fetchProgress() {
@@ -390,16 +390,6 @@
 		isPlaying = true;
 		hideControls();
 
-		if (settings.keepScreenOn && browser && 'wakeLock' in navigator) {
-			(async () => {
-				try {
-					wakeLock = await navigator.wakeLock.request('screen');
-				} catch (e) {
-					console.warn('Wake lock failed:', e);
-				}
-			})();
-		}
-
 		const advanceWord = () => {
 			if (currentIndex < words.length - 1) {
 				currentIndex++;
@@ -419,10 +409,6 @@
 		if (intervalId) {
 			clearTimeout(intervalId);
 			intervalId = null;
-		}
-		if (wakeLock) {
-			wakeLock.release();
-			wakeLock = null;
 		}
 		saveProgress();
 		showControlsTemporarily();
@@ -541,25 +527,43 @@
 		}
 	}
 
-	function findAccentCharIndex(word: string): number {
-		const len = word.length;
-		if (len <= 1) return 0;
-		if (len <= 3) return 1;
-		if (len <= 5) return 1;
-		return Math.floor(len * settings.focalPoint);
+	function splitGraphemes(text: string): string[] {
+		if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+			const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+			return Array.from(segmenter.segment(text), segment => segment.segment);
+		}
+		return Array.from(text);
+	}
+
+	function findAccentCharIndex(graphemes: string[]): number {
+		const readableIndices = graphemes
+			.map((grapheme, index) => /[\p{L}\p{N}]/u.test(grapheme) ? index : -1)
+			.filter(index => index >= 0);
+
+		const len = readableIndices.length;
+		if (len === 0) return graphemes.length > 0 ? 0 : -1;
+
+		let readableAccentIndex = 0;
+		if (len <= 1) readableAccentIndex = 0;
+		else if (len <= 5) readableAccentIndex = 1;
+		else if (len <= 9) readableAccentIndex = 2;
+		else if (len <= 13) readableAccentIndex = 3;
+		else readableAccentIndex = 4;
+
+		return readableIndices[Math.min(readableAccentIndex, len - 1)];
 	}
 
 	function getWordParts(word: ProcessedWord): { before: string; accent: string; after: string } {
-		const text = word.text;
-		const accentIndex = findAccentCharIndex(text);
+		const graphemes = splitGraphemes(word.text);
+		const accentIndex = findAccentCharIndex(graphemes);
 		if (accentIndex === -1) {
-			return { before: text, accent: '', after: '' };
+			return { before: word.text, accent: '', after: '' };
 		}
 
 		return {
-			before: text.substring(0, accentIndex),
-			accent: text[accentIndex] || '',
-			after: text.substring(accentIndex + 1)
+			before: graphemes.slice(0, accentIndex).join(''),
+			accent: graphemes[accentIndex] || '',
+			after: graphemes.slice(accentIndex + 1).join('')
 		};
 	}
 
@@ -613,16 +617,30 @@
 		}, 120);
 		return () => clearTimeout(timer);
 	});
+
+	$effect(() => {
+		currentIndex;
+		settings.wordSize;
+		settings.fontFamily;
+		settings.fontWeight;
+		settings.letterSpacing;
+		settings.accentEnabled;
+
+		tick().then(() => {
+			accentWidth = accentCharEl?.getBoundingClientRect().width ?? 0;
+		});
+	});
 </script>
 
 <svelte:head>
 	<title>{book?.title || 'Speed Reader'} - Cryptorum</title>
+	<link rel="stylesheet" href="/fonts/spectral.css" />
 </svelte:head>
 
 	<div
 		bind:this={containerEl}
-		class="fixed inset-0 z-50 flex flex-col select-none"
-			style="background-color: {readerTheme.bg}; color: {readerTheme.text}; font-family: {settings.fontFamily};"
+		class="speed-reader-root fixed inset-0 z-50 flex flex-col select-none"
+			style="background-color: {readerTheme.bg}; color: {readerTheme.text};"
 		role="application"
 		aria-label="Speed Reader"
 	>
@@ -765,25 +783,27 @@
 			<div
 				bind:this={wordContainerEl}
 				class="absolute speed-word-stage"
-				style="--focal-point: {settings.focalPoint * 100}%; top: 50%;"
+				style="--focal-point: {settings.focalPoint * 100}%; --accent-half: {accentWidth / 2}px; top: 50%;"
 			>
 				{#if settings.centerWord}
 					<p
-						class="speed-word speed-word-centered font-bold text-white"
-						style="font-size: {settings.wordSize}px; letter-spacing: {settings.letterSpacing}px;"
+						class="speed-word speed-word-centered"
+						style="font-family: {currentFontFamily}; font-size: {settings.wordSize}px; font-weight: {settings.fontWeight}; letter-spacing: {settings.letterSpacing}px;"
 					>
 						<span>{wordParts.before}</span><span
+							bind:this={accentCharEl}
 							class="accent-char"
 							style={settings.accentEnabled ? `color: ${settings.accentColor}; opacity: ${settings.accentOpacity};` : ''}
 						>{wordParts.accent}</span><span>{wordParts.after}</span>
 					</p>
 				{:else}
 					<p
-						class="speed-word speed-word-orp font-bold text-white"
-						style="font-size: {settings.wordSize}px; letter-spacing: {settings.letterSpacing}px;"
+						class="speed-word speed-word-orp"
+						style="font-family: {currentFontFamily}; font-size: {settings.wordSize}px; font-weight: {settings.fontWeight}; letter-spacing: {settings.letterSpacing}px;"
 					>
 						<span class="speed-word-before">{wordParts.before}</span>
 						<span
+							bind:this={accentCharEl}
 							class="accent-char speed-word-accent"
 							style={settings.accentEnabled ? `color: ${settings.accentColor}; opacity: ${settings.accentOpacity};` : ''}
 						>{wordParts.accent}</span>
@@ -1042,8 +1062,8 @@
 	{#if showSettings}
 		<div
 			bind:this={settingsPanelRef}
-			class="fixed top-12 right-0 h-[calc(100vh-3rem)] w-[480px] shadow-xl z-[60] flex flex-col transform transition-transform duration-300"
-			style="background-color: var(--color-surface-overlay); border-left: 1px solid var(--color-surface-border);"
+			class="fixed right-0 w-[480px] shadow-xl z-[60] flex flex-col transform transition-transform duration-300"
+			style="top: var(--speed-reader-top-bar-height); height: calc(100vh - var(--speed-reader-top-bar-height)); background-color: var(--color-surface-overlay); border-left: 1px solid var(--color-surface-border);"
 		>
 			<div class="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
 					<!-- Theme -->
@@ -1085,6 +1105,22 @@
 								style="color: var(--color-surface-text); font-family: {font.family};"
 							>
 								{font.name}
+							</button>
+						{/each}
+					</div>
+				</div>
+
+					<!-- Font Thickness -->
+					<div>
+						<div class="text-sm font-medium block mb-2" style="color: var(--color-surface-text);">Font Thickness</div>
+					<div class="grid grid-cols-2 gap-2">
+						{#each fontWeightOptions as option}
+							<button
+								onclick={() => updateSetting('fontWeight', option.value)}
+								class="px-3 py-2 rounded-lg border transition-all text-sm {settings.fontWeight === option.value ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10' : 'border-[var(--color-surface-border)] bg-[var(--color-surface-base)]'}"
+								style="color: var(--color-surface-text); font-family: {currentFontFamily}; font-weight: {option.value};"
+							>
+								{option.label}
 							</button>
 						{/each}
 					</div>
@@ -1312,25 +1348,6 @@
 					/>
 				</div>
 
-					<!-- Keep Screen On -->
-						<div class="flex items-center justify-between">
-						<div>
-							<div class="text-sm font-medium block" style="color: var(--color-surface-text);">Keep Screen On</div>
-							<p class="text-xs" style="color: var(--color-surface-text-muted);">Prevent screen from turning off</p>
-						</div>
-						<button
-							type="button"
-							onclick={() => updateSetting('keepScreenOn', !settings.keepScreenOn)}
-							class="relative w-12 h-6 rounded-full transition-colors {settings.keepScreenOn ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
-							aria-label={settings.keepScreenOn ? 'Disable keep screen on' : 'Enable keep screen on'}
-							title={settings.keepScreenOn ? 'Disable keep screen on' : 'Enable keep screen on'}
-						>
-						<span
-							class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform {settings.keepScreenOn ? 'left-7' : 'left-1'}"
-						></span>
-					</button>
-				</div>
-
 				<!-- Reset -->
 				<div class="pt-4 border-t" style="border-color: var(--color-surface-border);">
 					<button
@@ -1347,12 +1364,16 @@
 </div>
 
 <style>
+	.speed-reader-root {
+		--speed-reader-top-bar-height: 56px;
+	}
+
 	.top-nav {
 		position: relative;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		height: 48px;
+		height: var(--speed-reader-top-bar-height);
 		padding: 0 12px;
 		background: var(--color-surface-base, #0f172a);
 		border-bottom: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
@@ -1418,7 +1439,6 @@
 
 	@media (max-width: 768px) {
 		.top-nav {
-			height: 64px;
 			padding: 0 10px;
 		}
 
@@ -1491,13 +1511,15 @@
 
 	.speed-word-orp {
 		display: grid;
-		grid-template-columns: minmax(0, var(--focal-point)) auto 1fr;
+		grid-template-columns: minmax(0, calc(var(--focal-point) - var(--accent-half))) max-content minmax(0, 1fr);
 		align-items: baseline;
 		width: 100%;
 	}
 
 	.speed-word-before {
 		justify-self: end;
+		min-width: 0;
+		overflow: visible;
 		text-align: right;
 	}
 
@@ -1507,5 +1529,13 @@
 
 	.speed-word-after {
 		justify-self: start;
+		min-width: 0;
+		overflow: visible;
+	}
+
+	@media (max-width: 768px) {
+		.speed-reader-root {
+			--speed-reader-top-bar-height: 72px;
+		}
 	}
 </style>

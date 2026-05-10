@@ -356,6 +356,8 @@
 			setStyle(activeToolbarRoot, 'top', '0', 'important');
 			setStyle(activeToolbarRoot, 'left', '0', 'important');
 			setStyle(activeToolbarRoot, 'right', '0', 'important');
+			setStyle(activeToolbarRoot, 'height', 'var(--reader-top-bar-height, 56px)', 'important');
+			setStyle(activeToolbarRoot, 'min-height', 'var(--reader-top-bar-height, 56px)', 'important');
 			setStyle(activeToolbarRoot, 'z-index', '80', 'important');
 			setStyle(activeToolbarRoot, 'transition', 'opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease');
 			setStyle(activeToolbarRoot, 'opacity', toolbarVisible ? '1' : '0', 'important');
@@ -634,9 +636,9 @@
 
 <style>
 	.embedpdf-container {
-		--embedpdf-left-clearance: 44px;
+		--embedpdf-left-clearance: 56px;
 		--embedpdf-center-shift: -4px;
-		--embedpdf-right-clearance: 48px;
+		--embedpdf-right-clearance: 56px;
 		--embedpdf-title-left-clearance: clamp(240px, 32vw, 440px);
 		--embedpdf-title-right-clearance: 112px;
 		position: relative;
@@ -704,7 +706,7 @@
 		align-items: center;
 		justify-content: center;
 		min-width: 0;
-		height: 48px;
+		height: var(--reader-top-bar-height, 56px);
 		padding: 0 16px;
 		pointer-events: none;
 		color: var(--color-surface-text, #e2e8f0);
@@ -760,9 +762,9 @@
 
 	@media (max-width: 640px) {
 		.embedpdf-container {
-			--embedpdf-left-clearance: 42px;
+			--embedpdf-left-clearance: 56px;
 			--embedpdf-center-shift: -2px;
-			--embedpdf-right-clearance: 44px;
+			--embedpdf-right-clearance: 56px;
 			--embedpdf-title-left-clearance: 132px;
 			--embedpdf-title-right-clearance: 108px;
 		}
