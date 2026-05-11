@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { readerSettings, cbxFitModes, cbxScrollModes, type CbxReaderSetting } from '$lib/stores/readerSettings';
+	import ReaderProgressTrack from '$lib/components/ReaderProgressTrack.svelte';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
 	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
 
@@ -42,6 +43,7 @@
 	let lastWheelNavigationAt = 0;
 	let topBarHideTimeout: ReturnType<typeof setTimeout> | null = null;
 	let lastLongStripScrollTop = 0;
+	let preserveChromeAfterSeekUntil = 0;
 	let sessionEnded = false;
 	let handlePageExit: (() => void) | null = null;
 	let requestedFormat = $state('');
@@ -53,9 +55,12 @@
 	let stripPageLayouts = $state(new Map<number, { top: number; width: number; height: number }>());
 	let stripProgressSaveTimeout: ReturnType<typeof setTimeout> | null = null;
 	let closeTasksStarted = false;
+	let readerPointerStart: { id: number; x: number; y: number } | null = null;
+	let readerPointerMoved = false;
 
 	const TOP_BAR_HIDE_DELAY_MS = 2800;
 	const TOP_BAR_SCROLL_DELTA = 12;
+	const SEEK_SCROLL_SUPPRESS_MS = 1400;
 	const TOP_BAR_REVEAL_EDGE_PX = 72;
 	const STRIP_PADDING_PX = 16;
 	const STRIP_PAGE_GAP_PX = 8;
@@ -224,6 +229,15 @@
 		}
 	}
 
+	function toggleTopBarFromCenterTap() {
+		if (controlsNeedToStayVisible()) return;
+		if (topBarVisible) {
+			hideTopBar();
+		} else {
+			showTopBar(settings.scrollMode !== 'long-strip' && settings.scrollMode !== 'infinite');
+		}
+	}
+
 	function scheduleTopBarAutoHide() {
 		clearTopBarHideTimeout();
 		if (controlsNeedToStayVisible() || settings.scrollMode === 'long-strip' || settings.scrollMode === 'infinite') {
@@ -241,6 +255,21 @@
 		if (settings.scrollMode !== 'long-strip' && settings.scrollMode !== 'infinite') {
 			scheduleTopBarAutoHide();
 		}
+	}
+
+	function preserveChromeAfterSeek() {
+		preserveChromeAfterSeekUntil = performance.now() + SEEK_SCROLL_SUPPRESS_MS;
+		showTopBar(false);
+	}
+
+	function isReaderCenterTap(e: PointerEvent, surface: HTMLElement) {
+		const rect = surface.getBoundingClientRect();
+		if (rect.width <= 0 || rect.height <= 0) return false;
+
+		const xRatio = (e.clientX - rect.left) / rect.width;
+		const yRatio = (e.clientY - rect.top) / rect.height;
+
+		return xRatio > 0.28 && xRatio < 0.72 && yRatio > 0.12 && yRatio < 0.88;
 	}
 
 	function isStripMode() {
@@ -357,7 +386,21 @@
 		}, 650);
 	}
 
+	function handleReaderPointerDown(e: PointerEvent) {
+		if (!e.isPrimary) return;
+		readerPointerStart = { id: e.pointerId, x: e.clientX, y: e.clientY };
+		readerPointerMoved = false;
+	}
+
 	function handleReaderPointerMove(e: PointerEvent) {
+		if (readerPointerStart) {
+			const dx = e.clientX - readerPointerStart.x;
+			const dy = e.clientY - readerPointerStart.y;
+			if (Math.hypot(dx, dy) > 10) {
+				readerPointerMoved = true;
+			}
+		}
+
 		if (!settings.autoHideControls || controlsNeedToStayVisible()) return;
 		if (e.clientY <= TOP_BAR_REVEAL_EDGE_PX) {
 			showTopBar(settings.scrollMode !== 'long-strip' && settings.scrollMode !== 'infinite');
@@ -367,10 +410,15 @@
 	function handleReaderPointerUp(e: PointerEvent) {
 		if (controlsNeedToStayVisible()) return;
 		const target = e.target as Element | null;
-		if (target?.closest('input, textarea, select, [contenteditable="true"], .left-sidebar, .right-sidebar, .progress-bar')) {
+		if (target?.closest('input, textarea, select, [contenteditable="true"], .left-sidebar, .right-sidebar, .progress-bar, .reader-progress, .floating-nav')) {
 			return;
 		}
-		showTopBar(settings.scrollMode !== 'long-strip' && settings.scrollMode !== 'infinite');
+		if (readerPointerStart && readerPointerStart.id !== e.pointerId) return;
+		if (readerPointerMoved) return;
+		if (isReaderCenterTap(e, e.currentTarget as HTMLElement)) {
+			toggleTopBarFromCenterTap();
+		}
+		readerPointerStart = null;
 	}
 
 	onDestroy(() => {
@@ -479,7 +527,7 @@
 		if (rect.width <= 0) return null;
 		const x = clientX - rect.left;
 		const percentage = Math.max(0, Math.min(1, x / rect.width));
-		const newPage = Math.round(percentage * numPages);
+		const newPage = Math.max(1, Math.round(percentage * numPages));
 		return newPage >= 1 && newPage <= numPages ? newPage : null;
 	}
 
@@ -492,7 +540,7 @@
 	function handleProgressPointerDown(e: PointerEvent) {
 		e.preventDefault();
 		e.stopPropagation();
-		resetTopBarBehavior();
+		showTopBar(false);
 		isDraggingProgress = true;
 		pendingProgressPage = null;
 		activeProgressPointerId = e.pointerId;
@@ -529,8 +577,8 @@
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
 		e.preventDefault();
 		e.stopPropagation();
-		resetTopBarBehavior();
 		finishProgressPointer(e);
+		preserveChromeAfterSeek();
 	}
 
 	function handleProgressPointerCancel(e: PointerEvent) {
@@ -541,12 +589,12 @@
 	function handleProgressBarKeydown(e: KeyboardEvent) {
 		if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
 			e.preventDefault();
-			resetTopBarBehavior();
 			prevPage();
+			preserveChromeAfterSeek();
 		} else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
 			e.preventDefault();
-			resetTopBarBehavior();
 			nextPage();
+			preserveChromeAfterSeek();
 		}
 	}
 
@@ -631,6 +679,12 @@
 		if (!container) return;
 		const scrollTop = container.scrollTop;
 		updateVisibleStripPages();
+		if (performance.now() < preserveChromeAfterSeekUntil) {
+			showTopBar(false);
+			lastLongStripScrollTop = scrollTop;
+			return;
+		}
+
 		if (!settings.autoHideControls || controlsNeedToStayVisible()) {
 			lastLongStripScrollTop = scrollTop;
 			return;
@@ -686,6 +740,7 @@
 	class="cbx-reader"
 	style="background-color: {settings.backgroundColor};"
 	role="presentation"
+	onpointerdown={handleReaderPointerDown}
 	onpointermove={handleReaderPointerMove}
 	onpointerup={handleReaderPointerUp}
 >
@@ -708,36 +763,8 @@
 				onclick={toggleLeftSidebar}
 				class="nav-btn"
 				class:active={leftSidebarOpen}
-				title="Toggle Sidebar"
+				title="Pages"
 			>
-				<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<line x1="3" y1="6" x2="21" y2="6"></line>
-					<line x1="3" y1="12" x2="21" y2="12"></line>
-					<line x1="3" y1="18" x2="21" y2="18"></line>
-				</svg>
-			</button>
-
-			<div class="nav-divider"></div>
-
-			<div class="page-controls">
-				<button onclick={prevPage} class="nav-btn" disabled={settings.mangaMode || settings.readingDirection === 'rtl' ? currentPage >= numPages : currentPage <= 1} title="Previous Page">
-					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<polyline points="15 18 9 12 15 6"></polyline>
-					</svg>
-				</button>
-
-				<span class="page-display">{currentPage} / {numPages}</span>
-
-				<button onclick={nextPage} class="nav-btn" disabled={settings.mangaMode || settings.readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= numPages} title="Next Page">
-					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<polyline points="9 18 15 12 9 6"></polyline>
-					</svg>
-				</button>
-			</div>
-
-			<div class="nav-divider"></div>
-
-			<button onclick={toggleLeftSidebar} class="nav-btn mobile-secondary" title="Pages">
 				<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 					<rect x="3" y="3" width="7" height="7"></rect>
 					<rect x="14" y="3" width="7" height="7"></rect>
@@ -769,29 +796,34 @@
 			</button>
 		</div>
 
-		<div
-			bind:this={progressBarEl}
-			class="progress-bar"
-			onpointerdown={(e) => handleProgressPointerDown(e)}
-			onpointermove={(e) => handleProgressPointerMove(e)}
-			onpointerup={(e) => handleProgressPointerUp(e)}
-			onpointercancel={(e) => handleProgressPointerCancel(e)}
-			role="slider"
-			aria-label="Reading progress"
-			aria-valuemin="0"
-			aria-valuemax="100"
-			aria-valuenow={numPages > 0 ? Math.round((currentPage / numPages) * 100) : 0}
-			tabindex="0"
-			onkeydown={handleProgressBarKeydown}
-		>
-			<div class="progress-fill" style="--progress: {progress}%;"></div>
-			<div
-				class="progress-thumb"
-				style="left: calc({progress}% - 6px);"
-				role="presentation"
-			></div>
-		</div>
+		<ReaderProgressTrack
+			progress={progress}
+			visible={topBarVisible}
+			variant="top"
+			ariaLabel="Reading progress"
+			ariaValueNow={numPages > 0 ? Math.round((currentPage / numPages) * 100) : 0}
+		/>
 	</header>
+
+	<ReaderProgressTrack
+		bind:element={progressBarEl}
+		progress={progress}
+		visible={topBarVisible}
+		variant="bottom"
+		metaAlign="center"
+		interactive={true}
+		showThumb={true}
+		label={`Page ${currentPage} / ${numPages} • ${Math.max(0, Math.min(100, Math.round(progress)))}%`}
+		ariaLabel="Reading progress"
+		ariaValueMin={1}
+		ariaValueMax={Math.max(numPages, currentPage)}
+		ariaValueNow={currentPage}
+		onpointerdown={(e) => handleProgressPointerDown(e)}
+		onpointermove={(e) => handleProgressPointerMove(e)}
+		onpointerup={(e) => handleProgressPointerUp(e)}
+		onpointercancel={(e) => handleProgressPointerCancel(e)}
+		onkeydown={handleProgressBarKeydown}
+	/>
 
 	<!-- Main Content Area -->
 	<div class="main-content">
@@ -1098,9 +1130,10 @@
 		top: 0;
 		left: 0;
 		right: 0;
-		display: flex;
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
 		align-items: center;
-		justify-content: space-between;
+		column-gap: 16px;
 		height: var(--reader-top-bar-height);
 		padding: 0 12px;
 		background: var(--color-surface-base, #0f172a);
@@ -1124,9 +1157,16 @@
 		gap: 4px;
 	}
 
-	.nav-left { flex: 1; }
-	.nav-center { flex: 2; justify-content: center; }
-	.nav-right { flex: 1; justify-content: flex-end; }
+	.nav-left { min-width: 0; }
+	.nav-center {
+		justify-content: center;
+		min-width: 0;
+		text-align: center;
+	}
+	.nav-right {
+		justify-content: flex-end;
+		min-width: 0;
+	}
 
 	.nav-btn {
 		display: flex;
@@ -1146,27 +1186,11 @@
 	.nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 	.nav-btn.active { background: var(--color-primary-500, #22c55e); color: white; }
 
-	.nav-divider {
-		width: 1px;
-		height: 24px;
-		background: var(--color-surface-border, rgba(55, 65, 81, 0.6));
-		margin: 0 8px;
-	}
-
-	.page-controls { display: flex; align-items: center; gap: 4px; }
-
-	.page-display {
-		min-width: 80px;
-		color: var(--color-surface-text, #e2e8f0);
-		font-size: 14px;
-		text-align: center;
-	}
-
 	.book-title {
 		color: var(--color-surface-text, #e2e8f0);
 		font-size: 14px;
 		font-weight: 500;
-		max-width: 300px;
+		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -1174,56 +1198,6 @@
 
 	.icon { width: 20px; height: 20px; }
 	.icon-lg { width: 24px; height: 24px; }
-
-	.progress-bar {
-		position: absolute;
-		bottom: 0;
-		left: 0;
-		right: 0;
-		height: 8px;
-		background: transparent;
-		cursor: pointer;
-		display: flex;
-		align-items: flex-end;
-		touch-action: none;
-	}
-
-	.progress-fill {
-		position: absolute;
-		left: 0;
-		bottom: 0;
-		height: 3px;
-		background: var(--color-surface-border, rgba(55, 65, 81, 0.6));
-		border-radius: 2px;
-		width: 100%;
-	}
-
-	.progress-fill::after {
-		content: '';
-		position: absolute;
-		left: 0;
-		top: 0;
-		height: 100%;
-		width: var(--progress, 0%);
-		background: var(--color-primary-500, #22c55e);
-		border-radius: 2px;
-	}
-
-	.progress-thumb {
-		position: absolute;
-		bottom: -4px;
-		width: 12px;
-		height: 12px;
-		background: var(--color-primary-500, #22c55e);
-		border: 2px solid var(--color-surface-base, #0f172a);
-		border-radius: 50%;
-		cursor: grab;
-		z-index: 10;
-		transition: left 0.05s ease;
-		touch-action: none;
-	}
-
-	.progress-thumb:hover { transform: scale(1.2); }
 
 	.main-content {
 		flex: 1;
@@ -1538,6 +1512,7 @@
 
 		.top-nav {
 			padding: 0 10px;
+			column-gap: 8px;
 		}
 
 		.nav-left,
@@ -1563,14 +1538,6 @@
 		.icon-lg {
 			width: 22px;
 			height: 22px;
-		}
-
-		.page-controls {
-			gap: 4px;
-		}
-
-		.progress-bar {
-			height: 8px;
 		}
 
 		.left-sidebar,

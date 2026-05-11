@@ -8,6 +8,7 @@
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
 	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
 	import EmbedPDFViewer from '$lib/components/EmbedPDFViewer.svelte';
+	import ReaderProgressTrack from '$lib/components/ReaderProgressTrack.svelte';
 
 	let book = $state<any>(null);
 	let loading = $state(true);
@@ -135,6 +136,7 @@
 	let topBarHideTimeout: ReturnType<typeof setTimeout> | null = null;
 	let topBarVisible = $state(false);
 	let lastContinuousScrollTop = 0;
+	let preserveChromeAfterSeekUntil = 0;
 	let sessionEnded = false;
 	let handlePageExit: (() => void) | null = null;
 	let pdfReaderEl = $state<HTMLDivElement | null>(null);
@@ -161,6 +163,7 @@
 	};
 	const topBarHideDelayMs = 2800;
 	const scrollHideThresholdPx = 8;
+	const seekScrollSuppressMs = 1400;
 	const progressSaveDebounceMs = 750;
 	const continuousPageGapPx = 16;
 	const continuousOverscanPx = 2200;
@@ -772,10 +775,15 @@
 		showTopBar(true);
 	}
 
+	function preserveChromeAfterSeek() {
+		preserveChromeAfterSeekUntil = performance.now() + seekScrollSuppressMs;
+		showTopBar(false);
+	}
+
 	function isInteractiveReaderTarget(target: EventTarget | null) {
 		if (!(target instanceof Element)) return false;
 		return !!target.closest(
-			'button, a, input, textarea, select, label, [contenteditable="true"], .top-nav, .left-sidebar, .right-sidebar, .floating-nav, .progress-bar, .embedpdf-shell-control'
+			'button, a, input, textarea, select, label, [contenteditable="true"], .top-nav, .left-sidebar, .right-sidebar, .floating-nav, .progress-bar, .reader-progress, .embedpdf-shell-control'
 		);
 	}
 
@@ -1200,6 +1208,11 @@
 		lastContinuousScrollTop = scrollTop;
 		void renderVisibleContinuousPages(target);
 
+		if (performance.now() < preserveChromeAfterSeekUntil) {
+			showTopBar(false);
+			return;
+		}
+
 		if (controlsNeedToStayVisible() || scrollTop <= 0) {
 			showTopBar(false);
 			return;
@@ -1214,6 +1227,11 @@
 
 	function handleEmbedPdfScrollActivity(delta: number, scrollTop: number) {
 		if (!settings.autoHideControls || controlsNeedToStayVisible()) return;
+
+		if (performance.now() < preserveChromeAfterSeekUntil) {
+			showTopBar(false);
+			return;
+		}
 
 		if (scrollTop <= 2) {
 			showTopBar(false);
@@ -2098,7 +2116,7 @@
 		if (targetPage !== null) {
 			jumpToPage(targetPage);
 		}
-		resetTopBarBehavior();
+		preserveChromeAfterSeek();
 	}
 
 	function handleProgressPointerUp(e: PointerEvent) {
@@ -2115,7 +2133,7 @@
 
 	function jumpToPage(pageNum: number) {
 		if (pageNum >= 1 && pageNum <= numPages) {
-			showTopBar(true);
+			showTopBar(false);
 			navigateToPage(pageNum, 'auto');
 		}
 	}
@@ -2126,15 +2144,19 @@
 		if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
 			e.preventDefault();
 			jumpToPage(Math.max(1, currentPage - 1));
+			preserveChromeAfterSeek();
 		} else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
 			e.preventDefault();
 			jumpToPage(Math.min(numPages, currentPage + 1));
+			preserveChromeAfterSeek();
 		} else if (e.key === 'Home') {
 			e.preventDefault();
 			jumpToPage(1);
+			preserveChromeAfterSeek();
 		} else if (e.key === 'End') {
 			e.preventDefault();
 			jumpToPage(numPages);
+			preserveChromeAfterSeek();
 		}
 	}
 
@@ -2587,6 +2609,9 @@
 						<line x1="6" y1="6" x2="18" y2="18"></line>
 					</svg>
 				</a>
+				<div class="embedpdf-shell-title" class:top-nav-hidden={!topBarVisible} title={book?.title || 'Loading...'}>
+					<span>{book?.title || 'Loading...'}</span>
+				</div>
 				<button
 					class="embedpdf-shell-control embedpdf-fullscreen-control nav-btn"
 					onclick={toggleFullscreen}
@@ -2599,27 +2624,16 @@
 						<line x1="3" y1="21" x2="10" y2="14"></line>
 					</svg>
 				</button>
-				<div
-					bind:this={pdfProgressBarEl}
-					class="embedpdf-progress progress-bar"
-					onpointerdown={(e) => handleProgressPointerDown(e)}
-					onpointermove={(e) => handleProgressPointerMove(e)}
-					onpointerup={(e) => handleProgressPointerUp(e)}
-					onpointercancel={(e) => handleProgressPointerCancel(e)}
-					onkeydown={(e) => handleProgressBarKeydown(e)}
-					role="slider"
-					aria-label="Reading progress"
-					aria-valuemin="1"
-					aria-valuemax={Math.max(numPages, currentPage)}
-					aria-valuenow={currentPage}
-					tabindex="0"
-				>
-					<div class="progress-fill" style="--progress: {progress}%;"></div>
-					<div
-						class="progress-thumb"
-						style="left: calc({progress}% - 6px);"
-						role="presentation"
-					></div>
+				<div class="embedpdf-top-progress-shell" class:top-nav-hidden={!topBarVisible}>
+					<ReaderProgressTrack
+						progress={progress}
+						visible={topBarVisible}
+						variant="top"
+						ariaLabel="Reading progress"
+						ariaValueMin={1}
+						ariaValueMax={Math.max(numPages, currentPage)}
+						ariaValueNow={currentPage}
+					/>
 				</div>
 			{/if}
 			{#if error}
@@ -2649,6 +2663,27 @@
 				</div>
 			{/if}
 		</div>
+		{#if readerChromeReady}
+			<ReaderProgressTrack
+				bind:element={pdfProgressBarEl}
+				progress={progress}
+				visible={topBarVisible}
+				variant="bottom"
+				metaAlign="center"
+				interactive={true}
+				showThumb={true}
+				label={`Page ${currentPage} / ${Math.max(numPages, currentPage)} • ${Math.max(0, Math.min(100, Math.round(progress)))}%`}
+				ariaLabel="Reading progress"
+				ariaValueMin={1}
+				ariaValueMax={Math.max(numPages, currentPage)}
+				ariaValueNow={currentPage}
+				onpointerdown={(e) => handleProgressPointerDown(e)}
+				onpointermove={(e) => handleProgressPointerMove(e)}
+				onpointerup={(e) => handleProgressPointerUp(e)}
+				onpointercancel={(e) => handleProgressPointerCancel(e)}
+				onkeydown={(e) => handleProgressBarKeydown(e)}
+			/>
+		{/if}
 </div>
 
 <style>
@@ -2701,66 +2736,6 @@
 	.icon {
 		width: 20px;
 		height: 20px;
-	}
-
-	.progress-bar {
-		position: absolute;
-		bottom: 0;
-		left: 0;
-		right: 0;
-		height: 8px;
-		background: transparent;
-		cursor: pointer;
-		display: flex;
-		align-items: flex-end;
-		padding-bottom: 0;
-		touch-action: none;
-	}
-
-	.progress-fill {
-		position: absolute;
-		left: 0;
-		bottom: 0;
-		height: 3px;
-		background: var(--color-surface-border, rgba(55, 65, 81, 0.6));
-		border-radius: 2px;
-		width: 100%;
-	}
-
-	.progress-fill::after {
-		content: '';
-		position: absolute;
-		left: 0;
-		top: 0;
-		height: 100%;
-		width: var(--progress, 0%);
-		background: var(--color-primary-500, #22c55e);
-		border-radius: 2px;
-		transition: width 0.1s ease;
-	}
-
-	.progress-thumb {
-		position: absolute;
-		bottom: -4px;
-		width: 12px;
-		height: 12px;
-		background: var(--color-primary-500, #22c55e);
-		border: 2px solid var(--color-surface-base, #0f172a);
-		border-radius: 50%;
-		cursor: grab;
-		z-index: 10;
-		transition: left 0.05s ease, transform 0.1s ease;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-		touch-action: none;
-	}
-
-	.progress-thumb:hover {
-		transform: scale(1.2);
-	}
-
-	.progress-thumb:active {
-		cursor: grabbing;
-		transform: scale(1.1);
 	}
 
 	.reader-loading-overlay {
@@ -2828,10 +2803,6 @@
 			height: 22px;
 		}
 
-		.progress-bar {
-			height: 8px;
-		}
-
 		.loading-spinner {
 			width: 40px;
 			height: 40px;
@@ -2844,15 +2815,20 @@
 		inset: 0;
 		background: var(--color-surface-base, #0f172a);
 		z-index: 50;
+		--embedpdf-shell-title-width: clamp(220px, 42vw, 560px);
+		--embedpdf-shell-right-reserve: clamp(260px, 38vw, 520px);
 	}
 
 	:global([data-epdf-i="left-group"]) {
-		margin-left: calc(56px + max(0px, env(safe-area-inset-left))) !important;
+		margin-left: auto !important;
+		flex-shrink: 0;
 		transition: opacity 0.18s ease, transform 0.18s ease;
 	}
 
 	:global([data-epdf-i="center-group"]) {
-		transform: translateX(0);
+		margin-left: 0 !important;
+		transform: none !important;
+		flex-shrink: 0;
 		transition: opacity 0.18s ease, transform 0.18s ease;
 	}
 
@@ -2880,6 +2856,14 @@
 		opacity: 0;
 		pointer-events: none;
 		transform: translateY(-10px);
+	}
+
+	:global([data-cryptorum-embedpdf-toolbar="true"]) {
+		display: flex !important;
+		align-items: center !important;
+		justify-content: flex-end !important;
+		gap: 4px !important;
+		padding-left: var(--embedpdf-shell-title-width) !important;
 	}
 
 	.embedpdf-shell-control {
@@ -2928,12 +2912,44 @@
 		left: 0;
 	}
 
-	.embedpdf-progress.progress-bar {
-		top: calc(var(--reader-top-bar-height) - 8px);
-		bottom: auto;
-		height: 8px;
+	.embedpdf-shell-title {
+		position: absolute;
+		top: 0;
+		left: calc(56px + max(0px, env(safe-area-inset-left)));
+		right: calc(var(--embedpdf-shell-right-reserve) + max(0px, env(safe-area-inset-right)));
+		height: var(--reader-top-bar-height);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 0;
+		padding: 0 14px;
+		border-bottom: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
+		background: var(--color-surface-base, #0f172a);
+		color: var(--color-surface-text, #e2e8f0);
+		font-size: 14px;
+		font-weight: 600;
+		line-height: 1.2;
+		pointer-events: none;
 		transition: opacity 0.18s ease, transform 0.18s ease;
 		z-index: 101;
+	}
+
+	.embedpdf-shell-title span {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.embedpdf-top-progress-shell {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: var(--reader-top-bar-height);
+		pointer-events: none;
+		transition: opacity 0.18s ease, transform 0.18s ease;
+		z-index: 120;
 	}
 
 	.embedpdf-viewer-container {
@@ -2952,14 +2968,14 @@
 		transform: translateY(-100%);
 	}
 
-	.pdf-reader.controls-hidden .embedpdf-progress.progress-bar {
+	.pdf-reader.controls-hidden .embedpdf-shell-title,
+	.pdf-reader.controls-hidden .embedpdf-top-progress-shell {
 		opacity: 0;
-		pointer-events: none;
-		transform: translateY(-10px);
+		transform: translateY(-100%);
 	}
 
-	:global(.pdf-reader.controls-hidden [data-overlay-id="page-controls"]),
-	:global(.pdf-reader.controls-hidden [data-overlay-id="page-controls"] *) {
+	:global([data-overlay-id="page-controls"]),
+	:global([data-overlay-id="page-controls"] *) {
 		opacity: 0 !important;
 		visibility: hidden !important;
 		pointer-events: none !important;
@@ -2967,8 +2983,25 @@
 	}
 
 	@media (max-width: 640px) {
-		.embedpdf-progress.progress-bar {
-			top: calc(var(--reader-top-bar-height) - 8px);
+		.embedpdf-wrapper {
+			--embedpdf-shell-title-width: clamp(136px, 38vw, 260px);
+			--embedpdf-shell-right-reserve: clamp(120px, 30vw, 220px);
+		}
+
+		.embedpdf-shell-title {
+			padding: 0 10px;
+			font-size: 13px;
+		}
+	}
+
+	@media (max-width: 420px) {
+		.embedpdf-wrapper {
+			--embedpdf-shell-title-width: 108px;
+			--embedpdf-shell-right-reserve: 104px;
+		}
+
+		.embedpdf-shell-title {
+			padding: 0 8px;
 		}
 	}
 </style>

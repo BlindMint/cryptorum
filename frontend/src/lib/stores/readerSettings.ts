@@ -130,6 +130,7 @@ export interface SpeedReaderSetting {
 	theme: string;
 	letterSpacing: number;
 	focusIndicatorLength: number;
+	showWordCount: boolean;
 }
 
 export interface ReaderSettings {
@@ -263,7 +264,8 @@ export const defaultReaderSettings: ReaderSettings = {
 		keepScreenOn: true,
 		theme: 'dark',
 		letterSpacing: 0,
-		focusIndicatorLength: 20
+		focusIndicatorLength: 20,
+		showWordCount: false
 	}
 };
 
