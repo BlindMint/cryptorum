@@ -110,6 +110,7 @@
 	function isActive(href: string): boolean {
 		const currentPath = $page.url.pathname;
 		const currentSearch = $page.url.search;
+		const currentParams = $page.url.searchParams;
 
 		if (href === '/') {
 			return currentPath === '/' && !currentSearch.includes('library=');
@@ -120,7 +121,8 @@
 		}
 
 		if (href.startsWith('/library?library=')) {
-			return currentSearch.includes(href.split('?')[1]);
+			const expectedLibrary = new URLSearchParams(href.split('?')[1] || '').get('library');
+			return currentPath === '/library' && currentParams.get('library') === expectedLibrary;
 		}
 
 		if (href.startsWith('/shelves/')) {

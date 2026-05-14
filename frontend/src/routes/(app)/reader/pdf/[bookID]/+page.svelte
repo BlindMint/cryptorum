@@ -7,6 +7,7 @@
 	import type { PdfReaderSetting, PdfViewMode } from '$lib/stores/readerSettings';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
 	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
+	import { isBottomSystemGestureStart } from '$lib/utils/system-gesture-guard';
 	import EmbedPDFViewer from '$lib/components/EmbedPDFViewer.svelte';
 	import ReaderProgressTrack from '$lib/components/ReaderProgressTrack.svelte';
 
@@ -36,6 +37,9 @@
 	let embedPdfViewerReady = $state(false);
 	let embedPdfScroll: any = null;
 	let embedPdfRestoringInitialPage = false;
+	let showCurrentSection = $state(true);
+	let pdfLoadRetryToken = $state(0);
+	let pdfLoadRetryAttempts = 0;
 
 	let settings = $state<PdfReaderSetting>({
 		pageSpread: 'off',
@@ -241,6 +245,32 @@
 		return book?.id ? `/book/${book.id}` : '/library';
 	}
 
+	function getPdfDisplayTitle() {
+		const title = String(book?.title || book?.metadata?.title || '').trim();
+		if (title) return title;
+
+		const filePath = String(book?.path || book?.file_path || book?.filename || book?.file_name || '').trim();
+		if (filePath) {
+			const fileName = filePath.split(/[\\/]/).pop();
+			if (fileName) return fileName.replace(/\.[^.]+$/, '');
+		}
+
+		return book ? 'PDF Document' : 'Loading...';
+	}
+
+	function getPdfSourceUrl() {
+		if (!book?.id) return '';
+		const params = new URLSearchParams();
+		if (requestedFormat) {
+			params.set('format', requestedFormat);
+		}
+		if (pdfLoadRetryToken > 0) {
+			params.set('pdf_retry', String(pdfLoadRetryToken));
+		}
+		const query = params.toString();
+		return `/api/books/${book.id}/file${query ? `?${query}` : ''}`;
+	}
+
 	function clearBackgroundWarmup() {
 		backgroundWarmupRunId++;
 		if (backgroundWarmupTimer) {
@@ -342,6 +372,7 @@
 		window.addEventListener('click', globalClickListener);
 
 		unsubscribeReaderSettings = readerSettings.subscribe(s => {
+			showCurrentSection = s.showCurrentSection ?? true;
 			settings = { ...s.pdf };
 		});
 
@@ -1213,14 +1244,15 @@
 			return;
 		}
 
-		if (controlsNeedToStayVisible() || scrollTop <= 0) {
+		const touchLike = typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
+		if (controlsNeedToStayVisible() || (scrollTop <= 0 && !touchLike)) {
 			showTopBar(false);
 			return;
 		}
 
 		if (delta > scrollHideThresholdPx) {
 			hideTopBar();
-		} else if (delta < -scrollHideThresholdPx) {
+		} else if (delta < -scrollHideThresholdPx && !touchLike) {
 			showTopBar(false);
 		}
 	}
@@ -1233,14 +1265,15 @@
 			return;
 		}
 
-		if (scrollTop <= 2) {
+		const touchLike = typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
+		if (scrollTop <= 2 && !touchLike) {
 			showTopBar(false);
 			return;
 		}
 
 		if (delta > scrollHideThresholdPx) {
 			hideTopBar();
-		} else if (delta < -scrollHideThresholdPx) {
+		} else if (delta < -scrollHideThresholdPx && !touchLike) {
 			showTopBar(false);
 		}
 	}
@@ -1253,6 +1286,11 @@
 		const yRatio = (e.clientY - rect.top) / rect.height;
 
 		return xRatio > 0.28 && xRatio < 0.72 && yRatio > 0.12 && yRatio < 0.88;
+	}
+
+	function isTouchLikePointer(e?: PointerEvent | MouseEvent) {
+		if (e && 'pointerType' in e && e.pointerType === 'touch') return true;
+		return typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
 	}
 
 	function handleReaderPointerDown(e: PointerEvent) {
@@ -1285,7 +1323,7 @@
 			}
 		}
 
-		if (!settings.autoHideControls) return;
+		if (!settings.autoHideControls || isTouchLikePointer(e)) return;
 		if (e.clientY <= 72) {
 			showTopBar(true);
 		} else if (pdfReaderEl?.contains(e.target as Node)) {
@@ -2083,6 +2121,9 @@
 
 	function handleProgressPointerDown(e: PointerEvent) {
 		if (numPages <= 0) return;
+		if (isBottomSystemGestureStart(e)) {
+			return;
+		}
 		e.preventDefault();
 		e.stopPropagation();
 		showTopBar(false);
@@ -2202,12 +2243,12 @@
 			if (e.key === 'ArrowUp' || e.key === 'k') {
 				e.preventDefault();
 				if (currentPage > 1) {
-					navigateToPage(currentPage - 1);
+					navigateToPage(currentPage - 1, 'auto');
 				}
 			} else if (e.key === 'ArrowDown' || e.key === 'j' || e.key === ' ') {
 				e.preventDefault();
 				if (currentPage < numPages) {
-					navigateToPage(currentPage + 1);
+					navigateToPage(currentPage + 1, 'auto');
 				}
 			}
 		} else {
@@ -2572,8 +2613,26 @@
 		console.log('EmbedPDF ready, registry:', registry);
 		embedPdfScroll = registry.getPlugin?.('scroll')?.provides?.() ?? null;
 		embedPdfViewerReady = true;
+		pdfLoadRetryAttempts = 0;
 		topBarVisible = true;
 		resetTopBarBehavior();
+	}
+
+	function handleEmbedPdfError(message: string) {
+		const normalized = String(message || '');
+		const retryable =
+			normalized.includes('FPDF_LoadMemDocument') ||
+			normalized.toLowerCase().includes('failed to load document');
+
+		if (retryable && pdfLoadRetryAttempts < 1) {
+			pdfLoadRetryAttempts += 1;
+			embedPdfViewerReady = false;
+			error = '';
+			pdfLoadRetryToken = Date.now();
+			return;
+		}
+
+		error = normalized || 'Failed to load PDF';
 	}
 </script>
 
@@ -2609,8 +2668,11 @@
 						<line x1="6" y1="6" x2="18" y2="18"></line>
 					</svg>
 				</a>
-				<div class="embedpdf-shell-title" class:top-nav-hidden={!topBarVisible} title={book?.title || 'Loading...'}>
-					<span>{book?.title || 'Loading...'}</span>
+				<div class="embedpdf-shell-title" class:top-nav-hidden={!topBarVisible} title={getPdfDisplayTitle()}>
+					<span>{getPdfDisplayTitle()}</span>
+					{#if showCurrentSection}
+						<span class="ml-2 text-xs text-[var(--color-surface-text-muted)]">Page {currentPage} / {Math.max(numPages, currentPage)}</span>
+					{/if}
 				</div>
 				<button
 					class="embedpdf-shell-control embedpdf-fullscreen-control nav-btn"
@@ -2643,17 +2705,19 @@
 				</div>
 			{:else if book && embedPdfProgressReady}
 				<div class="embedpdf-viewer-container">
+					{#key `${book.id}:${requestedFormat}:${pdfLoadRetryToken}`}
 					<EmbedPDFViewer
-						src={`/api/books/${book.id}/file${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`}
-						title={book.title || 'Untitled'}
+						src={getPdfSourceUrl()}
+						title={getPdfDisplayTitle()}
 						initialPage={embedPdfInitialPage}
 						toolbarVisible={readerChromeReady && topBarVisible}
 						onScrollActivity={handleEmbedPdfScrollActivity}
 						onPageChange={handleEmbedPdfPageChange}
 						onReady={handleEmbedPdfReady}
-						onError={(e) => error = String(e)}
+						onError={handleEmbedPdfError}
 						style="height: 100%; width: 100%;"
 					/>
+					{/key}
 				</div>
 			{/if}
 			{#if !error && !embedPdfViewerReady}
@@ -2815,12 +2879,15 @@
 		inset: 0;
 		background: var(--color-surface-base, #0f172a);
 		z-index: 50;
+		--embedpdf-shell-control-size: 42px;
 		--embedpdf-shell-title-width: clamp(220px, 42vw, 560px);
+		--embedpdf-shell-left-reserve: clamp(128px, 18vw, 240px);
 		--embedpdf-shell-right-reserve: clamp(260px, 38vw, 520px);
 	}
 
 	:global([data-epdf-i="left-group"]) {
-		margin-left: auto !important;
+		margin-left: calc(56px + max(0px, env(safe-area-inset-left))) !important;
+		margin-right: auto !important;
 		flex-shrink: 0;
 		transition: opacity 0.18s ease, transform 0.18s ease;
 	}
@@ -2861,9 +2928,9 @@
 	:global([data-cryptorum-embedpdf-toolbar="true"]) {
 		display: flex !important;
 		align-items: center !important;
-		justify-content: flex-end !important;
+		justify-content: flex-start !important;
 		gap: 4px !important;
-		padding-left: var(--embedpdf-shell-title-width) !important;
+		padding-left: 0 !important;
 	}
 
 	.embedpdf-shell-control {
@@ -2871,51 +2938,36 @@
 		align-items: center;
 		justify-content: center;
 		position: absolute;
-		top: 0;
-		width: 56px;
-		height: var(--reader-top-bar-height);
-		border-bottom: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
-		background: var(--color-surface-base, #0f172a);
+		top: calc((var(--reader-top-bar-height) - var(--embedpdf-shell-control-size)) / 2);
+		width: var(--embedpdf-shell-control-size);
+		height: var(--embedpdf-shell-control-size);
+		border: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
+		background: color-mix(in srgb, var(--color-surface-base, #0f172a) 92%, transparent);
 		color: var(--color-surface-text, #e2e8f0);
 		cursor: pointer;
 		text-decoration: none;
 		transition: opacity 0.18s ease, transform 0.18s ease, background-color 0.16s ease;
-		z-index: 100;
+		z-index: 130;
 	}
 
 	.embedpdf-shell-control::after {
-		content: '';
-		position: absolute;
-		top: 50%;
-		width: 1px;
-		height: 24px;
-		background: var(--color-surface-border, rgba(55, 65, 81, 0.6));
-		transform: translateY(-50%);
-		pointer-events: none;
+		display: none;
 	}
 
 	.embedpdf-close-control {
-		left: max(0px, env(safe-area-inset-left));
-		border-radius: 0 0 8px 0;
-	}
-
-	.embedpdf-close-control::after {
-		right: 0;
+		left: calc(6px + max(0px, env(safe-area-inset-left)));
+		border-radius: 10px;
 	}
 
 	.embedpdf-fullscreen-control {
-		right: max(0px, env(safe-area-inset-right));
-		border-radius: 0 0 0 8px;
-	}
-
-	.embedpdf-fullscreen-control::after {
-		left: 0;
+		right: calc(6px + max(0px, env(safe-area-inset-right)));
+		border-radius: 10px;
 	}
 
 	.embedpdf-shell-title {
 		position: absolute;
 		top: 0;
-		left: calc(56px + max(0px, env(safe-area-inset-left)));
+		left: calc(var(--embedpdf-shell-left-reserve) + max(0px, env(safe-area-inset-left)));
 		right: calc(var(--embedpdf-shell-right-reserve) + max(0px, env(safe-area-inset-right)));
 		height: var(--reader-top-bar-height);
 		display: flex;
@@ -2931,7 +2983,7 @@
 		line-height: 1.2;
 		pointer-events: none;
 		transition: opacity 0.18s ease, transform 0.18s ease;
-		z-index: 101;
+		z-index: 110;
 	}
 
 	.embedpdf-shell-title span {
@@ -2965,7 +3017,7 @@
 	.pdf-reader.controls-hidden .embedpdf-shell-control {
 		opacity: 0;
 		pointer-events: none;
-		transform: translateY(-100%);
+		transform: translateY(calc(-1 * var(--reader-top-bar-height)));
 	}
 
 	.pdf-reader.controls-hidden .embedpdf-shell-title,
@@ -2984,7 +3036,9 @@
 
 	@media (max-width: 640px) {
 		.embedpdf-wrapper {
+			--embedpdf-shell-control-size: 44px;
 			--embedpdf-shell-title-width: clamp(136px, 38vw, 260px);
+			--embedpdf-shell-left-reserve: 112px;
 			--embedpdf-shell-right-reserve: clamp(120px, 30vw, 220px);
 		}
 
@@ -2997,6 +3051,7 @@
 	@media (max-width: 420px) {
 		.embedpdf-wrapper {
 			--embedpdf-shell-title-width: 108px;
+			--embedpdf-shell-left-reserve: 104px;
 			--embedpdf-shell-right-reserve: 104px;
 		}
 

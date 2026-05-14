@@ -5,11 +5,12 @@
 	import { browser } from '$app/environment';
 	import ePub from 'epubjs';
 	import { readerSettings, epubThemes, fontFamilies, fontWeightOptions, type EpubReaderSetting } from '$lib/stores/readerSettings';
-	import { currentTheme, resolveThemeColors, type FullTheme } from '$lib/stores/theme';
+	import { currentTheme, resolveThemeColors, addCustomTheme, removeCustomTheme, generateId, type FullTheme } from '$lib/stores/theme';
 	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 	import ReaderProgressTrack from '$lib/components/ReaderProgressTrack.svelte';
 	import { getPreferredTextFormat, getReaderRouteKind, normalizeBookFormat } from '$lib/utils/book-formats';
 	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
+	import { isBottomSystemGestureStart } from '$lib/utils/system-gesture-guard';
 	import {
 		getCachedBook,
 		cacheBook,
@@ -39,6 +40,7 @@
 	let appTheme = $state<FullTheme | null>(null);
 	let closeTasksStarted = false;
 	let readerReady = $state(false);
+	let showCurrentSection = $state(true);
 
 	let settings = $state<EpubReaderSetting>({
 		fontFamily: 'serif',
@@ -202,7 +204,8 @@
 		}
 
 		readerSettings.subscribe(s => {
-			settings = { ...s.epub };
+			showCurrentSection = s.showCurrentSection ?? true;
+			settings = { ...s.epub, theme: s.readerTheme || s.epub.theme };
 			applyTheme(settings.theme);
 			if (rendition) {
 				updateTypographyOverrides();
@@ -401,6 +404,10 @@
 		return xRatio > 0.28 && xRatio < 0.72 && yRatio > 0.12 && yRatio < 0.88;
 	}
 
+	function isTouchLikePointer(e?: PointerEvent) {
+		return e?.pointerType === 'touch' || (typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches);
+	}
+
 	function handleReaderPointerDown(e: PointerEvent) {
 		if (!e.isPrimary) return;
 		readerPointerStart = { id: e.pointerId, x: e.clientX, y: e.clientY };
@@ -416,7 +423,7 @@
 			}
 		}
 
-		if (!settings.autoHideControls || controlsNeedToStayVisible()) return;
+		if (!settings.autoHideControls || controlsNeedToStayVisible() || isTouchLikePointer(e)) return;
 		if (e.clientY <= TOP_BAR_REVEAL_EDGE_PX) {
 			showTopBar(!settings.continuousMode);
 		}
@@ -718,9 +725,31 @@
 		});
 	}
 
+	function addReaderTheme() {
+		const name = window.prompt('Theme name');
+		if (!name?.trim()) return;
+		const foreground = window.prompt('Font color', '#cdd6f4') || '#cdd6f4';
+		const background = window.prompt('Background color', '#1e1e2e') || '#1e1e2e';
+		const id = generateId();
+		addCustomTheme({ id, name: name.trim(), foreground, background });
+		void updateSetting('theme', id);
+	}
+
+	function deleteReaderTheme(themeId: string, themeName: string) {
+		if (!confirm(`Remove ${themeName}?`)) return;
+		removeCustomTheme(themeId);
+		if (settings.theme === themeId) {
+			void updateSetting('theme', 'catppuccin');
+		}
+	}
+
 	async function updateSetting(key: string, value: any) {
 		settings = { ...settings, [key]: value };
-		readerSettings.updateEpub({ [key]: value });
+		if (key === 'theme') {
+			readerSettings.updateReaderTheme(value);
+		} else {
+			readerSettings.updateEpub({ [key]: value });
+		}
 
 		if (key === 'theme') {
 			applyTheme(value);
@@ -875,23 +904,48 @@
 		return epubToc?.length || 1;
 	}
 
+	function normalizeTocText(value: string) {
+		return value.replace(/\s+/g, ' ').trim().toLowerCase();
+	}
+
+	function findContinuousTocTarget(item: any): HTMLElement | null {
+		if (!continuousScrollEl) return null;
+
+		const ids = [
+			item.id,
+			item.href?.includes('#') ? item.href.split('#').pop() : null
+		].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+		for (const id of ids) {
+			const escaped = CSS.escape(id);
+			const direct = continuousScrollEl.querySelector<HTMLElement>(`#${escaped}, a[name="${escaped}"]`);
+			if (direct) return direct;
+
+			const suffixMatch = Array.from(continuousScrollEl.querySelectorAll<HTMLElement>('[id], a[name]'))
+				.find((el) => el.id.endsWith(id) || el.getAttribute('name')?.endsWith(id));
+			if (suffixMatch) return suffixMatch;
+		}
+
+		const label = normalizeTocText(item.label || '');
+		if (!label) return null;
+
+		return Array.from(continuousScrollEl.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6, [role="heading"]'))
+			.find((el) => normalizeTocText(el.textContent || '') === label) || null;
+	}
+
 	function goToTocItem(item: any) {
+		currentChapter = item.label || currentChapter;
 		if (settings.continuousMode) {
-			// Navigate by scrolling to the heading element in continuous content
-			if (item.id && continuousScrollEl) {
-				const el = continuousScrollEl.querySelector('#' + CSS.escape(item.id)) as HTMLElement;
-				if (el) {
-					el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-				}
+			const target = findContinuousTocTarget(item);
+			if (target) {
+				target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 			}
-			leftSidebarOpen = false;
 			resetTopBarBehavior();
 			return;
 		}
 		if (rendition && item.href) {
 			resetTopBarBehavior();
 			rendition.display(item.href);
-			leftSidebarOpen = false;
 		}
 	}
 
@@ -921,6 +975,9 @@
 	}
 
 	function handleProgressPointerDown(e: PointerEvent) {
+		if (isBottomSystemGestureStart(e)) {
+			return;
+		}
 		e.preventDefault();
 		e.stopPropagation();
 		showTopBar(false);
@@ -1528,11 +1585,12 @@
 		}
 
 		const delta = scrollTop - lastContinuousScrollTop;
-		if (scrollTop <= 2) {
+		const touchLike = typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
+		if (scrollTop <= 2 && !touchLike) {
 			showTopBar(false);
 		} else if (delta > TOP_BAR_SCROLL_DELTA) {
 			hideTopBar();
-		} else if (delta < -TOP_BAR_SCROLL_DELTA) {
+		} else if (delta < -TOP_BAR_SCROLL_DELTA && !touchLike) {
 			showTopBar(false);
 		}
 
@@ -1646,7 +1704,7 @@
 
 <div
 	class="epub-reader"
-	style="background-color: {epubThemes.find(t => t.id === settings.theme)?.bg || '#111111'};"
+	style="background-color: {getReaderTheme(settings.theme).background};"
 	role="presentation"
 	onpointerdown={handleReaderPointerDown}
 	onpointermove={handleReaderPointerMove}
@@ -1708,7 +1766,7 @@
 
 			<div class="nav-center">
 				<span class="book-title">{book?.title || 'Loading...'}</span>
-					{#if currentChapter}
+					{#if showCurrentSection && currentChapter}
 						<span class="chapter-title">{currentChapter}</span>
 					{/if}
 				</div>
@@ -2052,6 +2110,21 @@
 					</div>
 
 					<div class="settings-section">
+						<div class="settings-label">Font Weight</div>
+						<div class="grid grid-cols-2 gap-2">
+							{#each fontWeightOptions as option}
+								<button
+									onclick={() => updateSetting('fontWeight', option.value)}
+									class="font-btn"
+									class:active={settings.fontWeight === option.value}
+								>
+									{option.label}
+								</button>
+							{/each}
+						</div>
+					</div>
+
+					<div class="settings-section">
 						<div class="settings-label">Line Height: {settings.lineHeight.toFixed(1)}</div>
 						<div class="range-row">
 							<button onclick={() => updateSetting('lineHeight', Math.max(1.0, settings.lineHeight - 0.1))} class="range-btn">−</button>
@@ -2104,16 +2177,25 @@
 							{/each}
 							{#if appTheme?.appearance.customThemes?.length}
 								{#each appTheme.appearance.customThemes as customTheme}
-									<button
-										onclick={() => updateSetting('theme', customTheme.id)}
-										class="theme-btn"
-										class:active={settings.theme === customTheme.id}
-									>
-										<ThemePreviewSwatch background={customTheme.background} foreground={customTheme.foreground} sizeClass="h-8 w-8" />
-										<span>{customTheme.name}</span>
-									</button>
+									<div class="theme-custom-wrap">
+										<button
+											onclick={() => updateSetting('theme', customTheme.id)}
+											class="theme-btn"
+											class:active={settings.theme === customTheme.id}
+										>
+											<ThemePreviewSwatch background={customTheme.background} foreground={customTheme.foreground} sizeClass="h-8 w-8" />
+											<span>{customTheme.name}</span>
+										</button>
+										<button class="theme-delete-btn" onclick={() => deleteReaderTheme(customTheme.id, customTheme.name)} aria-label="Remove {customTheme.name}">
+											×
+										</button>
+									</div>
 								{/each}
 							{/if}
+							<button class="theme-btn theme-add-btn" onclick={addReaderTheme}>
+								<span class="theme-add-icon">+</span>
+								<span>Add Theme</span>
+							</button>
 						</div>
 					</div>
 
@@ -2253,11 +2335,22 @@
 
 					<div class="settings-section">
 						<label class="toggle-option">
-							<span>Use Standard Fullscreen</span>
+							<span class="settings-label-text">Use Standard Fullscreen</span>
 							<input
 								type="checkbox"
 								checked={settings.useStandardFullscreen}
 								onchange={(e) => updateSetting('useStandardFullscreen', e.currentTarget.checked)}
+							/>
+						</label>
+					</div>
+
+					<div class="settings-section">
+						<label class="toggle-option">
+							<span class="settings-label-text">Show Current Section</span>
+							<input
+								type="checkbox"
+								checked={showCurrentSection}
+								onchange={(e) => readerSettings.update((s) => ({ ...s, showCurrentSection: e.currentTarget.checked }))}
 							/>
 						</label>
 					</div>
@@ -2919,6 +3012,58 @@
 
 	.theme-btn:hover { border-color: var(--color-surface-border, rgba(55, 65, 81, 0.6)); }
 	.theme-btn.active { border-color: var(--color-primary-500, #22c55e); }
+
+	.theme-custom-wrap {
+		position: relative;
+	}
+
+	.theme-custom-wrap .theme-btn {
+		width: 100%;
+	}
+
+	.theme-delete-btn {
+		position: absolute;
+		top: -6px;
+		right: -6px;
+		width: 20px;
+		height: 20px;
+		border: 1px solid rgba(248, 113, 113, 0.45);
+		border-radius: 999px;
+		background: rgba(127, 29, 29, 0.9);
+		color: rgb(254, 202, 202);
+		font-size: 14px;
+		line-height: 1;
+	}
+
+	.theme-add-btn {
+		border-style: dashed;
+		border-color: var(--color-surface-border, rgba(55, 65, 81, 0.6));
+	}
+
+	.theme-add-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		border-radius: 999px;
+		border: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
+		font-size: 18px;
+	}
+
+	.toggle-option {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		color: var(--color-surface-text, #e2e8f0);
+	}
+
+	.settings-label-text {
+		color: var(--color-surface-text, #e2e8f0);
+		font-size: 12px;
+		font-weight: 500;
+	}
 
 	.max-width-control {
 		display: flex;

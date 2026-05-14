@@ -2,9 +2,8 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { browser } from '$app/environment';
 	import { readerSettings, speedReaderThemes, fontFamilies, fontWeightOptions, resolveFontFamily, type SpeedReaderSetting } from '$lib/stores/readerSettings';
-	import { currentTheme as appThemeStore, resolveThemeColors, type FullTheme } from '$lib/stores/theme';
+	import { currentTheme as appThemeStore, resolveThemeColors, addCustomTheme, removeCustomTheme, generateId, type FullTheme } from '$lib/stores/theme';
 	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
 
@@ -23,6 +22,7 @@
 	let showControls = $state(true);
 	let showSettings = $state(false);
 	let showWpmMenu = $state(false);
+	let activeSettingsTab = $state<'reading' | 'typography' | 'focus'>('reading');
 	let controlsTimeout: ReturnType<typeof setTimeout> | null = null;
 	let containerEl: HTMLDivElement;
 	let settingsPanelRef: HTMLDivElement | null = $state(null);
@@ -152,7 +152,7 @@
 		sentencePause: 350,
 		autoSentencePause: true,
 		keepScreenOn: true,
-		theme: 'dark',
+		theme: 'catppuccin',
 		letterSpacing: 0,
 		focusIndicatorLength: 20,
 		showWordCount: false
@@ -183,7 +183,7 @@
 	});
 
 	const unsubSettings = readerSettings.subscribe(s => {
-		settings = { ...s.speedReader };
+		settings = { ...s.speedReader, theme: s.readerTheme || s.speedReader.theme };
 		updateReaderTheme();
 	});
 
@@ -589,7 +589,37 @@
 
 	function updateSetting(key: string, value: any) {
 		settings = { ...settings, [key]: value };
-		readerSettings.updateSpeedReader({ [key]: value });
+		if (key === 'theme') {
+			readerSettings.updateReaderTheme(value);
+		} else {
+			readerSettings.updateSpeedReader({ [key]: value });
+		}
+	}
+
+	function addReaderTheme() {
+		const name = window.prompt('Theme name');
+		if (!name?.trim()) return;
+		const foreground = window.prompt('Text color', readerTheme.text);
+		if (!foreground?.trim()) return;
+		const background = window.prompt('Background color', readerTheme.bg);
+		if (!background?.trim()) return;
+
+		const id = generateId();
+		addCustomTheme({
+			id,
+			name: name.trim(),
+			foreground: foreground.trim(),
+			background: background.trim()
+		});
+		updateSetting('theme', id);
+	}
+
+	function deleteReaderTheme(themeId: string, themeName: string) {
+		if (!window.confirm(`Remove theme "${themeName}"?`)) return;
+		removeCustomTheme(themeId);
+		if (settings.theme === themeId) {
+			updateSetting('theme', 'catppuccin');
+		}
 	}
 
 	function formatProgress(): string {
@@ -1131,9 +1161,48 @@
 		<div
 			bind:this={settingsPanelRef}
 			class="fixed right-0 w-[480px] shadow-xl z-[60] flex flex-col transform transition-transform duration-300"
-			style="top: var(--speed-reader-top-bar-height); height: calc(100vh - var(--speed-reader-top-bar-height)); background-color: var(--color-surface-overlay); border-left: 1px solid var(--color-surface-border);"
+			style="
+				top: var(--speed-reader-top-bar-height);
+				height: calc(100vh - var(--speed-reader-top-bar-height));
+				background-color: {readerTheme.bg}f2;
+				border-left: 1px solid {readerTheme.text}26;
+				color: {readerTheme.text};
+				backdrop-filter: blur(18px);
+				--color-surface-text: {readerTheme.text};
+				--color-surface-text-muted: {readerTheme.text}99;
+				--color-surface-border: {readerTheme.text}26;
+				--color-surface-base: {readerTheme.text}0f;
+				--color-surface-overlay: {readerTheme.bg}f2;
+				--color-surface-700: {readerTheme.text}18;
+				--color-surface-600: {readerTheme.text}24;
+			"
 		>
 			<div class="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
+				<div class="grid grid-cols-3 gap-2 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
+					<button
+						type="button"
+						onclick={() => activeSettingsTab = 'reading'}
+						class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {activeSettingsTab === 'reading' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+					>
+						Reading
+					</button>
+					<button
+						type="button"
+						onclick={() => activeSettingsTab = 'typography'}
+						class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {activeSettingsTab === 'typography' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+					>
+						Typography
+					</button>
+					<button
+						type="button"
+						onclick={() => activeSettingsTab = 'focus'}
+						class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {activeSettingsTab === 'focus' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+					>
+						Focus
+					</button>
+				</div>
+
+				{#if activeSettingsTab === 'typography'}
 					<!-- Theme -->
 					<div>
 						<div class="text-sm font-medium block mb-2" style="color: var(--color-surface-text);">Theme</div>
@@ -1149,15 +1218,33 @@
 						{/each}
 						{#if appTheme?.appearance.customThemes?.length}
 							{#each appTheme.appearance.customThemes as customTheme}
-								<button
-									onclick={() => updateSetting('theme', customTheme.id)}
-									class="flex flex-col items-center p-2 rounded-lg border-2 transition-all text-sm {settings.theme === customTheme.id ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10' : 'border-[var(--color-surface-border)] hover:border-[var(--color-surface-500)]'}"
-								>
-									<ThemePreviewSwatch background={customTheme.background} foreground={customTheme.foreground} sizeClass="h-8 w-8 mb-1" />
-									<span class="text-xs text-[var(--color-surface-text)]">{customTheme.name}</span>
-								</button>
+								<div class="relative">
+									<button
+										onclick={() => updateSetting('theme', customTheme.id)}
+										class="flex w-full flex-col items-center p-2 rounded-lg border-2 transition-all text-sm {settings.theme === customTheme.id ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10' : 'border-[var(--color-surface-border)] hover:border-[var(--color-surface-500)]'}"
+									>
+										<ThemePreviewSwatch background={customTheme.background} foreground={customTheme.foreground} sizeClass="h-8 w-8 mb-1" />
+										<span class="text-xs text-[var(--color-surface-text)]">{customTheme.name}</span>
+									</button>
+									<button
+										type="button"
+										onclick={() => deleteReaderTheme(customTheme.id, customTheme.name)}
+										class="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-surface-base)] text-sm text-[var(--color-surface-text-muted)] shadow hover:text-[var(--color-surface-text)]"
+										aria-label="Remove {customTheme.name}"
+									>
+										×
+									</button>
+								</div>
 							{/each}
 						{/if}
+						<button
+							type="button"
+							onclick={addReaderTheme}
+							class="flex min-h-[72px] flex-col items-center justify-center rounded-lg border-2 border-dashed border-[var(--color-surface-border)] p-2 text-sm text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)] hover:text-[var(--color-surface-text)]"
+						>
+							<span class="text-xl leading-none">+</span>
+							<span class="text-xs">Add Theme</span>
+						</button>
 					</div>
 					<p class="text-xs mt-1" style="color: var(--color-surface-text-muted);">Applies to the reading background and foreground.</p>
 				</div>
@@ -1212,6 +1299,7 @@
 					/>
 				</div>
 
+				{:else if activeSettingsTab === 'focus'}
 					<!-- Focal Point -->
 					<div>
 						<div class="flex justify-between mb-2">
@@ -1245,25 +1333,6 @@
 						>
 						<span
 							class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform {settings.centerWord ? 'left-7' : 'left-1'}"
-						></span>
-					</button>
-				</div>
-
-					<!-- Word Count Toggle -->
-						<div class="flex items-center justify-between">
-						<div>
-							<div class="text-sm font-medium block" style="color: var(--color-surface-text);">Show Word Count</div>
-							<p class="text-xs" style="color: var(--color-surface-text-muted);">Show current word and total words beside progress</p>
-						</div>
-						<button
-							type="button"
-							onclick={() => updateSetting('showWordCount', !settings.showWordCount)}
-							class="relative w-12 h-6 rounded-full transition-colors {settings.showWordCount ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
-							aria-label={settings.showWordCount ? 'Hide word count' : 'Show word count'}
-							title={settings.showWordCount ? 'Hide word count' : 'Show word count'}
-						>
-						<span
-							class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform {settings.showWordCount ? 'left-7' : 'left-1'}"
 						></span>
 					</button>
 				</div>
@@ -1379,6 +1448,44 @@
 					</button>
 				</div>
 
+				{:else}
+					<!-- Reading Speed -->
+					<div>
+						<div class="flex justify-between mb-2">
+							<div class="text-sm font-medium" style="color: var(--color-surface-text);">Words Per Minute</div>
+							<span class="text-sm" style="color: var(--color-surface-text-muted);">{settings.wpm}</span>
+						</div>
+						<input
+							type="range"
+							min="100"
+							max="1000"
+							step="10"
+							value={settings.wpm}
+							oninput={(e) => updateWpm(parseInt(e.currentTarget.value))}
+							class="w-full h-2 rounded-lg appearance-none cursor-pointer"
+							style="background-color: var(--color-surface-700);"
+						/>
+					</div>
+
+					<!-- Word Count Toggle -->
+					<div class="flex items-center justify-between">
+						<div>
+							<div class="text-sm font-medium block" style="color: var(--color-surface-text);">Show Word Count</div>
+							<p class="text-xs" style="color: var(--color-surface-text-muted);">Show current word and total words beside progress</p>
+						</div>
+						<button
+							type="button"
+							onclick={() => updateSetting('showWordCount', !settings.showWordCount)}
+							class="relative w-12 h-6 rounded-full transition-colors {settings.showWordCount ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
+							aria-label={settings.showWordCount ? 'Hide word count' : 'Show word count'}
+							title={settings.showWordCount ? 'Hide word count' : 'Show word count'}
+						>
+							<span
+								class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform {settings.showWordCount ? 'left-7' : 'left-1'}"
+							></span>
+						</button>
+					</div>
+
 					<!-- Automatic Sentence Pause -->
 						<div class="flex items-center justify-between">
 						<div>
@@ -1434,6 +1541,8 @@
 						style="background-color: var(--color-surface-700);"
 					/>
 				</div>
+
+				{/if}
 
 				<!-- Reset -->
 				<div class="pt-4 border-t" style="border-color: var(--color-surface-border);">

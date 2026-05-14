@@ -788,27 +788,28 @@
 								onclick={() => showSortMenu = false}
 							></button>
 						{/if}
-						<button
-							onclick={() => showSortMenu = !showSortMenu}
-							aria-label="Sort results"
-							class="inline-flex h-10 items-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] sm:px-4"
-						>
-							<span class="hidden sm:inline">Sort</span>
-							<span class="ml-0 text-sm text-[var(--color-surface-text-muted)] sm:ml-2">{currentSortLabel()}</span>
-							<span class="ml-1 text-sm text-[var(--color-primary-400)]" aria-label={sortDirectionLabel()}>{sortDirectionArrow()}</span>
-							<svg class="ml-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-							</svg>
-						</button>
-						<button
-							type="button"
-							onclick={toggleSortDirection}
-							class="ml-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-400)] transition-colors hover:bg-[var(--color-surface-700)]"
-							aria-label="Toggle sort direction"
-							title={sortDirectionLabel()}
-						>
-							{sortDirectionArrow()}
-						</button>
+						<div class="inline-flex h-10 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
+							<button
+								onclick={() => showSortMenu = !showSortMenu}
+								aria-label="Sort results"
+								class="inline-flex items-center px-3 font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] sm:px-4"
+							>
+								<span class="hidden sm:inline">Sort</span>
+								<span class="ml-0 text-sm text-[var(--color-surface-text-muted)] sm:ml-2">{currentSortLabel()}</span>
+								<svg class="ml-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+								</svg>
+							</button>
+							<button
+								type="button"
+								onclick={toggleSortDirection}
+								class="inline-flex w-10 items-center justify-center border-l border-[var(--color-surface-border)] text-[var(--color-primary-400)] transition-colors hover:bg-[var(--color-surface-700)]"
+								aria-label="Toggle sort direction"
+								title={sortDirectionLabel()}
+							>
+								{sortDirectionArrow()}
+							</button>
+						</div>
 						{#if showSortMenu}
 							<div class="absolute right-0 top-full z-40 mt-2 w-48 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-1 shadow-lg">
 								{#each sortOptions as option}
@@ -818,7 +819,7 @@
 									>
 										<span>{option.label}</span>
 										{#if sortBy === option.value}
-											<span class="text-xs">{sortDirectionArrow()}</span>
+											<span class="text-xs">✓</span>
 										{/if}
 									</button>
 								{/each}
@@ -928,7 +929,7 @@
 										placeholderSize="md"
 									/>
 									{#if book.status === 'reading' || book.status === 'finished'}
-										<span class="absolute top-1 right-1 z-10 w-2.5 h-2.5 rounded-full bg-[var(--color-primary-500)]"></span>
+										<span class="absolute bottom-4 right-2 z-10 h-2.5 w-2.5 rounded-full border border-black/30 bg-[var(--color-primary-500)] shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></span>
 									{/if}
 									{#if book.opened && book.percent > 0}
 										<div class="absolute bottom-1.5 left-0 right-0 z-10 h-1 bg-slate-700">

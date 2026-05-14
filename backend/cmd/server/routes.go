@@ -205,6 +205,7 @@ func initRoutes(r *chi.Mux) {
 			r.Route("/{bookID}", func(r chi.Router) {
 				r.Get("/", getBookHandler)
 				r.Put("/", updateBookHandler)
+				r.Patch("/status", updateBookStatusHandler)
 				r.Delete("/", deleteBookHandler)
 				r.Get("/files", getBookFilesHandler)
 				r.Get("/pdf/pages", getPdfPageCountHandler)
@@ -421,6 +422,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	current := getUserFromContext(r.Context())
 	libraryID := r.URL.Query().Get("library_id")
 	status := r.URL.Query().Get("status")
+	searchQuery := strings.TrimSpace(r.URL.Query().Get("q"))
 	author := r.URL.Query().Get("author")
 	series := r.URL.Query().Get("series")
 	genre := r.URL.Query().Get("genre")
@@ -514,6 +516,20 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	if status != "" {
 		for _, value := range queryValues("status", false) {
 			addFilterCondition("COALESCE(rp.status, 'unread') = ?", value)
+		}
+	}
+
+	if searchQuery != "" {
+		searchText := `LOWER(
+			COALESCE(bm.title, '') || ' ' ||
+			COALESCE(bm.authors, '') || ' ' ||
+			COALESCE(bm.description, '') || ' ' ||
+			COALESCE(bm.series, '') || ' ' ||
+			COALESCE(bm.isbn, '') || ' ' ||
+			COALESCE(bm.asin, '')
+		)`
+		for _, token := range searchTokens(searchQuery) {
+			addFilterCondition(searchText+" LIKE ?", "%"+token+"%")
 		}
 	}
 
@@ -849,6 +865,56 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func updateBookStatusHandler(w http.ResponseWriter, r *http.Request) {
+	bookID := chi.URLParam(r, "bookID")
+	current := getUserFromContext(r.Context())
+	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid book ID")
+		return
+	}
+	allowed, err := canAccessBook(current, bookIDInt)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
+		return
+	}
+	if !allowed {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.Status != "unread" && req.Status != "reading" && req.Status != "finished" {
+		errorResponse(w, http.StatusBadRequest, "Invalid reading status")
+		return
+	}
+
+	now := time.Now().Unix()
+	_, err = appDB.Exec(`
+		INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
+		VALUES (?, ?, 0, ?, ?)
+		ON CONFLICT(book_id) DO UPDATE SET
+			status = excluded.status,
+			updated_at = excluded.updated_at,
+			owner_user_id = excluded.owner_user_id
+	`, bookIDInt, req.Status, now, current.ID)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update reading status")
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"status":     req.Status,
+		"updated_at": now,
+	})
 }
 
 // deleteBookHandler deletes a book and all associated data
@@ -2859,13 +2925,16 @@ func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	readerSettings := map[string]interface{}{
 		"keepScreenOnWhileReading": true,
 		"keepScreenOnWhileAppOpen": false,
+		"readerTheme":              "catppuccin",
+		"showCurrentSection":       true,
+		"settingsUpdatedAt":        int64(0),
 		"epub": map[string]interface{}{
 			"fontFamily":     "serif",
 			"fontSize":       16,
 			"lineHeight":     1.5,
 			"margin":         20,
 			"textAlign":      "justify",
-			"theme":          "light",
+			"theme":          "catppuccin",
 			"flow":           "scrolled",
 			"continuousMode": true,
 		},
@@ -2882,6 +2951,9 @@ func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		"audio": map[string]interface{}{
 			"playbackSpeed": 1.0,
 			"autoAdvance":   false,
+		},
+		"speedReader": map[string]interface{}{
+			"theme": "catppuccin",
 		},
 	}
 	var storedReaderSettings string
@@ -2995,7 +3067,7 @@ func getCbxPageCountHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filePath = translateHostPathToContainerPath(filePath)
-	count, err := countCbzPages(filePath)
+	count, err := countCbxPages(filePath, format)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to count pages")
 		return

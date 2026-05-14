@@ -307,6 +307,8 @@
 		const activeToolbarRoot = toolbarRoot ?? lastToolbarRoot;
 		const rightClearance =
 			'calc(var(--embedpdf-right-clearance, 48px) + max(0px, env(safe-area-inset-right)))';
+		const leftClearance =
+			'calc(var(--embedpdf-left-clearance, 56px) + max(0px, env(safe-area-inset-left)))';
 
 		for (const element of queryAllDeep(
 			[
@@ -328,12 +330,14 @@
 		}
 
 		if (leftGroup) {
-			setStyle(leftGroup, 'margin-left', 'auto', 'important');
+			setStyle(leftGroup, 'margin-left', leftClearance, 'important');
+			setStyle(leftGroup, 'margin-right', 'auto', 'important');
 			setStyle(leftGroup, 'flex-shrink', '0', 'important');
 		}
 
 		if (centerGroup) {
 			setStyle(centerGroup, 'margin-left', '0', 'important');
+			setStyle(centerGroup, 'margin-right', '0', 'important');
 			setStyle(centerGroup, 'transform', 'none', 'important');
 			setStyle(centerGroup, 'flex-shrink', '0', 'important');
 		}
@@ -358,9 +362,9 @@
 			setStyle(activeToolbarRoot, 'right', '0', 'important');
 			setStyle(activeToolbarRoot, 'display', 'flex', 'important');
 			setStyle(activeToolbarRoot, 'align-items', 'center', 'important');
-			setStyle(activeToolbarRoot, 'justify-content', 'flex-end', 'important');
+			setStyle(activeToolbarRoot, 'justify-content', 'flex-start', 'important');
 			setStyle(activeToolbarRoot, 'gap', '4px', 'important');
-			setStyle(activeToolbarRoot, 'padding-left', 'var(--embedpdf-shell-title-width, clamp(180px, 42vw, 520px))', 'important');
+			setStyle(activeToolbarRoot, 'padding-left', '0', 'important');
 			setStyle(activeToolbarRoot, 'padding-right', '0', 'important');
 			setStyle(activeToolbarRoot, 'height', 'var(--reader-top-bar-height, 56px)', 'important');
 			setStyle(activeToolbarRoot, 'min-height', 'var(--reader-top-bar-height, 56px)', 'important');
@@ -620,12 +624,13 @@
 					maxDocuments: 1
 				},
 				scroll: {
-					defaultBufferSize: 3,
+					defaultBufferSize: 5,
 					defaultPageGap: 8
 				},
 				render: {
 					withAnnotations: false,
-					withForms: false
+					withForms: false,
+					defaultImageQuality: 0.96
 				},
 				disabledCategories: readingOnlyDisabledCategories
 			}}
@@ -642,6 +647,7 @@
 
 <style>
 	.embedpdf-container {
+		--embedpdf-left-clearance: 56px;
 		--embedpdf-right-clearance: 56px;
 		--embedpdf-shell-title-width: clamp(180px, 42vw, 520px);
 		position: relative;
@@ -651,7 +657,8 @@
 	}
 
 	.embedpdf-container :global([data-epdf-i="left-group"]) {
-		margin-left: auto !important;
+		margin-left: calc(var(--embedpdf-left-clearance) + max(0px, env(safe-area-inset-left))) !important;
+		margin-right: auto !important;
 		flex-shrink: 0;
 		transition: opacity 0.18s ease, transform 0.18s ease;
 	}

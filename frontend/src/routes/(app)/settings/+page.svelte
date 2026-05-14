@@ -21,11 +21,14 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	let localReaderSettings = $state<ReaderSettings>({
 		keepScreenOnWhileReading: true,
 		keepScreenOnWhileAppOpen: false,
-		epub: { fontFamily: 'serif', fontSize: 18, fontWeight: 400, fontStyle: 'normal' as const, lineHeight: 1.6, letterSpacing: 0, paragraphSpacing: 0, paragraphIndent: 0, justify: true, hyphenate: false, hyphenationLanguage: 'en', maxColumnCount: 1, gap: 5, theme: 'dark', isDark: true, flow: 'paginated' as const, maxInlineSize: 680, maxBlockSize: 1440, margin: 5, continuousMaxWidth: 720, brightness: 100, contrast: 100, pageAnimation: 'slide' as const, autoAdvance: false, autoAdvanceTimer: 0, fullscreenLock: false, useStandardFullscreen: false, autoHideControls: true, customCss: '', showTextLayer: true, originalLayout: false, continuousMode: true, showImages: true, imageSize: 'fit-width' as const, imageGrayscale: false },
+		readerTheme: 'catppuccin',
+		showCurrentSection: true,
+		settingsUpdatedAt: 0,
+		epub: { fontFamily: 'serif', fontSize: 18, fontWeight: 400, fontStyle: 'normal' as const, lineHeight: 1.6, letterSpacing: 0, paragraphSpacing: 0, paragraphIndent: 0, justify: true, hyphenate: false, hyphenationLanguage: 'en', maxColumnCount: 1, gap: 5, theme: 'catppuccin', isDark: true, flow: 'paginated' as const, maxInlineSize: 680, maxBlockSize: 1440, margin: 5, continuousMaxWidth: 720, brightness: 100, contrast: 100, pageAnimation: 'slide' as const, autoAdvance: false, autoAdvanceTimer: 0, fullscreenLock: false, useStandardFullscreen: false, autoHideControls: true, customCss: '', showTextLayer: true, originalLayout: false, continuousMode: true, showImages: true, imageSize: 'fit-width' as const, imageGrayscale: false },
 		pdf: { pageSpread: 'off' as const, pageLayout: 'single' as const, pageZoom: 'auto', zoomLevel: 100, renderQuality: 'high' as const, autoHideControls: true, showSidebar: false, scrollDirection: 'vertical' as const, scrollMode: 'paged' as const, pageRotation: 0 as const, backgroundColor: '#111111', brightness: 100, contrast: 100, grayscale: 0, readingDirection: 'ltr' as const, autoCropMargins: false, textLayerEnabled: true, annotationsEnabled: true, viewMode: 'dark' as const, showChapterMarkers: false, showQuoteMarks: false, panMode: false, useStandardFullscreen: false, keepScreenOn: true },
 		cbx: { pageSpread: 'auto' as const, pageLayout: 'single' as const, fitMode: 'fit-width' as const, scrollMode: 'paginated' as const, backgroundColor: '#111111', readingDirection: 'ltr' as const, stripMaxWidthPercent: 100, mangaMode: false, panelViewEnabled: false, spreadHandling: 'auto' as const, pageTransitionSound: false, autoHideControls: true, useStandardFullscreen: false, vibrance: 100, saturation: 100 },
 		audio: { playbackSpeed: 1.0, skipForward: 15, skipBackward: 15, autoAdvance: false, autoHideControls: true, gaplessPlayback: true, sleepTimer: 'off' as const, sleepTimerCustom: 30, theme: 'cover-focused' as const, waveformStyle: 'line' as const, backgroundStyle: 'cover-blur' as const, voiceBoost: false, equalizerLow: 50, equalizerMid: 50, equalizerHigh: 50 },
-		speedReader: { wpm: 300, wordSize: 48, fontFamily: 'serif', fontWeight: 400, focalPoint: 0.38, centerWord: false, accentEnabled: true, accentColor: '#ef4444', accentOpacity: 1.0, focusIndicator: 'lines' as const, focusIndicatorDistance: 20, horizontalBars: true, horizontalBarsColor: '#666666', horizontalBarsOpacity: 1.0, verticalIndicator: 'off' as const, sentencePause: 350, autoSentencePause: true, keepScreenOn: true, theme: 'dark', letterSpacing: 0, focusIndicatorLength: 20, showWordCount: false }
+		speedReader: { wpm: 300, wordSize: 48, fontFamily: 'serif', fontWeight: 400, focalPoint: 0.38, centerWord: false, accentEnabled: true, accentColor: '#ef4444', accentOpacity: 1.0, focusIndicator: 'lines' as const, focusIndicatorDistance: 20, horizontalBars: true, horizontalBarsColor: '#666666', horizontalBarsOpacity: 1.0, verticalIndicator: 'off' as const, sentencePause: 350, autoSentencePause: true, keepScreenOn: true, theme: 'catppuccin', letterSpacing: 0, focusIndicatorLength: 20, showWordCount: false }
 	});
 	let loading = $state(true);
 	let scanning = $state(false);
@@ -369,6 +372,15 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 
 	function updateEpubSetting(key: string, value: any) {
 		localReaderSettings.epub = { ...localReaderSettings.epub, [key]: value };
+	}
+
+	function updateReaderThemeSetting(theme: string) {
+		localReaderSettings = {
+			...localReaderSettings,
+			readerTheme: theme,
+			epub: { ...localReaderSettings.epub, theme },
+			speedReader: { ...localReaderSettings.speedReader, theme }
+		};
 	}
 
 	function updateReaderWakeSetting(key: 'keepScreenOnWhileReading' | 'keepScreenOnWhileAppOpen', value: boolean) {
@@ -1171,8 +1183,8 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 								<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
 									{#each epubThemes as theme}
 										<button
-											onclick={() => updateEpubSetting('theme', theme.id)}
-											class="flex flex-col items-center p-2 rounded-lg border-2 transition-all {localReaderSettings.epub.theme === theme.id ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10' : 'border-[var(--color-surface-border)] hover:border-[var(--color-surface-500)]'}"
+											onclick={() => updateReaderThemeSetting(theme.id)}
+											class="flex flex-col items-center p-2 rounded-lg border-2 transition-all {localReaderSettings.readerTheme === theme.id ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10' : 'border-[var(--color-surface-border)] hover:border-[var(--color-surface-500)]'}"
 										>
 											<ThemePreviewSwatch background={theme.bg} foreground={theme.text} sizeClass="h-8 w-8 mb-1" />
 											<span class="text-xs text-[var(--color-surface-text)]">{theme.name}</span>
@@ -1183,8 +1195,8 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 										{#each themeState.appearance.customThemes as theme}
 											<div class="relative group">
 												<button
-													onclick={() => updateEpubSetting('theme', theme.id)}
-													class="w-full flex flex-col items-center p-2 rounded-lg border-2 transition-all {localReaderSettings.epub.theme === theme.id ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10' : 'border-[var(--color-surface-border)] hover:border-[var(--color-surface-500)]'}"
+													onclick={() => updateReaderThemeSetting(theme.id)}
+													class="w-full flex flex-col items-center p-2 rounded-lg border-2 transition-all {localReaderSettings.readerTheme === theme.id ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10' : 'border-[var(--color-surface-border)] hover:border-[var(--color-surface-500)]'}"
 												>
 													<ThemePreviewSwatch background={theme.background} foreground={theme.foreground} sizeClass="h-8 w-8 mb-1" />
 													<span class="text-xs text-[var(--color-surface-text)] truncate w-full">{theme.name}</span>
@@ -1260,6 +1272,22 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 										</svg>
 										Custom
 									</button>
+								</div>
+							</div>
+
+							<!-- Font Weight -->
+							<div class="col-span-2 lg:col-span-1">
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Font Thickness</div>
+								<div class="flex flex-wrap gap-2">
+									{#each fontWeightOptions as option}
+										<button
+											onclick={() => updateEpubSetting('fontWeight', option.value)}
+											class="px-3 py-2 rounded-lg border-2 transition-all text-sm text-[var(--color-surface-text)] {localReaderSettings.epub.fontWeight === option.value ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10' : 'border-[var(--color-surface-border)] hover:border-[var(--color-surface-500)]'}"
+											style="font-weight: {option.value};"
+										>
+											{option.label}
+										</button>
+									{/each}
 								</div>
 							</div>
 
@@ -1354,6 +1382,18 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 										Scrolled
 									</button>
 								</div>
+							</div>
+
+							<!-- Current Section -->
+							<div class="flex items-center space-x-3">
+								<input
+									type="checkbox"
+									id="show-current-section"
+									checked={localReaderSettings.showCurrentSection}
+									onchange={(e) => localReaderSettings = { ...localReaderSettings, showCurrentSection: e.currentTarget.checked }}
+									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+								>
+								<label for="show-current-section" class="text-sm font-medium text-[var(--color-surface-text)]">Show Current Section</label>
 							</div>
 
 							<!-- Column Gap -->

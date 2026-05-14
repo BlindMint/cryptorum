@@ -80,6 +80,15 @@
 		if (lastRouteKey && routeKey !== lastRouteKey) {
 			$mobileMenuOpen = false;
 		}
+		if (typeof window !== 'undefined' && authenticated) {
+			try {
+				const stack = JSON.parse(sessionStorage.getItem('cryptorumRouteStack') || '[]') as string[];
+				const nextStack = stack[stack.length - 1] === routeKey ? stack : [...stack, routeKey].slice(-30);
+				sessionStorage.setItem('cryptorumRouteStack', JSON.stringify(nextStack));
+			} catch {
+				sessionStorage.setItem('cryptorumRouteStack', JSON.stringify([routeKey]));
+			}
+		}
 		lastRouteKey = routeKey;
 	});
 
