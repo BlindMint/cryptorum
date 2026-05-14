@@ -79,6 +79,7 @@
   	let actionInProgress = $state(false);
   	let selectAllMode = $state<'none' | 'page' | 'filtered'>('none');
   	let bulkSelectMode = $derived(selectedBooks.size > 0);
+	let bulkSelectionRestored = false;
 
   	// Long press state for mobile
    	let longPressTimer: number | null = null;
@@ -88,9 +89,15 @@
 	let longPressTouchStart: { x: number; y: number } | null = null;
 	const LONG_PRESS_MOVE_TOLERANCE = 10;
 
- 	let libraryFilter = $derived($page.url.searchParams.get('library') || '');
+	let libraryFilter = $derived($page.url.searchParams.get('library') || '');
+	let librarySearch = $state('');
  	let currentOffset = $state(0);
  	const BATCH_SIZE = 50;
+	const BACKGROUND_REFRESH_INTERVAL_MS = 3000;
+	const MAX_REFRESH_LIMIT = 200;
+	const BULK_SELECTION_STORAGE_KEY = 'cryptorumLibraryBulkSelection';
+	let backgroundRefreshing = false;
+	let searchUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function getQueryValues(params: URLSearchParams, key: string, splitComma: boolean = false): string[] {
 		const values = params.getAll(key);
@@ -143,7 +150,7 @@
  		}
  	}
 
-	function buildBooksUrl(offset: number = 0): string {
+	function buildBooksUrl(offset: number = 0, limit: number = BATCH_SIZE): string {
 		const params = $page.url.searchParams;
 		const authors = getQueryValues(params, 'author');
 		const series = getQueryValues(params, 'series');
@@ -153,10 +160,12 @@
 		const filterMode = getFilterMode();
 
 		const queryParams = new URLSearchParams();
-		queryParams.set('limit', String(BATCH_SIZE));
+		queryParams.set('limit', String(limit));
 		queryParams.set('offset', String(offset));
 
 		if (libraryFilter) queryParams.set('library_id', libraryFilter);
+		const q = $page.url.searchParams.get('q');
+		if (q) queryParams.set('q', q);
 		for (const author of authors) queryParams.append('author', author);
 		for (const seriesName of series) queryParams.append('series', seriesName);
 		if (genres.length > 0) queryParams.set('genre', genres.join(','));
@@ -210,6 +219,41 @@
   		}
  	}
 
+	async function refreshBooksInBackground() {
+		if (loading || loadingMore || backgroundRefreshing) return;
+		backgroundRefreshing = true;
+
+		try {
+			const previousBooks = books;
+			const loadedAllKnownBooks = previousBooks.length >= totalBooks;
+			const refreshLimit = Math.min(
+				MAX_REFRESH_LIMIT,
+				Math.max(BATCH_SIZE, previousBooks.length + (loadedAllKnownBooks ? BATCH_SIZE : 0))
+			);
+			const res = await fetch(buildBooksUrl(0, refreshLimit), { cache: 'no-store' });
+			if (res.ok) {
+				const data = await res.json();
+				if (data.books) {
+					const refreshedBooks = data.books;
+					if (previousBooks.length > refreshedBooks.length) {
+						const refreshedIDs = new Set(refreshedBooks.map((book: any) => book.id));
+						const existingTail = previousBooks.filter((book) => !refreshedIDs.has(book.id));
+						books = [...refreshedBooks, ...existingTail].slice(0, Math.max(refreshedBooks.length, previousBooks.length));
+					} else {
+						books = refreshedBooks;
+					}
+					totalBooks = data.total;
+					currentOffset = books.length;
+					sortBooks();
+				}
+			}
+		} catch (e) {
+			console.error('Failed to refresh books:', e);
+		} finally {
+			backgroundRefreshing = false;
+		}
+	}
+
  	async function loadMore() {
  		if (loadingMore || !hasMore) return;
  		await fetchBooks(false);
@@ -251,6 +295,7 @@
 	$effect(() => {
 		// Re-fetch when URL params change
 		$page.url.search;
+		librarySearch = $page.url.searchParams.get('q') || '';
 		fetchBooks(true);
 	});
 
@@ -264,7 +309,51 @@
 
  	$effect(() => {
     		showBulkPanel = selectedBooks.size > 0;
+		persistBulkSelectionState();
    	});
+
+	function currentRouteKey() {
+		return typeof window === 'undefined' ? '' : `${window.location.pathname}${window.location.search}`;
+	}
+
+	function persistBulkSelectionState() {
+		if (typeof window === 'undefined') return;
+		if (!bulkSelectionRestored) return;
+		if (selectedBooks.size === 0) {
+			sessionStorage.removeItem(BULK_SELECTION_STORAGE_KEY);
+			return;
+		}
+		sessionStorage.setItem(BULK_SELECTION_STORAGE_KEY, JSON.stringify({
+			route: currentRouteKey(),
+			selectedIds: Array.from(selectedBooks),
+			selectAllMode,
+			timestamp: Date.now()
+		}));
+	}
+
+	function restoreBulkSelectionState() {
+		if (typeof window === 'undefined') return;
+		try {
+			const raw = sessionStorage.getItem(BULK_SELECTION_STORAGE_KEY);
+			if (!raw) {
+				bulkSelectionRestored = true;
+				return;
+			}
+			const state = JSON.parse(raw);
+			if (state.route !== currentRouteKey()) {
+				bulkSelectionRestored = true;
+				return;
+			}
+			const selectedIds = Array.isArray(state.selectedIds) ? state.selectedIds.map(Number).filter(Number.isFinite) : [];
+			selectedBooks = new Set(selectedIds);
+			selectAllMode = state.selectAllMode === 'filtered' || state.selectAllMode === 'page' ? state.selectAllMode : 'none';
+			showBulkPanel = selectedIds.length > 0;
+		} catch {
+			sessionStorage.removeItem(BULK_SELECTION_STORAGE_KEY);
+		} finally {
+			bulkSelectionRestored = true;
+		}
+	}
 
 	let loadMoreTrigger = $state<HTMLDivElement | null>(null);
   	let observer: IntersectionObserver | null = null;
@@ -315,10 +404,14 @@
 
 
   		onMount(() => {
+		restoreBulkSelectionState();
  		fetchLibraryName();
  		fetchBooks(true);
  		fetchFilterOptions();
  		showFormatOnCover.init();
+		const backgroundRefresh = window.setInterval(() => {
+			void refreshBooksInBackground();
+		}, BACKGROUND_REFRESH_INTERVAL_MS);
 
  		// Set initial grid size based on viewport
  		const updateGridSizeForViewport = () => {
@@ -335,6 +428,8 @@
  		updateGridSizeForViewport();
 
  		return () => {
+			window.clearInterval(backgroundRefresh);
+			if (searchUpdateTimer) clearTimeout(searchUpdateTimer);
  			if (observer) observer.disconnect();
  		};
  	});
@@ -348,7 +443,7 @@
 				: await fetch('/api/scan', { method: 'POST' });
 			const data = await res.json().catch(() => ({}));
 			if (res.ok) {
-				scanMessage = 'Scan started. Refreshing in 5s...';
+				scanMessage = 'Scan started. Updating automatically...';
 				setTimeout(async () => {
  					await fetchBooks(true);
  					scanMessage = '';
@@ -428,6 +523,29 @@
 	function toggleSortDirection() {
 		sortDir = sortDir === 'asc' ? 'desc' : 'asc';
 		void fetchBooks(true);
+	}
+
+	function updateScopedSearch(value: string) {
+		librarySearch = value;
+		if (searchUpdateTimer) clearTimeout(searchUpdateTimer);
+		searchUpdateTimer = setTimeout(() => {
+			const url = new URL(window.location.href);
+			const query = librarySearch.trim();
+			if (query) {
+				url.searchParams.set('q', query);
+			} else {
+				url.searchParams.delete('q');
+			}
+			navigateWithFilters(url, true);
+		}, 300);
+	}
+
+	function clearScopedSearch() {
+		if (searchUpdateTimer) clearTimeout(searchUpdateTimer);
+		librarySearch = '';
+		const url = new URL(window.location.href);
+		url.searchParams.delete('q');
+		navigateWithFilters(url, true);
 	}
 
  	function statusDot(status: string) {
@@ -732,6 +850,10 @@
 		for (const status of getQueryValues(params, 'status')) {
 			filters.push({ key: 'status', value: status, label: `Status: ${status}` });
 		}
+		const search = params.get('q')?.trim();
+		if (search) {
+			filters.push({ key: 'q', value: search, label: `Search: ${search}` });
+		}
 
 		return filters;
 	}
@@ -760,6 +882,7 @@
 		url.searchParams.delete('tag_mode');
 		url.searchParams.delete('status');
 		url.searchParams.delete('filter_mode');
+		url.searchParams.delete('q');
 		navigateWithFilters(url);
 	}
 
@@ -861,7 +984,7 @@
 
 <div class="pb-20 transition-all duration-300">
 	<div class="sticky top-0 z-30 px-3 py-3 sm:px-6 sm:py-4 bg-[var(--color-surface-base)]/95 backdrop-blur border-b border-[var(--color-surface-border)] shadow-[0_1px_0_rgba(255,255,255,0.04)] transition-all duration-300 {showFilterPanel ? 'lg:pr-[21.5rem]' : ''}">
-		<div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between min-w-0">
+		<div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between min-w-0">
 			<div class="min-w-0 flex-1">
 				<div class="flex items-baseline gap-2 sm:gap-3 min-w-0">
 					<h1 class="text-xl sm:text-2xl font-bold text-[var(--color-surface-text)] truncate">
@@ -880,7 +1003,7 @@
 				{/if}
 			</div>
 
-			<div class="flex items-center justify-start lg:justify-end gap-2 flex-wrap flex-shrink-0">
+			<div class="flex items-center justify-start xl:justify-end gap-2 flex-wrap flex-shrink-0">
 				<button
 					onclick={() => viewMode = 'grid'}
 					class="p-2.5 rounded-lg {viewMode === 'grid' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'} transition-colors"
@@ -923,7 +1046,7 @@
 						</svg>
 					</button>
 					{#if showSettingsMenu}
-						<div class="fixed left-3 right-3 top-32 z-40 mt-2 max-h-[70vh] overflow-y-auto rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-3 shadow-lg sm:absolute sm:left-auto sm:right-0 sm:top-full sm:w-56">
+						<div class="fixed right-3 top-32 z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-3 shadow-lg sm:right-6 lg:top-28 {showFilterPanel ? 'lg:right-[21.5rem]' : ''}">
 							{#if viewMode === 'grid'}
 								<div class="px-4 pb-3 border-b border-[var(--color-surface-border)]">
 									<label class="text-sm font-medium text-[var(--color-surface-text)] block mb-2" for="library-grid-size">Grid Size</label>
@@ -974,6 +1097,32 @@
 					{/if}
 				</div>
 
+				<div class="relative min-w-[14rem] flex-1 lg:max-w-sm">
+					<svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"></path>
+					</svg>
+					<input
+						type="search"
+						value={librarySearch}
+						oninput={(event) => updateScopedSearch(event.currentTarget.value)}
+						placeholder="Search current results"
+						aria-label="Search current library results"
+						class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-2 pl-9 pr-9 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none"
+					/>
+					{#if librarySearch}
+						<button
+							type="button"
+							onclick={clearScopedSearch}
+							class="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]"
+							aria-label="Clear library search"
+						>
+							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+							</svg>
+						</button>
+					{/if}
+				</div>
+
 				<div class="relative">
 					{#if showSortMenu}
 						<button
@@ -983,27 +1132,28 @@
 							onclick={() => showSortMenu = false}
 						></button>
 					{/if}
-					<button
-						onclick={() => showSortMenu = !showSortMenu}
-						aria-label="Sort books"
-						class="inline-flex h-10 items-center px-3 sm:px-4 rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors"
-					>
-						<span class="hidden sm:inline">Sort</span>
-						<span class="ml-0 sm:ml-2 text-sm text-[var(--color-surface-text-muted)]">{currentSortLabel()}</span>
-						<span class="ml-1 text-sm text-[var(--color-primary-400)]" aria-label={sortDirectionLabel()}>{sortDirectionArrow()}</span>
-						<svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-						</svg>
-					</button>
-					<button
-						type="button"
-						onclick={toggleSortDirection}
-						class="ml-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-400)] hover:bg-[var(--color-surface-700)] transition-colors"
-						aria-label="Toggle sort direction"
-						title={sortDirectionLabel()}
-					>
-						{sortDirectionArrow()}
-					</button>
+					<div class="inline-flex h-10 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
+						<button
+							onclick={() => showSortMenu = !showSortMenu}
+							aria-label="Sort books"
+							class="inline-flex items-center px-3 sm:px-4 text-[var(--color-surface-text)] font-medium transition-colors hover:bg-[var(--color-surface-700)]"
+						>
+							<span class="hidden sm:inline">Sort</span>
+							<span class="ml-0 sm:ml-2 text-sm text-[var(--color-surface-text-muted)]">{currentSortLabel()}</span>
+							<svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+							</svg>
+						</button>
+						<button
+							type="button"
+							onclick={toggleSortDirection}
+							class="inline-flex w-10 items-center justify-center border-l border-[var(--color-surface-border)] text-[var(--color-primary-400)] transition-colors hover:bg-[var(--color-surface-700)]"
+							aria-label="Toggle sort direction"
+							title={sortDirectionLabel()}
+						>
+							{sortDirectionArrow()}
+						</button>
+					</div>
 					{#if showSortMenu}
 						<div class="absolute right-0 top-full mt-2 w-48 bg-[var(--color-surface-overlay)] border border-[var(--color-surface-border)] rounded-lg shadow-lg z-40 py-1">
 							{#each sortOptions as option}
@@ -1013,7 +1163,7 @@
 								>
 									<span>{option.label}</span>
 									{#if sortBy === option.value}
-										<span class="text-xs">{sortDirectionArrow()}</span>
+										<span class="text-xs">✓</span>
 									{/if}
 								</button>
 							{/each}
@@ -1337,9 +1487,6 @@
    						tabindex="0"
 					>
     					<div class="block">
-							{#if book.status === 'reading' || book.status === 'finished'}
-								<span class="absolute top-1 right-1 z-10 w-2.5 h-2.5 rounded-full {statusDot(book.status)}"></span>
-    							{/if}
 							<div class="relative" role="button" tabindex="0" onclick={(event) => handleCoverTap(event, book.id)} onkeydown={(event) => handleCoverKeydown(event, book.id)}>
 								<BookCoverFrame
 									src={book.cover_path ? getCoverThumbUrl(book.id, libraryCoverThumbSize, book.cover_updated_on) : null}
@@ -1357,26 +1504,37 @@
 								{#if formatOnCover && book.format}
 									{@const formatColor = getFormatColor(book.format)}
 									<div
-										class="absolute left-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+										class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
 										style="background-color: {formatColor.bg}; color: {formatColor.text};"
 									>
 										{book.format}
 									</div>
 								{/if}
+								{#if book.status === 'reading' || book.status === 'finished'}
+									<span class="absolute bottom-2 right-2 z-20 h-3 w-3 rounded-full border border-black/30 {statusDot(book.status)} shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></span>
+								{/if}
 								<div class="cover-action-overlay {activeBookActions === book.id ? 'is-active' : ''}">
-									<a href="/book/{book.id}" class="cover-action-button top-action" aria-label="View details for {book.title || 'book'}" onclick={(event) => { event.stopPropagation(); saveRouteScrollPosition(); }}>
+									<a href="/book/{book.id}" class="cover-action-button top-action" aria-label="View details for {book.title || 'book'}" onclick={(event) => { event.stopPropagation(); saveRouteScrollPosition(); persistBulkSelectionState(); }}>
 										<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11v5m0-8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
 										</svg>
 									</a>
-									<a href={getReaderUrl(book)} class="cover-action-button bottom-action" aria-label="Read {book.title || 'book'}" onclick={(event) => event.stopPropagation()}>
-										<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-											<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
-										</svg>
-									</a>
+									{#if bulkSelectMode}
+										<button type="button" class="cover-action-button bottom-action opacity-45 cursor-not-allowed" aria-label="Reading is disabled during bulk selection" onclick={(event) => event.stopPropagation()}>
+											<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+												<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
+											</svg>
+										</button>
+									{:else}
+										<a href={getReaderUrl(book)} class="cover-action-button bottom-action" aria-label="Read {book.title || 'book'}" onclick={(event) => event.stopPropagation()}>
+											<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+												<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
+											</svg>
+										</a>
+									{/if}
 								</div>
 							</div>
-							<a href="/book/{book.id}" class="block" onclick={saveRouteScrollPosition}>
+							<a href="/book/{book.id}" class="block" onclick={(event) => { event.stopPropagation(); saveRouteScrollPosition(); persistBulkSelectionState(); }}>
 								<h3 class="text-sm font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
     							{#if book.authors && book.authors !== '[]'}
     								<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{parseAuthors(book.authors)}</p>
@@ -1412,7 +1570,7 @@
   						role="button"
   						tabindex="0"
   					>
-						<a href="/book/{book.id}" class="block bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] {selectedBooks.has(book.id) ? 'border-[var(--color-primary-500)]' : ''} p-4 hover:border-[var(--color-primary-500)]/50 transition-colors" onclick={saveRouteScrollPosition}>
+						<a href="/book/{book.id}" class="block bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] {selectedBooks.has(book.id) ? 'border-[var(--color-primary-500)]' : ''} p-4 hover:border-[var(--color-primary-500)]/50 transition-colors" onclick={(event) => { event.stopPropagation(); saveRouteScrollPosition(); persistBulkSelectionState(); }}>
   							<div class="flex items-center space-x-4">
 								<BookCoverFrame
 									src={book.cover_path ? getCoverThumbUrl(book.id, 'small', book.cover_updated_on) : null}

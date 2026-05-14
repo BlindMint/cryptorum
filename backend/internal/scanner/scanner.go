@@ -120,6 +120,11 @@ func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []stri
 			record.Size == file.Size &&
 			record.LastModified == file.ModTimeUnix &&
 			record.MissingAt == 0 {
+			if shouldUseFilenameTitle(record.Title) {
+				if err := s.saveFilenameFallbackTitle(record.BookID, file.Path, ownerUserID); err != nil {
+					slog.Debug("Skipped filename title fallback", "path", file.Path, "error", err)
+				}
+			}
 			progress.ScannedFiles++
 			progress.UnchangedFiles++
 			progress.CurrentPath = file.Path
@@ -194,6 +199,7 @@ type existingFileRecord struct {
 	Hash         string
 	LastModified int64
 	MissingAt    int64
+	Title        string
 }
 
 func collectProcessableFiles(paths []string, shouldCancel ScanCancelFunc) ([]fileInventoryItem, error) {
@@ -244,9 +250,11 @@ func collectProcessableFiles(paths []string, shouldCancel ScanCancelFunc) ([]fil
 
 func (s *Scanner) loadLibraryFileInventory(libraryID int64) (map[string]existingFileRecord, error) {
 	rows, err := s.db.Query(`
-		SELECT bf.id, bf.book_id, bf.path, bf.size, bf.hash, bf.last_modified, COALESCE(bf.missing_at, 0)
+		SELECT bf.id, bf.book_id, bf.path, bf.size, bf.hash, bf.last_modified, COALESCE(bf.missing_at, 0),
+		       COALESCE(bm.title, '')
 		FROM book_file bf
 		JOIN book b ON b.id = bf.book_id
+		LEFT JOIN book_metadata bm ON bm.book_id = b.id
 		WHERE b.library_id = ?
 	`, libraryID)
 	if err != nil {
@@ -265,6 +273,7 @@ func (s *Scanner) loadLibraryFileInventory(libraryID int64) (map[string]existing
 			&record.Hash,
 			&record.LastModified,
 			&record.MissingAt,
+			&record.Title,
 		); err != nil {
 			continue
 		}
@@ -316,7 +325,7 @@ func (s *Scanner) RefreshMissingMetadata(limit int) (int, error) {
 		JOIN book_file bf ON b.id = bf.book_id
 		JOIN library l ON b.library_id = l.id
 		LEFT JOIN book_metadata bm ON b.id = bm.book_id
-		WHERE bm.book_id IS NULL OR bm.title IS NULL OR bm.title = '' OR bm.cover_path IS NULL
+		WHERE bm.book_id IS NULL OR bm.title IS NULL OR bm.title = '' OR LOWER(TRIM(bm.title)) = 'untitled' OR bm.cover_path IS NULL
 		LIMIT ?
 	`, limit)
 	if err != nil {
@@ -342,9 +351,10 @@ func (s *Scanner) RefreshMissingMetadata(limit int) (int, error) {
 	count := 0
 	for _, e := range entries {
 		meta, err := metadata.Extract(e.filePath)
-		if err != nil || meta == nil {
-			continue
+		if err != nil {
+			slog.Debug("Using filename fallback for missing metadata refresh", "path", e.filePath, "error", err)
 		}
+		meta = metadataWithFilenameTitleFallback(meta, e.filePath)
 		if err := s.saveMetadata(e.bookID, meta, e.ownerID); err != nil {
 			slog.Error("Failed to save metadata", "bookID", e.bookID, "error", err)
 			continue
@@ -465,6 +475,9 @@ func (s *Scanner) processFileWithInfo(
 				slog.Debug("Skipped metadata repair", "path", file.Path, "error", repairErr)
 			}
 		}
+		if repairErr := s.saveFilenameFallbackTitleIfWeak(existingBookID, file.Path, ownerUserID); repairErr != nil {
+			slog.Debug("Skipped filename title fallback", "path", file.Path, "error", repairErr)
+		}
 		return false, nil
 	}
 
@@ -525,10 +538,10 @@ func (s *Scanner) processFileWithInfo(
 	meta, err := metadata.Extract(file.Path)
 	if err != nil {
 		slog.Warn("Failed to extract metadata", "path", file.Path, "error", err)
-	} else if meta != nil {
-		if saveErr := s.saveMetadata(bookID, meta, ownerUserID); saveErr != nil {
-			slog.Warn("Failed to save metadata", "path", file.Path, "error", saveErr)
-		}
+	}
+	meta = metadataWithFilenameTitleFallback(meta, file.Path)
+	if saveErr := s.saveMetadata(bookID, meta, ownerUserID); saveErr != nil {
+		slog.Warn("Failed to save metadata", "path", file.Path, "error", saveErr)
 	}
 
 	slog.Info("Imported new book", "path", file.Path, "bookID", bookID)
@@ -542,6 +555,61 @@ func repairsExtractedMetadata(ext string) bool {
 	default:
 		return false
 	}
+}
+
+func metadataWithFilenameTitleFallback(meta *metadata.BookMetadata, path string) *metadata.BookMetadata {
+	if meta == nil {
+		meta = metadata.ExtractFilename(path)
+	}
+	if meta.Authors == nil {
+		meta.Authors = []string{}
+	}
+	if meta.Genres == nil {
+		meta.Genres = []string{}
+	}
+	if shouldUseFilenameTitle(meta.Title) {
+		meta.Title = filenameFallbackTitle(path)
+	}
+	return meta
+}
+
+func shouldUseFilenameTitle(title string) bool {
+	title = strings.TrimSpace(title)
+	return title == "" || strings.EqualFold(title, "Untitled")
+}
+
+func filenameFallbackTitle(path string) string {
+	generated := metadata.ExtractFilename(path)
+	title := strings.TrimSpace(generated.Title)
+	if title != "" {
+		return title
+	}
+	return strings.TrimSpace(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
+}
+
+func (s *Scanner) saveFilenameFallbackTitleIfWeak(bookID int64, path string, ownerUserID int64) error {
+	var title string
+	err := s.db.QueryRow("SELECT COALESCE(title, '') FROM book_metadata WHERE book_id = ?", bookID).Scan(&title)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil && !shouldUseFilenameTitle(title) {
+		return nil
+	}
+	return s.saveFilenameFallbackTitle(bookID, path, ownerUserID)
+}
+
+func (s *Scanner) saveFilenameFallbackTitle(bookID int64, path string, ownerUserID int64) error {
+	title := filenameFallbackTitle(path)
+	if title == "" {
+		return nil
+	}
+	return s.saveMetadata(bookID, &metadata.BookMetadata{
+		Title:   title,
+		Authors: []string{},
+		Genres:  []string{},
+		Source:  "filename",
+	}, ownerUserID)
 }
 
 // saveMetadata upserts book metadata and saves the cover image to disk

@@ -1,8 +1,9 @@
 import { writable, derived } from 'svelte/store';
 import { browser } from '$app/environment';
 
-const READER_SETTINGS_VERSION = 4;
+const READER_SETTINGS_VERSION = 5;
 const READER_SETTINGS_VERSION_KEY = 'readerSettingsVersion';
+const DEFAULT_READER_THEME = 'catppuccin';
 
 export interface EpubReaderSetting {
 	fontFamily: string;
@@ -136,6 +137,9 @@ export interface SpeedReaderSetting {
 export interface ReaderSettings {
 	keepScreenOnWhileReading: boolean;
 	keepScreenOnWhileAppOpen: boolean;
+	readerTheme: string;
+	showCurrentSection: boolean;
+	settingsUpdatedAt: number;
 	epub: EpubReaderSetting;
 	pdf: PdfReaderSetting;
 	cbx: CbxReaderSetting;
@@ -146,6 +150,9 @@ export interface ReaderSettings {
 export const defaultReaderSettings: ReaderSettings = {
 	keepScreenOnWhileReading: true,
 	keepScreenOnWhileAppOpen: false,
+	readerTheme: DEFAULT_READER_THEME,
+	showCurrentSection: true,
+	settingsUpdatedAt: 0,
 	epub: {
 		fontFamily: 'serif',
 		fontSize: 18,
@@ -160,7 +167,7 @@ export const defaultReaderSettings: ReaderSettings = {
 		hyphenationLanguage: 'en',
 		maxColumnCount: 1,
 		gap: 5,
-		theme: 'dark',
+		theme: DEFAULT_READER_THEME,
 		isDark: true,
 		flow: 'paginated',
 		maxInlineSize: 680,
@@ -262,7 +269,7 @@ export const defaultReaderSettings: ReaderSettings = {
 		sentencePause: 350,
 		autoSentencePause: true,
 		keepScreenOn: true,
-		theme: 'dark',
+		theme: DEFAULT_READER_THEME,
 		letterSpacing: 0,
 		focusIndicatorLength: 20,
 		showWordCount: false
@@ -290,15 +297,28 @@ function loadSettings(): ReaderSettings {
 function migrateSettings(settings: ReaderSettings): ReaderSettings {
 	const version = Number(localStorage.getItem(READER_SETTINGS_VERSION_KEY) || '0');
 	if (version >= READER_SETTINGS_VERSION) {
-		return settings;
+		const readerTheme = settings.readerTheme || settings.epub?.theme || settings.speedReader?.theme || DEFAULT_READER_THEME;
+		return {
+			...settings,
+			readerTheme,
+			showCurrentSection: settings.showCurrentSection ?? true,
+			settingsUpdatedAt: settings.settingsUpdatedAt ?? 0,
+			epub: { ...settings.epub, theme: readerTheme },
+			speedReader: { ...settings.speedReader, theme: readerTheme }
+		};
 	}
 
+	const readerTheme = settings.readerTheme || settings.epub?.theme || settings.speedReader?.theme || DEFAULT_READER_THEME;
 	return {
 		...settings,
 		keepScreenOnWhileReading: settings.keepScreenOnWhileReading ?? true,
 		keepScreenOnWhileAppOpen: settings.keepScreenOnWhileAppOpen ?? false,
+		readerTheme,
+		showCurrentSection: settings.showCurrentSection ?? true,
+		settingsUpdatedAt: settings.settingsUpdatedAt ?? 0,
 		epub: {
 			...settings.epub,
+			theme: readerTheme,
 			flow: 'scrolled',
 			continuousMode: true
 		},
@@ -308,6 +328,7 @@ function migrateSettings(settings: ReaderSettings): ReaderSettings {
 		},
 		speedReader: {
 			...settings.speedReader,
+			theme: readerTheme,
 			fontWeight: settings.speedReader.fontWeight ?? 400
 		}
 	};
@@ -327,69 +348,136 @@ function deepMerge<T extends Record<string, any>>(target: T, source: Partial<T>)
 
 function createReaderSettingsStore() {
 	const { subscribe, set, update } = writable<ReaderSettings>(loadSettings());
+	let saveTimer: ReturnType<typeof setTimeout> | null = null;
+	let pendingBackendSave: ReaderSettings | null = null;
+
+	function normalizeSettings(value: ReaderSettings): ReaderSettings {
+		const readerTheme = value.readerTheme || value.epub?.theme || value.speedReader?.theme || DEFAULT_READER_THEME;
+		return {
+			...value,
+			readerTheme,
+			showCurrentSection: value.showCurrentSection ?? true,
+			settingsUpdatedAt: value.settingsUpdatedAt ?? 0,
+			epub: { ...value.epub, theme: readerTheme },
+			speedReader: { ...value.speedReader, theme: readerTheme }
+		};
+	}
+
+	function touchSettings(value: ReaderSettings): ReaderSettings {
+		return normalizeSettings({
+			...value,
+			settingsUpdatedAt: Date.now()
+		});
+	}
+
+	function persistLocal(value: ReaderSettings) {
+		if (browser) {
+			localStorage.setItem('readerSettings', JSON.stringify(value));
+			localStorage.setItem(READER_SETTINGS_VERSION_KEY, String(READER_SETTINGS_VERSION));
+		}
+	}
+
+	async function saveSettingsToBackend(value: ReaderSettings, keepalive = false) {
+		const res = await fetch('/api/settings/reader', {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ reader: value }),
+			keepalive
+		});
+		if (!res.ok) {
+			throw new Error(`Failed to save reader settings: ${res.status}`);
+		}
+	}
+
+	function scheduleSaveToBackend(value: ReaderSettings) {
+		if (!browser) return;
+		pendingBackendSave = value;
+		if (saveTimer) clearTimeout(saveTimer);
+		saveTimer = setTimeout(async () => {
+			saveTimer = null;
+			const valueToSave = pendingBackendSave;
+			pendingBackendSave = null;
+			if (!valueToSave) return;
+			try {
+				await saveSettingsToBackend(valueToSave);
+			} catch (e) {
+				console.error('Failed to save reader settings:', e);
+			}
+		}, 700);
+	}
 
 	return {
 		subscribe,
 		set: (value: ReaderSettings) => {
-			if (browser) {
-				localStorage.setItem('readerSettings', JSON.stringify(value));
-			}
-			set(value);
+			const newValue = touchSettings(value);
+			persistLocal(newValue);
+			set(newValue);
+			scheduleSaveToBackend(newValue);
 		},
 		update: (fn: (value: ReaderSettings) => ReaderSettings) => {
 			update(value => {
-				const newValue = fn(value);
-				if (browser) {
-					localStorage.setItem('readerSettings', JSON.stringify(newValue));
-				}
+				const newValue = touchSettings(fn(value));
+				persistLocal(newValue);
+				scheduleSaveToBackend(newValue);
 				return newValue;
 			});
 		},
 		updateEpub: (epubSettings: Partial<EpubReaderSetting>) => {
 			update(s => {
-				const newSettings = { 
+				const nextEpub = { ...s.epub, ...epubSettings };
+				const newSettings = touchSettings({
 					...s, 
-					epub: { ...s.epub, ...epubSettings } 
-				};
-				if (browser) {
-					localStorage.setItem('readerSettings', JSON.stringify(newSettings));
-				}
+					epub: nextEpub,
+					readerTheme: epubSettings.theme ?? s.readerTheme
+				});
+				persistLocal(newSettings);
+				scheduleSaveToBackend(newSettings);
 				return newSettings;
 			});
 		},
 		updatePdf: (pdfSettings: Partial<PdfReaderSetting>) => {
 			update(s => {
-				const newSettings = { 
+				const newSettings = touchSettings({ 
 					...s, 
 					pdf: { ...s.pdf, ...pdfSettings } 
-				};
-				if (browser) {
-					localStorage.setItem('readerSettings', JSON.stringify(newSettings));
-				}
+				});
+				persistLocal(newSettings);
+				scheduleSaveToBackend(newSettings);
 				return newSettings;
 			});
 		},
 		updateCbx: (cbxSettings: Partial<CbxReaderSetting>) => {
 			update(s => {
-				const newSettings = { 
+				const newSettings = touchSettings({ 
 					...s, 
 					cbx: { ...s.cbx, ...cbxSettings } 
-				};
-				if (browser) {
-					localStorage.setItem('readerSettings', JSON.stringify(newSettings));
-				}
+				});
+				persistLocal(newSettings);
+				scheduleSaveToBackend(newSettings);
 				return newSettings;
 			});
 		},
 		updateAudio: (audioSettings: Partial<AudioReaderSetting>) => {
 			update(s => {
-				const newSettings = { 
+				const newSettings = touchSettings({ 
 					...s, 
 					audio: { ...s.audio, ...audioSettings } 
-				};
-				if (browser) {
-					localStorage.setItem('readerSettings', JSON.stringify(newSettings));
-				}
+				});
+				persistLocal(newSettings);
+				scheduleSaveToBackend(newSettings);
+				return newSettings;
+			});
+		},
+		updateReaderTheme: (theme: string) => {
+			update(s => {
+				const newSettings = touchSettings({
+					...s,
+					readerTheme: theme,
+					epub: { ...s.epub, theme },
+					speedReader: { ...s.speedReader, theme }
+				});
+				persistLocal(newSettings);
+				scheduleSaveToBackend(newSettings);
 				return newSettings;
 			});
 		},
@@ -400,9 +488,16 @@ function createReaderSettingsStore() {
 				if (res.ok) {
 					const data = await res.json();
 					if (data.reader) {
-						const merged = deepMerge(defaultReaderSettings, data.reader);
-						localStorage.setItem('readerSettings', JSON.stringify(merged));
-						set(merged);
+						const merged = normalizeSettings(migrateSettings(deepMerge(defaultReaderSettings, data.reader)));
+						const local = normalizeSettings(loadSettings());
+						if ((merged.settingsUpdatedAt || 0) >= (local.settingsUpdatedAt || 0)) {
+							persistLocal(merged);
+							set(merged);
+						} else {
+							persistLocal(local);
+							set(local);
+							scheduleSaveToBackend(local);
+						}
 					}
 				}
 			} catch (e) {
@@ -411,28 +506,46 @@ function createReaderSettingsStore() {
 		},
 		saveToBackend: async () => {
 			try {
-				const res = await fetch('/api/settings/reader', {
-					method: 'PUT',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ reader: loadSettings() })
-				});
-				return res.ok;
+				const current = normalizeSettings(loadSettings());
+				await saveSettingsToBackend(current);
+				pendingBackendSave = null;
+				return true;
 			} catch (e) {
 				console.error('Failed to save reader settings:', e);
 				return false;
 			}
 		},
+		flushPendingSave: async (keepalive = false) => {
+			if (!browser) return false;
+			if (saveTimer) {
+				clearTimeout(saveTimer);
+				saveTimer = null;
+			}
+			const current = normalizeSettings(pendingBackendSave ?? loadSettings());
+			pendingBackendSave = null;
+			try {
+				await saveSettingsToBackend(current, keepalive);
+				return true;
+			} catch (e) {
+				console.error('Failed to flush reader settings:', e);
+				return false;
+			}
+		},
 		resetToDefaults: (readerType?: 'epub' | 'pdf' | 'cbx' | 'audio' | 'speedReader') => {
 			update(s => {
+				let next: ReaderSettings;
 				if (readerType) {
-					return {
+					next = {
 						...s,
 						[readerType]: { ...defaultReaderSettings[readerType] }
 					};
 				} else {
-					return {
+					next = {
 						keepScreenOnWhileReading: defaultReaderSettings.keepScreenOnWhileReading,
 						keepScreenOnWhileAppOpen: defaultReaderSettings.keepScreenOnWhileAppOpen,
+						readerTheme: defaultReaderSettings.readerTheme,
+						showCurrentSection: defaultReaderSettings.showCurrentSection,
+						settingsUpdatedAt: defaultReaderSettings.settingsUpdatedAt,
 						epub: { ...defaultReaderSettings.epub },
 						pdf: { ...defaultReaderSettings.pdf },
 						cbx: { ...defaultReaderSettings.cbx },
@@ -440,17 +553,22 @@ function createReaderSettingsStore() {
 						speedReader: { ...defaultReaderSettings.speedReader }
 					};
 				}
+				const newSettings = touchSettings(next);
+				persistLocal(newSettings);
+				scheduleSaveToBackend(newSettings);
+				return newSettings;
 			});
 		},
 		updateSpeedReader: (speedReaderSettings: Partial<SpeedReaderSetting>) => {
 			update(s => {
-				const newSettings = {
+				const nextSpeedReader = { ...s.speedReader, ...speedReaderSettings };
+				const newSettings = touchSettings({
 					...s,
-					speedReader: { ...s.speedReader, ...speedReaderSettings }
-				};
-				if (browser) {
-					localStorage.setItem('readerSettings', JSON.stringify(newSettings));
-				}
+					speedReader: nextSpeedReader,
+					readerTheme: speedReaderSettings.theme ?? s.readerTheme
+				});
+				persistLocal(newSettings);
+				scheduleSaveToBackend(newSettings);
 				return newSettings;
 			});
 		}
@@ -460,6 +578,7 @@ function createReaderSettingsStore() {
 export const readerSettings = createReaderSettingsStore();
 
 export const epubThemes = [
+	{ id: 'catppuccin', name: 'Catppuccin', bg: '#1e1e2e', text: '#cdd6f4' },
 	{ id: 'light', name: 'Light', bg: '#ffffff', text: '#333333' },
 	{ id: 'sepia', name: 'Sepia', bg: '#f4ecd8', text: '#5b4636' },
 	{ id: 'dark', name: 'Dark', bg: '#111111', text: '#e5e7eb' },
@@ -467,6 +586,7 @@ export const epubThemes = [
 ];
 
 export const speedReaderThemes = [
+	{ id: 'catppuccin', name: 'Catppuccin', bg: '#1e1e2e', text: '#cdd6f4' },
 	{ id: 'light', name: 'Light', bg: '#ffffff', text: '#333333' },
 	{ id: 'sepia', name: 'Sepia', bg: '#f4ecd8', text: '#5b4636' },
 	{ id: 'dark', name: 'Dark', bg: '#111111', text: '#e5e7eb' },

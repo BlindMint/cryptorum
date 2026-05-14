@@ -28,6 +28,8 @@
 	let similarBooks = $state<any[]>([]);
 	let similarLoading = $state(false);
 	let similarBooksLoaded = $state(false);
+	let similarError = $state('');
+	let filesError = $state('');
 	let saveError = $state<string | null>(null);
 	let showMetadataLookup = $state(false);
 	let showCoverModal = $state(false);
@@ -40,6 +42,8 @@
 	let formatOnCover = $state(true);
 	let convertMenuFileId = $state<number | null>(null);
 	let selectedConvertFormat = $state<'epub' | 'fb2' | 'txt' | 'rtf'>('epub');
+	let statusSaving = $state(false);
+	let statusError = $state('');
 
 	let editForm = $state<any>({});
 	let authorsList = $state<string[]>([]);
@@ -62,9 +66,13 @@
 	$effect(() => {
 		const bookId = $page.params.bookID;
 		if (bookId) {
+			book = null;
 			sessions = [];
 			similarBooks = [];
 			similarBooksLoaded = false;
+			similarError = '';
+			files = [];
+			filesError = '';
 			void fetchBook();
 		}
 	});
@@ -86,19 +94,28 @@
 		formatMenuOpen = false;
 		const bookId = $page.params.bookID;
 		try {
-			const [bookRes, filesRes] = await Promise.all([
+			const [bookResult, filesResult] = await Promise.allSettled([
 				fetch(`/api/books/${bookId}`, { credentials: 'same-origin' }),
 				fetch(`/api/books/${bookId}/files`, { credentials: 'same-origin' })
 			]);
+			const bookRes = bookResult.status === 'fulfilled' ? bookResult.value : null;
+			const filesRes = filesResult.status === 'fulfilled' ? filesResult.value : null;
 
-			if (bookRes.status === 401 || filesRes.status === 401) {
+			if (bookRes?.status === 401 || filesRes?.status === 401) {
 				await goto('/login');
 				return;
 			}
-			if (bookRes.ok) book = await bookRes.json();
-			if (filesRes.ok) files = await filesRes.json();
+			if (bookRes?.ok) book = await bookRes.json();
+			if (filesRes?.ok) {
+				files = await filesRes.json();
+				filesError = '';
+			} else {
+				files = [];
+				filesError = 'Unable to check available reader formats.';
+			}
 		} catch (e) {
 			console.error('Failed to fetch book:', e);
+			filesError = 'Unable to check available reader formats.';
 		} finally {
 			loading = false;
 		}
@@ -145,11 +162,16 @@
 			const res = await fetch(`/api/books/${bookId}/similar?limit=6`);
 			if (res.ok) {
 				similarBooks = await res.json();
-				similarBooksLoaded = true;
+			} else {
+				similarBooks = [];
+				similarError = res.status === 404 ? '' : 'Unable to load similar books.';
 			}
 		} catch (e) {
 			console.error('Failed to fetch similar books:', e);
+			similarBooks = [];
+			similarError = 'Unable to load similar books.';
 		} finally {
+			similarBooksLoaded = true;
 			similarLoading = false;
 		}
 	}
@@ -358,6 +380,40 @@
 	function getStatusLabel(status: string): string {
 		const option = statusOptions.find(s => s.value === status);
 		return option ? option.label : status;
+	}
+
+	function statusChipClass(status: string) {
+		const current = book?.status || 'unread';
+		if (current === status) {
+			if (status === 'reading') return 'bg-blue-500/20 text-blue-400 border-blue-500/40';
+			if (status === 'finished') return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
+			return 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-300)] border-[var(--color-primary-500)]/40';
+		}
+		return 'bg-[var(--color-surface-700)]/50 text-[var(--color-surface-text-muted)] border-[var(--color-surface-border)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]';
+	}
+
+	async function updateBookStatus(status: string) {
+		if (!book?.id || statusSaving || (book.status || 'unread') === status) return;
+		const previousStatus = book.status || 'unread';
+		statusSaving = true;
+		statusError = '';
+		book = { ...book, status };
+		try {
+			const res = await fetch(`/api/books/${book.id}/status`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ status })
+			});
+			if (!res.ok) {
+				throw new Error(await res.text());
+			}
+		} catch (e) {
+			book = { ...book, status: previousStatus };
+			statusError = 'Failed to update status.';
+			console.error('Failed to update reading status:', e);
+		} finally {
+			statusSaving = false;
+		}
 	}
 
 	function getReaderTypeLabel(readerType: string): string {
@@ -569,6 +625,19 @@
 
 	function goBackToPreviousContext(event: MouseEvent) {
 		event.preventDefault();
+		const currentRoute = `${$page.url.pathname}${$page.url.search}`;
+		if (typeof window !== 'undefined') {
+			try {
+				const stack = JSON.parse(sessionStorage.getItem('cryptorumRouteStack') || '[]') as string[];
+				const previousUnique = [...stack].reverse().find((route) => route && route !== currentRoute && !route.startsWith('/reader/'));
+				if (previousUnique) {
+					goto(previousUnique);
+					return;
+				}
+			} catch {
+				// Fall back to browser history or library route.
+			}
+		}
 		if (typeof window !== 'undefined' && window.history.length > 1) {
 			window.history.back();
 			return;
@@ -865,48 +934,62 @@
 					</div>
 
 					<div class="mt-3 mb-4 md:mb-0 flex flex-col gap-2">
-						{#if primaryReadFormat}
-							<div class="relative">
-								<div class="flex w-full overflow-hidden rounded-lg">
-										<a
-											href={getBookReaderHref(book.id, primaryReadFormat, `/book/${book.id}`)}
-											class="flex min-w-0 flex-1 items-center justify-between gap-3 bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-colors duration-200 ease-out hover:bg-[var(--color-primary-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
-										>
-											<span class="truncate">{book.opened && book.percent > 0 ? 'Continue Reading' : 'Read Now'}</span>
-											<span class="text-[10px] uppercase tracking-[0.14em] text-white/80">{getFormatDisplayLabel(primaryReadFormat)}</span>
-										</a>
-										{#if readableFormats.length > 1}
-											<button
-												type="button"
-												onclick={() => formatMenuOpen = !formatMenuOpen}
-												class="inline-flex items-center justify-center border-l border-white/20 bg-[var(--color-primary-500)] px-3 text-white transition-colors duration-200 ease-out hover:bg-[var(--color-primary-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
-												aria-label="Choose reader format"
-												aria-expanded={formatMenuOpen}
-											>
-												<svg class="h-4 w-4 transition-transform duration-200 ease-out {formatMenuOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-												</svg>
-											</button>
-										{/if}
-								</div>
-								{#if formatMenuOpen && readableFormats.length > 1}
-									<div class="absolute right-0 top-full z-20 mt-2 w-56 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-800)] shadow-lg">
-											{#each readableFormats.filter((format) => format !== primaryReadFormat) as format}
-												<a
-													href={getBookReaderHref(book.id, format, `/book/${book.id}`)}
-													onclick={() => formatMenuOpen = false}
-													class="flex items-center justify-between px-3 py-2 text-sm text-[var(--color-surface-text)] transition-colors duration-200 hover:bg-[var(--color-surface-700)]"
-												>
-												<span>{getFormatDisplayLabel(format)}</span>
-												<span class="text-xs uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">
-													{getReaderRouteKind(format) || 'reader'}
-												</span>
-											</a>
-										{/each}
-									</div>
+						<div class="relative">
+							<div class="flex w-full overflow-hidden rounded-lg">
+								{#if primaryReadFormat}
+									<a
+										href={getBookReaderHref(book.id, primaryReadFormat, `/book/${book.id}`)}
+										class="flex min-w-0 flex-1 items-center justify-between gap-3 bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-colors duration-200 ease-out hover:bg-[var(--color-primary-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
+									>
+										<span class="truncate">{book.opened && book.percent > 0 ? 'Continue Reading' : 'Read Now'}</span>
+										<span class="text-[10px] uppercase tracking-[0.14em] text-white/80">{getFormatDisplayLabel(primaryReadFormat)}</span>
+									</a>
+								{:else}
+									<button
+										type="button"
+										disabled
+										class="flex min-w-0 flex-1 items-center justify-between gap-3 bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text-muted)] sm:px-4"
+									>
+										<span class="truncate">{loading ? 'Checking reader...' : 'Read Now unavailable'}</span>
+										<span class="text-[10px] uppercase tracking-[0.14em]">{filesError ? 'retry' : 'no reader'}</span>
+									</button>
+								{/if}
+								{#if readableFormats.length > 1}
+									<button
+										type="button"
+										onclick={() => formatMenuOpen = !formatMenuOpen}
+										class="inline-flex items-center justify-center border-l border-white/20 bg-[var(--color-primary-500)] px-3 text-white transition-colors duration-200 ease-out hover:bg-[var(--color-primary-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+										aria-label="Choose reader format"
+										aria-expanded={formatMenuOpen}
+									>
+										<svg class="h-4 w-4 transition-transform duration-200 ease-out {formatMenuOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+										</svg>
+									</button>
 								{/if}
 							</div>
-						{/if}
+							{#if !primaryReadFormat && !loading}
+								<button type="button" onclick={fetchBook} class="mt-1 text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">
+									Retry reader check
+								</button>
+							{/if}
+							{#if formatMenuOpen && readableFormats.length > 1}
+								<div class="absolute right-0 top-full z-20 mt-2 w-56 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-800)] shadow-lg">
+									{#each readableFormats.filter((format) => format !== primaryReadFormat) as format}
+										<a
+											href={getBookReaderHref(book.id, format, `/book/${book.id}`)}
+											onclick={() => formatMenuOpen = false}
+											class="flex items-center justify-between px-3 py-2 text-sm text-[var(--color-surface-text)] transition-colors duration-200 hover:bg-[var(--color-surface-700)]"
+										>
+											<span>{getFormatDisplayLabel(format)}</span>
+											<span class="text-xs uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">
+												{getReaderRouteKind(format) || 'reader'}
+											</span>
+										</a>
+									{/each}
+								</div>
+							{/if}
+						</div>
 							{#if primarySpeedReadFormat}
 									<a
 										href={getSpeedReaderHref(book.id, primarySpeedReadFormat)}
@@ -933,6 +1016,36 @@
 
 				<div class="flex-1 min-w-0">
 					<div class="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+						<div class="flex items-start gap-2 sm:col-span-2">
+							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Status</dt>
+							<dd class="flex flex-wrap gap-2 text-sm">
+								{#each statusOptions as option}
+									<button
+										type="button"
+										onclick={() => updateBookStatus(option.value)}
+										disabled={statusSaving}
+										class="rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors duration-200 ease-out {statusChipClass(option.value)} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:cursor-wait disabled:opacity-70"
+									>
+										{option.label}
+									</button>
+								{/each}
+								{#if statusError}
+									<span class="basis-full text-xs text-red-400">{statusError}</span>
+								{/if}
+							</dd>
+						</div>
+						{#if uniqueBookFormats(files).length > 0}
+							<div class="flex items-start gap-2 sm:col-span-2">
+								<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Formats</dt>
+								<dd class="flex flex-wrap gap-2 min-w-0">
+									{#each uniqueBookFormats(files) as format}
+										<span class="rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-2.5 py-0.5 text-xs font-medium uppercase tracking-[0.08em] text-[var(--color-surface-text)]">
+											{getFormatDisplayLabel(format)}
+										</span>
+									{/each}
+								</dd>
+							</div>
+						{/if}
 						<div class="flex items-start gap-2">
 							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Library</dt>
 							<dd class="text-sm text-[var(--color-surface-text)]">
@@ -1018,29 +1131,6 @@
 								{/if}
 							</dd>
 						</div>
-						<div class="flex items-start gap-2">
-							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Status</dt>
-								<dd class="text-sm">
-									<button
-										onclick={() => navigateWithFilter('status', book.status || 'reading')}
-										class="rounded-full px-2 py-0.5 text-xs font-medium transition-colors duration-200 ease-out {book.status === 'reading' ? 'bg-blue-500/20 text-blue-400' : book.status === 'finished' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-[var(--color-surface-700)] text-[var(--color-surface-text)]'} hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
-									>
-										{book.status === 'reading' ? 'Currently Reading' : book.status === 'finished' ? 'Already Read' : 'Unread'}
-									</button>
-							</dd>
-						</div>
-						{#if uniqueBookFormats(files).length > 0}
-							<div class="flex items-start gap-2 sm:col-span-2">
-								<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Formats</dt>
-								<dd class="flex flex-wrap gap-2 min-w-0">
-									{#each uniqueBookFormats(files) as format}
-										<span class="rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-2.5 py-0.5 text-xs font-medium uppercase tracking-[0.08em] text-[var(--color-surface-text)]">
-											{getFormatDisplayLabel(format)}
-										</span>
-									{/each}
-								</dd>
-							</div>
-						{/if}
 						{#if getPrimaryFilePath()}
 							<div class="flex items-start gap-2 sm:col-span-2">
 								<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Path</dt>

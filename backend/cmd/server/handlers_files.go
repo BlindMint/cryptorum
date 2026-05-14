@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -88,7 +89,19 @@ type cbzManifest struct {
 	entries []cbzManifestEntry
 }
 
+type archiveCommand struct {
+	name string
+	args func(filePath string, entryName string) []string
+}
+
 var cbzManifestCache = struct {
+	sync.RWMutex
+	items map[string]*cbzManifest
+}{
+	items: make(map[string]*cbzManifest),
+}
+
+var cbrManifestCache = struct {
 	sync.RWMutex
 	items map[string]*cbzManifest
 }{
@@ -465,6 +478,25 @@ func countCbzPages(filePath string) (int, error) {
 		return 0, err
 	}
 	return len(manifest.entries), nil
+}
+
+func countCbrPages(filePath string) (int, error) {
+	manifest, err := getCbrManifest(filePath)
+	if err != nil {
+		return 0, err
+	}
+	return len(manifest.entries), nil
+}
+
+func countCbxPages(filePath, format string) (int, error) {
+	switch strings.ToLower(format) {
+	case "cbz":
+		return countCbzPages(filePath)
+	case "cbr":
+		return countCbrPages(filePath)
+	default:
+		return 0, fmt.Errorf("unsupported comic archive format %q", format)
+	}
 }
 
 func countPdfPages(filePath string) (int, error) {
@@ -921,10 +953,184 @@ func serveCbzPage(w http.ResponseWriter, r *http.Request, filePath string, pageN
 	_, _ = io.Copy(w, rc)
 }
 
+func cbrArchiveCommands() []archiveCommand {
+	return []archiveCommand{
+		{
+			name: "unrar",
+			args: func(filePath string, entryName string) []string {
+				if entryName == "" {
+					return []string{"lb", "-c-", "--", filePath}
+				}
+				return []string{"p", "-inul", "-c-", "--", filePath, entryName}
+			},
+		},
+		{
+			name: "7z",
+			args: func(filePath string, entryName string) []string {
+				if entryName == "" {
+					return []string{"l", "-slt", "--", filePath}
+				}
+				return []string{"x", "-so", "--", filePath, entryName}
+			},
+		},
+		{
+			name: "bsdtar",
+			args: func(filePath string, entryName string) []string {
+				if entryName == "" {
+					return []string{"-tf", filePath}
+				}
+				return []string{"-xOf", filePath, entryName}
+			},
+		},
+	}
+}
+
+func parseCbrListOutput(toolName, output string) []cbzManifestEntry {
+	var entries []cbzManifestEntry
+	switch toolName {
+	case "7z":
+		for _, line := range strings.Split(output, "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "Path = ") {
+				continue
+			}
+			name := strings.TrimSpace(strings.TrimPrefix(line, "Path = "))
+			if name == "" || name == "." || strings.HasSuffix(name, "/") || strings.HasSuffix(name, "\\") || strings.Contains(name, "__MACOSX/") {
+				continue
+			}
+			contentType := cbzContentType(filepath.Ext(name))
+			if contentType == "" {
+				continue
+			}
+			entries = append(entries, cbzManifestEntry{Name: name, ContentType: contentType})
+		}
+	default:
+		for _, line := range strings.Split(output, "\n") {
+			name := strings.TrimSpace(line)
+			if name == "" || strings.HasSuffix(name, "/") || strings.HasSuffix(name, "\\") || strings.Contains(name, "__MACOSX/") {
+				continue
+			}
+			contentType := cbzContentType(filepath.Ext(name))
+			if contentType == "" {
+				continue
+			}
+			entries = append(entries, cbzManifestEntry{Name: name, ContentType: contentType})
+		}
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return naturalCompare(entries[i].Name, entries[j].Name) < 0
+	})
+	return entries
+}
+
+func getCbrManifest(filePath string) (*cbzManifest, error) {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return nil, err
+	}
+	size := info.Size()
+	modTime := info.ModTime().Unix()
+
+	cbrManifestCache.RLock()
+	cached := cbrManifestCache.items[filePath]
+	cbrManifestCache.RUnlock()
+	if cached != nil && cached.size == size && cached.modTime == modTime {
+		return cached, nil
+	}
+
+	var lastErr error
+	for _, command := range cbrArchiveCommands() {
+		if _, err := exec.LookPath(command.name); err != nil {
+			lastErr = err
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		output, err := exec.CommandContext(ctx, command.name, command.args(filePath, "")...).CombinedOutput()
+		cancel()
+		if err != nil {
+			lastErr = fmt.Errorf("%s failed to list CBR archive: %w: %s", command.name, err, strings.TrimSpace(string(output)))
+			continue
+		}
+
+		entries := parseCbrListOutput(command.name, string(output))
+		if len(entries) == 0 {
+			lastErr = fmt.Errorf("%s found no image pages in CBR archive", command.name)
+			continue
+		}
+
+		manifest := &cbzManifest{size: size, modTime: modTime, entries: entries}
+		cbrManifestCache.Lock()
+		cbrManifestCache.items[filePath] = manifest
+		cbrManifestCache.Unlock()
+		return manifest, nil
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no supported CBR extraction tool found; install unrar, 7z, or bsdtar")
+	}
+	return nil, lastErr
+}
+
 func serveCbrPage(w http.ResponseWriter, filePath string, pageNum int) {
-	// CBR (RAR) support would require the rardecode library
-	// For now, return not implemented
-	errorResponse(w, http.StatusNotImplemented, "CBR format not yet supported")
+	manifest, err := getCbrManifest(filePath)
+	if err != nil {
+		log.Printf("Failed to open CBR %s: %v\n", filePath, err)
+		errorResponse(w, http.StatusInternalServerError, "Failed to open CBR")
+		return
+	}
+	if pageNum < 1 || pageNum > len(manifest.entries) {
+		errorResponse(w, http.StatusNotFound, "Page not found")
+		return
+	}
+
+	entry := manifest.entries[pageNum-1]
+	var lastErr error
+	wroteResponse := false
+	for _, command := range cbrArchiveCommands() {
+		if _, err := exec.LookPath(command.name); err != nil {
+			lastErr = err
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		cmd := exec.CommandContext(ctx, command.name, command.args(filePath, entry.Name)...)
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			cancel()
+			lastErr = err
+			continue
+		}
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		if err := cmd.Start(); err != nil {
+			cancel()
+			lastErr = err
+			continue
+		}
+
+		w.Header().Set("Content-Type", entry.ContentType)
+		w.Header().Set("Cache-Control", "private, max-age=86400")
+		_, copyErr := io.Copy(w, stdout)
+		wroteResponse = true
+		waitErr := cmd.Wait()
+		cancel()
+		if copyErr != nil {
+			lastErr = copyErr
+			continue
+		}
+		if waitErr != nil {
+			lastErr = fmt.Errorf("%s failed to extract CBR page: %w: %s", command.name, waitErr, strings.TrimSpace(stderr.String()))
+			continue
+		}
+		return
+	}
+
+	log.Printf("Failed to extract CBR page %d from %s: %v\n", pageNum, filePath, lastErr)
+	if !wroteResponse {
+		errorResponse(w, http.StatusInternalServerError, "Failed to extract CBR page")
+	}
 }
 
 // ServeCoverHandler serves book covers
