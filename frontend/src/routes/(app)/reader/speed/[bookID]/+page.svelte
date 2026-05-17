@@ -2,9 +2,8 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { browser } from '$app/environment';
 	import { readerSettings, speedReaderThemes, fontFamilies, fontWeightOptions, resolveFontFamily, type SpeedReaderSetting } from '$lib/stores/readerSettings';
-	import { currentTheme as appThemeStore, resolveThemeColors, type FullTheme } from '$lib/stores/theme';
+	import { currentTheme as appThemeStore, resolveThemeColors, addCustomTheme, removeCustomTheme, generateId, type FullTheme } from '$lib/stores/theme';
 	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
 
@@ -23,6 +22,7 @@
 	let showControls = $state(true);
 	let showSettings = $state(false);
 	let showWpmMenu = $state(false);
+	let activeSettingsTab = $state<'reading' | 'typography' | 'focus'>('reading');
 	let controlsTimeout: ReturnType<typeof setTimeout> | null = null;
 	let containerEl: HTMLDivElement;
 	let settingsPanelRef: HTMLDivElement | null = $state(null);
@@ -39,6 +39,7 @@
 	// Word picker state
 	let wordPickerPending = $state(0);   // word the user is about to jump to
 	let wordPickerOrigin = $state(0);    // word the user was at when panel opened
+	const WORD_PICKER_WINDOW_RADIUS = 450;
 
 	function preprocessText(text: string): string {
 		const result: string[] = [];
@@ -106,6 +107,16 @@
 	}
 
 	let wordPickerParagraphs = $derived(buildParagraphs(words));
+	let wordPickerVisibleStart = $derived(Math.max(0, wordPickerPending - WORD_PICKER_WINDOW_RADIUS));
+	let wordPickerVisibleEnd = $derived(Math.min(words.length, wordPickerPending + WORD_PICKER_WINDOW_RADIUS + 1));
+	let wordPickerVisibleParagraphs = $derived(
+		wordPickerParagraphs
+			.filter((para) => para.end > wordPickerVisibleStart && para.start < wordPickerVisibleEnd)
+			.map((para) => ({
+				start: Math.max(para.start, wordPickerVisibleStart),
+				end: Math.min(para.end, wordPickerVisibleEnd)
+			}))
+	);
 
 	function processText(text: string): ProcessedWord[] {
 		const processed: ProcessedWord[] = [];
@@ -141,9 +152,10 @@
 		sentencePause: 350,
 		autoSentencePause: true,
 		keepScreenOn: true,
-		theme: 'dark',
+		theme: 'catppuccin',
 		letterSpacing: 0,
-		focusIndicatorLength: 20
+		focusIndicatorLength: 20,
+		showWordCount: false
 	});
 
 	let readerTheme = $state(speedReaderThemes[0]);
@@ -171,7 +183,7 @@
 	});
 
 	const unsubSettings = readerSettings.subscribe(s => {
-		settings = { ...s.speedReader };
+		settings = { ...s.speedReader, theme: s.readerTheme || s.speedReader.theme };
 		updateReaderTheme();
 	});
 
@@ -450,17 +462,20 @@
 
 	function openWordPicker(e: MouseEvent | { stopPropagation: () => void }) {
 		e.stopPropagation();
+		showWpmMenu = false;
 		wordPickerPending = currentIndex;
 		wordPickerOrigin = currentIndex;
 		showWordPicker = true;
 	}
 
-	function confirmWordPicker() {
+	function confirmWordPicker(e?: Event) {
+		e?.stopPropagation();
 		currentIndex = wordPickerPending;
 		showWordPicker = false;
 	}
 
-	function cancelWordPicker() {
+	function cancelWordPicker(e?: Event) {
+		e?.stopPropagation();
 		showWordPicker = false;
 	}
 
@@ -574,12 +589,58 @@
 
 	function updateSetting(key: string, value: any) {
 		settings = { ...settings, [key]: value };
-		readerSettings.updateSpeedReader({ [key]: value });
+		if (key === 'theme') {
+			readerSettings.updateReaderTheme(value);
+		} else {
+			readerSettings.updateSpeedReader({ [key]: value });
+		}
+	}
+
+	function addReaderTheme() {
+		const name = window.prompt('Theme name');
+		if (!name?.trim()) return;
+		const foreground = window.prompt('Text color', readerTheme.text);
+		if (!foreground?.trim()) return;
+		const background = window.prompt('Background color', readerTheme.bg);
+		if (!background?.trim()) return;
+
+		const id = generateId();
+		addCustomTheme({
+			id,
+			name: name.trim(),
+			foreground: foreground.trim(),
+			background: background.trim()
+		});
+		updateSetting('theme', id);
+	}
+
+	function deleteReaderTheme(themeId: string, themeName: string) {
+		if (!window.confirm(`Remove theme "${themeName}"?`)) return;
+		removeCustomTheme(themeId);
+		if (settings.theme === themeId) {
+			updateSetting('theme', 'catppuccin');
+		}
 	}
 
 	function formatProgress(): string {
 		const percent = words.length > 0 ? Math.round((currentIndex / words.length) * 100) : 0;
 		return `${percent}%`;
+	}
+
+	function formatWordProgress(): string {
+		if (words.length <= 0) return '0 / 0 • 0%';
+		const currentWord = Math.min(currentIndex + 1, words.length);
+		return `${currentWord.toLocaleString()} / ${words.length.toLocaleString()}`;
+	}
+
+	function openWpmMenu(e: MouseEvent) {
+		e.stopPropagation();
+		showWpmMenu = true;
+	}
+
+	function closeWpmMenu(e?: Event) {
+		e?.stopPropagation();
+		showWpmMenu = false;
 	}
 
 	function toggleFullscreen() {
@@ -640,7 +701,7 @@
 	<div
 		bind:this={containerEl}
 		class="speed-reader-root fixed inset-0 z-50 flex flex-col select-none"
-			style="background-color: {readerTheme.bg}; color: {readerTheme.text};"
+			style="--speed-reader-bg: {readerTheme.bg}; --speed-reader-chrome: {readerTheme.text}; background-color: {readerTheme.bg}; color: {readerTheme.text};"
 		role="application"
 		aria-label="Speed Reader"
 	>
@@ -659,31 +720,9 @@
 
 		<div class="nav-center">
 			<span class="book-title">{book?.title || 'Loading...'}</span>
-			<span class="chapter-title">Speed Reader</span>
 		</div>
 
 		<div class="nav-right">
-			<span class="nav-stat hidden sm:inline">{(currentIndex + 1).toLocaleString()} / {words.length.toLocaleString()}</span>
-			<span class="nav-stat hidden sm:inline">{formatProgress()}</span>
-			<div class="nav-divider hidden sm:block"></div>
-				<button
-					type="button"
-					onclick={(e) => { e.stopPropagation(); showWpmMenu = !showWpmMenu; }}
-					class="nav-btn nav-pill hidden sm:inline-flex"
-					title="Playback speed"
-			>
-				{settings.wpm} wpm
-			</button>
-				<button
-					type="button"
-					onclick={(e) => { e.stopPropagation(); openWordPicker(e); }}
-					class="nav-btn"
-					title="Word Picker"
-			>
-				<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7"></path>
-				</svg>
-			</button>
 				<button
 					type="button"
 					onclick={(e) => { e.stopPropagation(); showSettings = !showSettings; }}
@@ -818,122 +857,171 @@
 
 	<!-- Bottom Bar -->
 	<footer
-		class="speed-footer absolute bottom-0 left-0 right-0 p-4 transition-opacity duration-200 {showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}"
+		class="speed-footer absolute bottom-0 left-0 right-0 transition-opacity duration-200 {showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}"
 	>
-		<div class="flex items-center justify-center gap-6">
-			<button
-				type="button"
-				onclick={prevWord}
-				class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors text-2xl font-light"
-				aria-label="Previous word"
-				title="Previous word"
-			>
-				&lt;
-			</button>
-
-			<button
-				type="button"
-				onclick={togglePlay}
-				class="w-16 h-16 rounded-full text-white flex items-center justify-center transition-colors shadow-lg"
-				style="background-color: var(--color-primary-500);"
-				aria-label={isPlaying ? 'Pause' : 'Play'}
-				title={isPlaying ? 'Pause' : 'Play'}
-			>
-				{#if isPlaying}
-					<svg class="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
-						<path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"></path>
+		<div class="speed-footer-inner">
+			<div class="speed-playback-controls">
+				<button
+					type="button"
+					onclick={prevWord}
+					class="speed-transport-button"
+					aria-label="Previous word"
+					title="Previous word"
+				>
+					<svg class="speed-transport-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+						<polyline points="15 18 9 12 15 6"></polyline>
 					</svg>
-				{:else}
-					<svg class="w-8 h-8 ml-1" fill="currentColor" viewBox="0 0 24 24">
-						<path d="M8 5v14l11-7z"></path>
-					</svg>
-				{/if}
-			</button>
+				</button>
 
-			<button
-				type="button"
-				onclick={nextWord}
-				class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors text-2xl font-light"
-				aria-label="Next word"
-				title="Next word"
-			>
-				&gt;
-			</button>
+				<button
+					type="button"
+					onclick={togglePlay}
+					class="speed-play-button"
+					aria-label={isPlaying ? 'Pause' : 'Play'}
+					title={isPlaying ? 'Pause' : 'Play'}
+				>
+					{#if isPlaying}
+						<svg class="speed-play-icon" fill="currentColor" viewBox="0 0 24 24">
+							<path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"></path>
+						</svg>
+					{:else}
+						<svg class="speed-play-icon speed-play-icon-play" fill="currentColor" viewBox="0 0 24 24">
+							<path d="M8 5v14l11-7z"></path>
+						</svg>
+					{/if}
+				</button>
+
+				<button
+					type="button"
+					onclick={nextWord}
+					class="speed-transport-button"
+					aria-label="Next word"
+					title="Next word"
+				>
+					<svg class="speed-transport-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+						<polyline points="9 18 15 12 9 6"></polyline>
+					</svg>
+				</button>
+			</div>
+
+			<div class="speed-status-strip">
+				<div class="speed-status-row">
+					<div class="speed-progress-line" aria-label="Speed reader progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={words.length > 0 ? Math.round((currentIndex / words.length) * 100) : 0}>
+						<div class="speed-progress-fill" style="width: {words.length > 0 ? (currentIndex / words.length) * 100 : 0}%;"></div>
+					</div>
+					{#if settings.showWordCount}
+						<span class="speed-word-count">{formatWordProgress()}</span>
+						<span class="speed-progress-separator">•</span>
+					{/if}
+					<span class="speed-progress-label">{formatProgress()}</span>
+					<button
+						type="button"
+						onclick={openWpmMenu}
+						class="speed-status-button"
+						title="Playback speed"
+					>
+						{settings.wpm} wpm
+					</button>
+					<button
+						type="button"
+						onclick={(e) => { e.stopPropagation(); openWordPicker(e); }}
+						class="speed-status-icon"
+						title="Word Picker"
+						aria-label="Word Picker"
+					>
+						<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7"></path>
+						</svg>
+					</button>
+				</div>
+			</div>
 		</div>
 	</footer>
 
 	<!-- WPM Menu Popup -->
 		{#if showWpmMenu}
 			<div
-				bind:this={wpmMenuRef}
-				class="absolute bottom-24 right-4 w-64 rounded-xl shadow-xl z-[70] p-4"
-				style="background-color: {readerTheme.bg}; border: 1px solid {readerTheme.text}20;"
+				class="speed-sheet-backdrop"
+				role="presentation"
+				onclick={closeWpmMenu}
 			>
-			<!-- WPM Value Display -->
-			<div class="flex items-center justify-between mb-4">
+				<div
+					bind:this={wpmMenuRef}
+					class="speed-wpm-sheet"
+					role="dialog"
+					aria-modal="true"
+					aria-label="Playback speed"
+					tabindex="-1"
+					onclick={(e) => e.stopPropagation()}
+					onkeydown={(e) => { if (e.key === 'Escape') closeWpmMenu(e); }}
+					style="background-color: {readerTheme.bg}; border-color: {readerTheme.text}22;"
+				>
+					<div class="speed-wpm-value-row">
 					<button
 						type="button"
 						onclick={() => updateWpm(Math.max(50, settings.wpm - 100))}
-						class="px-2 py-1 rounded text-sm transition-colors"
-						style="background-color: {readerTheme.text}20; color: {readerTheme.text};"
-				>
-					-100
-				</button>
+							class="speed-wpm-step-button speed-wpm-step-edge"
+							style="background-color: {readerTheme.text}18; color: {readerTheme.text};"
+					>
+						-100
+					</button>
 					<button
 						type="button"
 						onclick={() => updateWpm(Math.max(50, settings.wpm - 50))}
-						class="px-2 py-1 rounded text-sm transition-colors"
-					style="background-color: {readerTheme.text}20; color: {readerTheme.text};"
-				>
-					-50
-				</button>
-				<span class="text-2xl font-bold text-center flex-1" style="color: {readerTheme.text};">{settings.wpm}</span>
+							class="speed-wpm-step-button speed-wpm-step-inner speed-wpm-step-minus"
+						style="background-color: {readerTheme.text}18; color: {readerTheme.text};"
+					>
+						-50
+					</button>
+					<span class="speed-wpm-value" style="color: {readerTheme.text};">{settings.wpm}</span>
 					<button
 						type="button"
 						onclick={() => updateWpm(Math.min(1200, settings.wpm + 50))}
-						class="px-2 py-1 rounded text-sm transition-colors"
-					style="background-color: {readerTheme.text}20; color: {readerTheme.text};"
-				>
-					+50
-				</button>
+							class="speed-wpm-step-button speed-wpm-step-inner speed-wpm-step-plus"
+						style="background-color: {readerTheme.text}18; color: {readerTheme.text};"
+					>
+						+50
+					</button>
 					<button
 						type="button"
 						onclick={() => updateWpm(Math.min(1200, settings.wpm + 100))}
-						class="px-2 py-1 rounded text-sm transition-colors"
-					style="background-color: {readerTheme.text}20; color: {readerTheme.text};"
-				>
-					+100
-				</button>
-			</div>
+							class="speed-wpm-step-button speed-wpm-step-edge"
+						style="background-color: {readerTheme.text}18; color: {readerTheme.text};"
+					>
+						+100
+					</button>
+				</div>
 
-			<!-- WPM Slider Row -->
-			<div class="flex items-center gap-2">
+					<div class="speed-wpm-slider-row">
 					<button
 						type="button"
 						onclick={() => updateWpm(Math.max(50, settings.wpm - 10))}
-						class="text-xl transition-colors"
-					style="color: {readerTheme.text};"
-				>
-					-
-				</button>
-				<input
-					type="range"
-					min="50"
-					max="1200"
-					step="10"
-					value={settings.wpm}
-					oninput={(e) => updateWpm(parseInt(e.currentTarget.value))}
-					class="flex-1 h-2 rounded-lg appearance-none cursor-pointer"
-					style="background-color: {readerTheme.text}20;"
-				/>
+							class="speed-wpm-nudge-button"
+						style="background-color: {readerTheme.text}14; color: {readerTheme.text};"
+						aria-label="Decrease speed"
+					>
+						-
+					</button>
+					<input
+						type="range"
+						min="50"
+						max="1200"
+						step="10"
+						value={settings.wpm}
+						oninput={(e) => updateWpm(parseInt(e.currentTarget.value))}
+						class="speed-wpm-slider"
+						style="background-color: {readerTheme.text}20;"
+					/>
 					<button
 						type="button"
 						onclick={() => updateWpm(Math.min(1200, settings.wpm + 10))}
-						class="text-xl transition-colors"
-					style="color: {readerTheme.text};"
-				>
-					+
-				</button>
+							class="speed-wpm-nudge-button"
+						style="background-color: {readerTheme.text}14; color: {readerTheme.text};"
+						aria-label="Increase speed"
+					>
+						+
+					</button>
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -941,14 +1029,14 @@
 	<!-- Word Picker Panel -->
 		{#if showWordPicker}
 			<div
-				class="fixed inset-0 z-[60] flex flex-col"
+				class="speed-word-picker-modal"
 				style="background-color: {readerTheme.bg};"
 				role="dialog"
 				aria-modal="true"
 				aria-label="Word picker"
 				tabindex="0"
-				onkeydown={(e) => { if (e.key === 'Escape') cancelWordPicker(); }}
-				onclick={(e) => { if (e.target === e.currentTarget) cancelWordPicker(); }}
+				onkeydown={(e) => { if (e.key === 'Escape') cancelWordPicker(e); }}
+				onclick={(e) => { if (e.target === e.currentTarget) cancelWordPicker(e); }}
 			>
 			<!-- Header -->
 			<div class="flex-shrink-0 flex items-center justify-between px-5 py-4 border-b" style="border-color: {readerTheme.text}20;">
@@ -958,7 +1046,7 @@
 						Tap a word to select it, then confirm
 					</p>
 				</div>
-					<button type="button" onclick={cancelWordPicker} class="p-1.5 transition-colors" style="color: {readerTheme.text}80;" aria-label="Close word picker" title="Close word picker">
+					<button type="button" onclick={(e) => cancelWordPicker(e)} class="speed-word-picker-close" style="color: {readerTheme.text}80;" aria-label="Close word picker" title="Close word picker">
 					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
 					</svg>
@@ -979,40 +1067,50 @@
 
 			<!-- Text content -->
 			<div class="flex-1 overflow-y-auto px-6 py-5">
-				{#each wordPickerParagraphs as para}
-					<p class="mb-5 leading-loose text-base select-none" style="color: {readerTheme.text}; font-family: Georgia, serif;">
-						{#each words.slice(para.start, para.end) as word, j}
-							{@const idx = para.start + j}
-							{@const isOrigin = idx === wordPickerOrigin}
-							{@const isPending = idx === wordPickerPending}
-								<span
-									id="wk-{idx}"
-									onclick={() => { wordPickerPending = idx; }}
-									role="button"
-									tabindex="0"
-									onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); wordPickerPending = idx; } }}
-									class="cursor-pointer rounded px-0.5 py-px transition-colors {
-									isOrigin && isPending
-										? 'text-white'
-										: isOrigin
+				{#if words.length === 0}
+					<div class="speed-word-picker-loading" style="color: {readerTheme.text}80;">
+						<div class="speed-word-picker-spinner" style="border-color: {readerTheme.text}24; border-bottom-color: {readerTheme.text};"></div>
+						<span>Preparing word list...</span>
+					</div>
+				{:else}
+					<div class="speed-word-picker-window-note" style="color: {readerTheme.text}60;">
+						Showing words {(wordPickerVisibleStart + 1).toLocaleString()}-{wordPickerVisibleEnd.toLocaleString()} of {words.length.toLocaleString()}
+					</div>
+					{#each wordPickerVisibleParagraphs as para}
+						<p class="mb-5 leading-loose text-base select-none" style="color: {readerTheme.text}; font-family: Georgia, serif;">
+							{#each words.slice(para.start, para.end) as word, j}
+								{@const idx = para.start + j}
+								{@const isOrigin = idx === wordPickerOrigin}
+								{@const isPending = idx === wordPickerPending}
+									<span
+										id="wk-{idx}"
+										onclick={() => { wordPickerPending = idx; }}
+										role="button"
+										tabindex="0"
+										onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); wordPickerPending = idx; } }}
+										class="cursor-pointer rounded px-0.5 py-px transition-colors {
+										isOrigin && isPending
 											? 'text-white'
-											: isPending
-												? 'outline outline-2'
-												: 'hover:bg-white/10'
-								}"
-								style="{
-									isOrigin && isPending
-										? 'background-color: var(--color-primary-500);'
-										: isOrigin
+											: isOrigin
+												? 'text-white'
+												: isPending
+													? 'outline outline-2'
+													: 'hover:bg-white/10'
+									}"
+									style="{
+										isOrigin && isPending
 											? 'background-color: var(--color-primary-500);'
-											: isPending
-												? 'outline-color: var(--color-primary-400);'
-												: ''
-								}"
-							>{word.text}</span>&#8203;{' '}
+											: isOrigin
+												? 'background-color: var(--color-primary-500);'
+												: isPending
+													? 'outline-color: var(--color-primary-400);'
+													: ''
+									}"
+								>{word.text}</span>&#8203;{' '}
+							{/each}
+						</p>
 						{/each}
-					</p>
-				{/each}
+				{/if}
 			</div>
 
 			<!-- Seek bar -->
@@ -1040,16 +1138,16 @@
 			<div class="flex-shrink-0 flex gap-3 px-5 py-4 border-t" style="border-color: {readerTheme.text}20;">
 					<button
 						type="button"
-						onclick={cancelWordPicker}
-						class="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+						onclick={(e) => cancelWordPicker(e)}
+						class="speed-word-picker-action speed-word-picker-action-secondary"
 					style="background-color: {readerTheme.text}15; color: {readerTheme.text};"
 				>
 					Cancel
 				</button>
 					<button
 						type="button"
-						onclick={confirmWordPicker}
-						class="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+						onclick={(e) => confirmWordPicker(e)}
+						class="speed-word-picker-action speed-word-picker-action-primary"
 					style="background-color: var(--color-primary-500); color: white;"
 				>
 					Start Here
@@ -1063,9 +1161,48 @@
 		<div
 			bind:this={settingsPanelRef}
 			class="fixed right-0 w-[480px] shadow-xl z-[60] flex flex-col transform transition-transform duration-300"
-			style="top: var(--speed-reader-top-bar-height); height: calc(100vh - var(--speed-reader-top-bar-height)); background-color: var(--color-surface-overlay); border-left: 1px solid var(--color-surface-border);"
+			style="
+				top: var(--speed-reader-top-bar-height);
+				height: calc(100vh - var(--speed-reader-top-bar-height));
+				background-color: {readerTheme.bg}f2;
+				border-left: 1px solid {readerTheme.text}26;
+				color: {readerTheme.text};
+				backdrop-filter: blur(18px);
+				--color-surface-text: {readerTheme.text};
+				--color-surface-text-muted: {readerTheme.text}99;
+				--color-surface-border: {readerTheme.text}26;
+				--color-surface-base: {readerTheme.text}0f;
+				--color-surface-overlay: {readerTheme.bg}f2;
+				--color-surface-700: {readerTheme.text}18;
+				--color-surface-600: {readerTheme.text}24;
+			"
 		>
 			<div class="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
+				<div class="grid grid-cols-3 gap-2 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
+					<button
+						type="button"
+						onclick={() => activeSettingsTab = 'reading'}
+						class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {activeSettingsTab === 'reading' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+					>
+						Reading
+					</button>
+					<button
+						type="button"
+						onclick={() => activeSettingsTab = 'typography'}
+						class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {activeSettingsTab === 'typography' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+					>
+						Typography
+					</button>
+					<button
+						type="button"
+						onclick={() => activeSettingsTab = 'focus'}
+						class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {activeSettingsTab === 'focus' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+					>
+						Focus
+					</button>
+				</div>
+
+				{#if activeSettingsTab === 'typography'}
 					<!-- Theme -->
 					<div>
 						<div class="text-sm font-medium block mb-2" style="color: var(--color-surface-text);">Theme</div>
@@ -1081,15 +1218,33 @@
 						{/each}
 						{#if appTheme?.appearance.customThemes?.length}
 							{#each appTheme.appearance.customThemes as customTheme}
-								<button
-									onclick={() => updateSetting('theme', customTheme.id)}
-									class="flex flex-col items-center p-2 rounded-lg border-2 transition-all text-sm {settings.theme === customTheme.id ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10' : 'border-[var(--color-surface-border)] hover:border-[var(--color-surface-500)]'}"
-								>
-									<ThemePreviewSwatch background={customTheme.background} foreground={customTheme.foreground} sizeClass="h-8 w-8 mb-1" />
-									<span class="text-xs text-[var(--color-surface-text)]">{customTheme.name}</span>
-								</button>
+								<div class="relative">
+									<button
+										onclick={() => updateSetting('theme', customTheme.id)}
+										class="flex w-full flex-col items-center p-2 rounded-lg border-2 transition-all text-sm {settings.theme === customTheme.id ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10' : 'border-[var(--color-surface-border)] hover:border-[var(--color-surface-500)]'}"
+									>
+										<ThemePreviewSwatch background={customTheme.background} foreground={customTheme.foreground} sizeClass="h-8 w-8 mb-1" />
+										<span class="text-xs text-[var(--color-surface-text)]">{customTheme.name}</span>
+									</button>
+									<button
+										type="button"
+										onclick={() => deleteReaderTheme(customTheme.id, customTheme.name)}
+										class="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-surface-base)] text-sm text-[var(--color-surface-text-muted)] shadow hover:text-[var(--color-surface-text)]"
+										aria-label="Remove {customTheme.name}"
+									>
+										×
+									</button>
+								</div>
 							{/each}
 						{/if}
+						<button
+							type="button"
+							onclick={addReaderTheme}
+							class="flex min-h-[72px] flex-col items-center justify-center rounded-lg border-2 border-dashed border-[var(--color-surface-border)] p-2 text-sm text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)] hover:text-[var(--color-surface-text)]"
+						>
+							<span class="text-xl leading-none">+</span>
+							<span class="text-xs">Add Theme</span>
+						</button>
 					</div>
 					<p class="text-xs mt-1" style="color: var(--color-surface-text-muted);">Applies to the reading background and foreground.</p>
 				</div>
@@ -1144,6 +1299,7 @@
 					/>
 				</div>
 
+				{:else if activeSettingsTab === 'focus'}
 					<!-- Focal Point -->
 					<div>
 						<div class="flex justify-between mb-2">
@@ -1292,6 +1448,44 @@
 					</button>
 				</div>
 
+				{:else}
+					<!-- Reading Speed -->
+					<div>
+						<div class="flex justify-between mb-2">
+							<div class="text-sm font-medium" style="color: var(--color-surface-text);">Words Per Minute</div>
+							<span class="text-sm" style="color: var(--color-surface-text-muted);">{settings.wpm}</span>
+						</div>
+						<input
+							type="range"
+							min="100"
+							max="1000"
+							step="10"
+							value={settings.wpm}
+							oninput={(e) => updateWpm(parseInt(e.currentTarget.value))}
+							class="w-full h-2 rounded-lg appearance-none cursor-pointer"
+							style="background-color: var(--color-surface-700);"
+						/>
+					</div>
+
+					<!-- Word Count Toggle -->
+					<div class="flex items-center justify-between">
+						<div>
+							<div class="text-sm font-medium block" style="color: var(--color-surface-text);">Show Word Count</div>
+							<p class="text-xs" style="color: var(--color-surface-text-muted);">Show current word and total words beside progress</p>
+						</div>
+						<button
+							type="button"
+							onclick={() => updateSetting('showWordCount', !settings.showWordCount)}
+							class="relative w-12 h-6 rounded-full transition-colors {settings.showWordCount ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-700)]'}"
+							aria-label={settings.showWordCount ? 'Hide word count' : 'Show word count'}
+							title={settings.showWordCount ? 'Hide word count' : 'Show word count'}
+						>
+							<span
+								class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform {settings.showWordCount ? 'left-7' : 'left-1'}"
+							></span>
+						</button>
+					</div>
+
 					<!-- Automatic Sentence Pause -->
 						<div class="flex items-center justify-between">
 						<div>
@@ -1348,6 +1542,8 @@
 					/>
 				</div>
 
+				{/if}
+
 				<!-- Reset -->
 				<div class="pt-4 border-t" style="border-color: var(--color-surface-border);">
 					<button
@@ -1370,15 +1566,373 @@
 
 	.top-nav {
 		position: relative;
-		display: flex;
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
 		align-items: center;
-		justify-content: space-between;
+		column-gap: 16px;
 		height: var(--speed-reader-top-bar-height);
-		padding: 0 12px;
-		background: var(--color-surface-base, #0f172a);
-		border-bottom: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
+		padding: 0 clamp(12px, 3vw, 32px);
+		color: var(--speed-reader-chrome, currentColor);
 		flex-shrink: 0;
 		z-index: 100;
+	}
+
+	.speed-footer {
+		z-index: 50;
+		padding: 0 clamp(12px, 4vw, 48px) calc(14px + env(safe-area-inset-bottom));
+		color: var(--speed-reader-chrome, currentColor);
+	}
+
+	.speed-footer-inner {
+		width: min(100%, 920px);
+		margin: 0 auto;
+	}
+
+	.speed-playback-controls {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: clamp(4px, 1.2vw, 10px);
+		padding: 0 0 24px;
+		transform: translateY(-12px);
+	}
+
+	.speed-transport-button,
+	.speed-play-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: 0;
+		border-radius: 999px;
+		background: transparent;
+		color: currentColor;
+		cursor: pointer;
+		transition: background-color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
+	}
+
+	.speed-transport-button {
+		width: 44px;
+		height: 44px;
+		opacity: 0.74;
+	}
+
+	.speed-play-button {
+		width: 156px;
+		height: 156px;
+		opacity: 0.9;
+	}
+
+	.speed-transport-button:hover,
+	.speed-play-button:hover,
+	.speed-transport-button:focus-visible,
+	.speed-play-button:focus-visible {
+		background: color-mix(in srgb, currentColor 12%, transparent);
+		opacity: 1;
+	}
+
+	.speed-play-button:hover,
+	.speed-play-button:focus-visible {
+		transform: scale(1.03);
+	}
+
+	.speed-transport-button:focus-visible,
+	.speed-play-button:focus-visible {
+		outline: 2px solid currentColor;
+		outline-offset: 3px;
+	}
+
+	.speed-transport-icon {
+		width: 26px;
+		height: 26px;
+	}
+
+	.speed-play-icon {
+		width: 84px;
+		height: 84px;
+	}
+
+	.speed-play-icon-play {
+		margin-left: 8px;
+	}
+
+	.speed-status-strip {
+		width: 100%;
+		padding: 0;
+	}
+
+	.speed-progress-line {
+		flex: 1 1 auto;
+		position: relative;
+		height: 4px;
+		overflow: hidden;
+		border-radius: 999px;
+		background: color-mix(in srgb, currentColor 18%, transparent);
+	}
+
+	.speed-progress-fill {
+		height: 100%;
+		border-radius: inherit;
+		background: currentColor;
+		opacity: 0.72;
+		transition: width 0.1s ease;
+	}
+
+	.speed-status-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		color: currentColor;
+		font-size: 13px;
+		font-weight: 500;
+		font-variant-numeric: tabular-nums;
+		opacity: 0.82;
+	}
+
+	.speed-word-count {
+		flex: 0 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.speed-progress-separator {
+		margin: 0 4px;
+		opacity: 0.65;
+	}
+
+	.speed-progress-label {
+		flex: 0 0 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-align: right;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.speed-status-button,
+	.speed-status-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 32px;
+		border: 0;
+		border-radius: 6px;
+		background: transparent;
+		color: currentColor;
+		cursor: pointer;
+		transition: background-color 0.15s;
+	}
+
+	.speed-status-button {
+		flex: 0 0 auto;
+		padding: 0 10px;
+		font: inherit;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	}
+
+	.speed-status-icon {
+		flex: 0 0 auto;
+		width: 32px;
+	}
+
+	.speed-status-button:hover,
+	.speed-status-icon:hover {
+		background: color-mix(in srgb, currentColor 20%, transparent);
+	}
+
+	.speed-sheet-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 130;
+		display: flex;
+		align-items: flex-end;
+		justify-content: center;
+		padding: 0 clamp(12px, 4vw, 48px) calc(12px + env(safe-area-inset-bottom));
+		background: transparent;
+	}
+
+	.speed-wpm-sheet {
+		width: min(100%, 560px);
+		padding: 18px;
+		border: 1px solid;
+		border-radius: 18px 18px 0 0;
+		box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.28);
+		animation: speed-sheet-in 0.16s ease-out;
+	}
+
+	.speed-wpm-value-row {
+		display: grid;
+		grid-template-columns: auto auto minmax(92px, 1fr) auto auto;
+		align-items: center;
+		column-gap: 12px;
+		margin-bottom: 18px;
+	}
+
+	.speed-wpm-step-button,
+	.speed-wpm-nudge-button {
+		border: 0;
+		border-radius: 8px;
+		cursor: pointer;
+		font-weight: 700;
+		transition: background-color 0.15s ease, transform 0.15s ease;
+	}
+
+	.speed-wpm-step-button {
+		min-width: 54px;
+		min-height: 38px;
+		padding: 0 10px;
+		font-size: 13px;
+	}
+
+	.speed-wpm-step-minus {
+		justify-self: end;
+		margin-right: clamp(4px, 1.6vw, 14px);
+	}
+
+	.speed-wpm-step-plus {
+		justify-self: start;
+		margin-left: clamp(4px, 1.6vw, 14px);
+	}
+
+	.speed-wpm-value {
+		display: block;
+		min-width: 0;
+		text-align: center;
+		font-size: 28px;
+		font-weight: 800;
+		line-height: 1;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.speed-wpm-slider-row {
+		display: grid;
+		grid-template-columns: 48px minmax(0, 1fr) 48px;
+		align-items: center;
+		gap: 14px;
+	}
+
+	.speed-wpm-nudge-button {
+		width: 48px;
+		height: 48px;
+		font-size: 28px;
+		line-height: 1;
+	}
+
+	.speed-wpm-step-button:hover,
+	.speed-wpm-nudge-button:hover {
+		transform: translateY(-1px);
+	}
+
+	.speed-wpm-slider {
+		width: 100%;
+		height: 8px;
+		border-radius: 999px;
+		appearance: none;
+		cursor: pointer;
+	}
+
+	.speed-word-picker-modal {
+		position: fixed;
+		inset: 0;
+		z-index: 150;
+		display: flex;
+		flex-direction: column;
+		padding-top: env(safe-area-inset-top);
+	}
+
+	.speed-word-picker-window-note {
+		margin-bottom: 14px;
+		font-size: 12px;
+		text-align: center;
+	}
+
+	.speed-word-picker-loading {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 12px;
+		min-height: 220px;
+		font-size: 13px;
+	}
+
+	.speed-word-picker-spinner {
+		width: 34px;
+		height: 34px;
+		border: 3px solid;
+		border-radius: 50%;
+		animation: speed-spin 0.8s linear infinite;
+	}
+
+	.speed-word-picker-close {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 36px;
+		height: 36px;
+		border: 0;
+		border-radius: 10px;
+		background: transparent;
+		cursor: pointer;
+		transition: background-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+	}
+
+	.speed-word-picker-close:hover,
+	.speed-word-picker-close:focus-visible {
+		background: color-mix(in srgb, currentColor 12%, transparent);
+		color: currentColor !important;
+		transform: translateY(-1px);
+	}
+
+	.speed-word-picker-close:active,
+	.speed-word-picker-action:active {
+		transform: translateY(0) scale(0.985);
+	}
+
+	.speed-word-picker-action {
+		flex: 1;
+		padding: 10px 16px;
+		border: 0;
+		border-radius: 10px;
+		font-size: 14px;
+		font-weight: 650;
+		cursor: pointer;
+		transition: background-color 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease, transform 0.16s ease;
+	}
+
+	.speed-word-picker-action:hover,
+	.speed-word-picker-action:focus-visible {
+		transform: translateY(-1px);
+	}
+
+	.speed-word-picker-action-secondary:hover,
+	.speed-word-picker-action-secondary:focus-visible {
+		background-color: color-mix(in srgb, currentColor 22%, transparent) !important;
+		box-shadow: 0 8px 20px color-mix(in srgb, currentColor 10%, transparent);
+	}
+
+	.speed-word-picker-action-primary:hover,
+	.speed-word-picker-action-primary:focus-visible {
+		filter: brightness(1.08);
+		box-shadow: 0 10px 24px rgba(34, 197, 94, 0.22);
+	}
+
+	@keyframes speed-sheet-in {
+		from {
+			opacity: 0;
+			transform: translateY(18px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	@keyframes speed-spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 
 	.nav-left,
@@ -1389,15 +1943,16 @@
 		gap: 4px;
 	}
 
-	.nav-left { flex: 1; }
+	.nav-left { min-width: 0; }
 	.nav-center {
-		flex: 2;
 		justify-content: center;
-		flex-direction: column;
-		gap: 0;
+		min-width: 0;
+		text-align: center;
+	}
+	.nav-right {
+		justify-content: flex-end;
 		min-width: 0;
 	}
-	.nav-right { flex: 1; justify-content: flex-end; }
 
 	.nav-btn,
 	.nav-close {
@@ -1409,37 +1964,71 @@
 		border: none;
 		border-radius: 6px;
 		background: transparent;
-		color: var(--color-surface-text, #e2e8f0);
+		color: currentColor;
 		cursor: pointer;
 		transition: background-color 0.15s, color 0.15s;
 	}
 
 	.nav-btn:hover,
-	.nav-close:hover { background: var(--color-surface-overlay, rgba(15, 23, 42, 0.85)); }
+	.nav-close:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
 	.nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-	.nav-btn.active { background: var(--color-primary-500, #22c55e); color: white; }
+	.nav-btn.active { background: color-mix(in srgb, currentColor 16%, transparent); color: currentColor; }
 
 	.nav-close { text-decoration: none; }
-
-	.nav-pill {
-		width: auto;
-		padding: 0 12px;
-		font-size: 12px;
-		font-weight: 500;
-		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-		white-space: nowrap;
-	}
-
-	.nav-divider {
-		width: 1px;
-		height: 24px;
-		background: var(--color-surface-border, rgba(55, 65, 81, 0.6));
-		margin: 0 8px;
-	}
 
 	@media (max-width: 768px) {
 		.top-nav {
 			padding: 0 10px;
+			column-gap: 8px;
+		}
+
+		.speed-status-row {
+			gap: 8px;
+			font-size: 12px;
+		}
+
+		.speed-playback-controls {
+			gap: 4px;
+			padding-bottom: 20px;
+			transform: translateY(-8px);
+		}
+
+		.speed-transport-button {
+			width: 42px;
+			height: 42px;
+		}
+
+		.speed-play-button {
+			width: 144px;
+			height: 144px;
+		}
+
+		.speed-play-icon {
+			width: 78px;
+			height: 78px;
+		}
+
+		.speed-wpm-sheet {
+			width: min(100%, 520px);
+			padding: 16px;
+		}
+
+		.speed-wpm-value-row {
+			grid-template-columns: repeat(2, minmax(48px, auto)) minmax(64px, 1fr) repeat(2, minmax(48px, auto));
+			gap: 8px;
+		}
+
+		.speed-wpm-step-minus {
+			margin-right: 4px;
+		}
+
+		.speed-wpm-step-plus {
+			margin-left: 4px;
+		}
+
+		.speed-wpm-step-button {
+			min-width: 48px;
+			padding: 0 8px;
 		}
 
 		.nav-left,
@@ -1458,35 +2047,56 @@
 			width: 22px;
 			height: 22px;
 		}
+	}
 
-		.nav-center {
-			min-width: 0;
+	@media (max-width: 520px) {
+		.speed-footer {
+			padding-inline: 12px;
+		}
+
+		.speed-word-count,
+		.speed-progress-separator {
+			display: none;
+		}
+
+		.speed-status-button {
+			padding: 0 8px;
+		}
+
+		.speed-wpm-value-row {
+			grid-template-columns: repeat(2, 1fr);
+		}
+
+		.speed-wpm-step-minus,
+		.speed-wpm-step-plus {
+			justify-self: stretch;
+			margin: 0;
+		}
+
+		.speed-wpm-value {
+			grid-column: 1 / -1;
+			grid-row: 1;
+			margin-bottom: 4px;
+		}
+
+		.speed-wpm-slider-row {
+			grid-template-columns: 44px minmax(0, 1fr) 44px;
+			gap: 10px;
+		}
+
+		.speed-wpm-nudge-button {
+			width: 44px;
+			height: 44px;
 		}
 	}
 
 	.book-title {
-		color: var(--color-surface-text, #e2e8f0);
+		color: currentColor;
 		font-size: 14px;
 		font-weight: 500;
-		max-width: 300px;
+		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.chapter-title {
-		color: var(--color-surface-text-muted, #94a3b8);
-		font-size: 11px;
-		max-width: 300px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.nav-stat {
-		color: var(--color-surface-text-muted, #94a3b8);
-		font-size: 12px;
-		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 		white-space: nowrap;
 	}
 

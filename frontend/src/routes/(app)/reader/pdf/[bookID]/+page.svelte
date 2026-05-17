@@ -7,7 +7,9 @@
 	import type { PdfReaderSetting, PdfViewMode } from '$lib/stores/readerSettings';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
 	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
+	import { isBottomSystemGestureStart } from '$lib/utils/system-gesture-guard';
 	import EmbedPDFViewer from '$lib/components/EmbedPDFViewer.svelte';
+	import ReaderProgressTrack from '$lib/components/ReaderProgressTrack.svelte';
 
 	let book = $state<any>(null);
 	let loading = $state(true);
@@ -35,6 +37,9 @@
 	let embedPdfViewerReady = $state(false);
 	let embedPdfScroll: any = null;
 	let embedPdfRestoringInitialPage = false;
+	let showCurrentSection = $state(true);
+	let pdfLoadRetryToken = $state(0);
+	let pdfLoadRetryAttempts = 0;
 
 	let settings = $state<PdfReaderSetting>({
 		pageSpread: 'off',
@@ -135,6 +140,7 @@
 	let topBarHideTimeout: ReturnType<typeof setTimeout> | null = null;
 	let topBarVisible = $state(false);
 	let lastContinuousScrollTop = 0;
+	let preserveChromeAfterSeekUntil = 0;
 	let sessionEnded = false;
 	let handlePageExit: (() => void) | null = null;
 	let pdfReaderEl = $state<HTMLDivElement | null>(null);
@@ -161,6 +167,7 @@
 	};
 	const topBarHideDelayMs = 2800;
 	const scrollHideThresholdPx = 8;
+	const seekScrollSuppressMs = 1400;
 	const progressSaveDebounceMs = 750;
 	const continuousPageGapPx = 16;
 	const continuousOverscanPx = 2200;
@@ -236,6 +243,32 @@
 		if (launchReturnPath) return launchReturnPath;
 
 		return book?.id ? `/book/${book.id}` : '/library';
+	}
+
+	function getPdfDisplayTitle() {
+		const title = String(book?.title || book?.metadata?.title || '').trim();
+		if (title) return title;
+
+		const filePath = String(book?.path || book?.file_path || book?.filename || book?.file_name || '').trim();
+		if (filePath) {
+			const fileName = filePath.split(/[\\/]/).pop();
+			if (fileName) return fileName.replace(/\.[^.]+$/, '');
+		}
+
+		return book ? 'PDF Document' : 'Loading...';
+	}
+
+	function getPdfSourceUrl() {
+		if (!book?.id) return '';
+		const params = new URLSearchParams();
+		if (requestedFormat) {
+			params.set('format', requestedFormat);
+		}
+		if (pdfLoadRetryToken > 0) {
+			params.set('pdf_retry', String(pdfLoadRetryToken));
+		}
+		const query = params.toString();
+		return `/api/books/${book.id}/file${query ? `?${query}` : ''}`;
 	}
 
 	function clearBackgroundWarmup() {
@@ -339,6 +372,7 @@
 		window.addEventListener('click', globalClickListener);
 
 		unsubscribeReaderSettings = readerSettings.subscribe(s => {
+			showCurrentSection = s.showCurrentSection ?? true;
 			settings = { ...s.pdf };
 		});
 
@@ -772,10 +806,15 @@
 		showTopBar(true);
 	}
 
+	function preserveChromeAfterSeek() {
+		preserveChromeAfterSeekUntil = performance.now() + seekScrollSuppressMs;
+		showTopBar(false);
+	}
+
 	function isInteractiveReaderTarget(target: EventTarget | null) {
 		if (!(target instanceof Element)) return false;
 		return !!target.closest(
-			'button, a, input, textarea, select, label, [contenteditable="true"], .top-nav, .left-sidebar, .right-sidebar, .floating-nav, .progress-bar, .embedpdf-shell-control'
+			'button, a, input, textarea, select, label, [contenteditable="true"], .top-nav, .left-sidebar, .right-sidebar, .floating-nav, .progress-bar, .reader-progress, .embedpdf-shell-control'
 		);
 	}
 
@@ -1200,14 +1239,20 @@
 		lastContinuousScrollTop = scrollTop;
 		void renderVisibleContinuousPages(target);
 
-		if (controlsNeedToStayVisible() || scrollTop <= 0) {
+		if (performance.now() < preserveChromeAfterSeekUntil) {
+			showTopBar(false);
+			return;
+		}
+
+		const touchLike = typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
+		if (controlsNeedToStayVisible() || (scrollTop <= 0 && !touchLike)) {
 			showTopBar(false);
 			return;
 		}
 
 		if (delta > scrollHideThresholdPx) {
 			hideTopBar();
-		} else if (delta < -scrollHideThresholdPx) {
+		} else if (delta < -scrollHideThresholdPx && !touchLike) {
 			showTopBar(false);
 		}
 	}
@@ -1215,14 +1260,20 @@
 	function handleEmbedPdfScrollActivity(delta: number, scrollTop: number) {
 		if (!settings.autoHideControls || controlsNeedToStayVisible()) return;
 
-		if (scrollTop <= 2) {
+		if (performance.now() < preserveChromeAfterSeekUntil) {
+			showTopBar(false);
+			return;
+		}
+
+		const touchLike = typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
+		if (scrollTop <= 2 && !touchLike) {
 			showTopBar(false);
 			return;
 		}
 
 		if (delta > scrollHideThresholdPx) {
 			hideTopBar();
-		} else if (delta < -scrollHideThresholdPx) {
+		} else if (delta < -scrollHideThresholdPx && !touchLike) {
 			showTopBar(false);
 		}
 	}
@@ -1235,6 +1286,11 @@
 		const yRatio = (e.clientY - rect.top) / rect.height;
 
 		return xRatio > 0.28 && xRatio < 0.72 && yRatio > 0.12 && yRatio < 0.88;
+	}
+
+	function isTouchLikePointer(e?: PointerEvent | MouseEvent) {
+		if (e && 'pointerType' in e && e.pointerType === 'touch') return true;
+		return typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
 	}
 
 	function handleReaderPointerDown(e: PointerEvent) {
@@ -1267,7 +1323,7 @@
 			}
 		}
 
-		if (!settings.autoHideControls) return;
+		if (!settings.autoHideControls || isTouchLikePointer(e)) return;
 		if (e.clientY <= 72) {
 			showTopBar(true);
 		} else if (pdfReaderEl?.contains(e.target as Node)) {
@@ -2065,6 +2121,9 @@
 
 	function handleProgressPointerDown(e: PointerEvent) {
 		if (numPages <= 0) return;
+		if (isBottomSystemGestureStart(e)) {
+			return;
+		}
 		e.preventDefault();
 		e.stopPropagation();
 		showTopBar(false);
@@ -2098,7 +2157,7 @@
 		if (targetPage !== null) {
 			jumpToPage(targetPage);
 		}
-		resetTopBarBehavior();
+		preserveChromeAfterSeek();
 	}
 
 	function handleProgressPointerUp(e: PointerEvent) {
@@ -2115,7 +2174,7 @@
 
 	function jumpToPage(pageNum: number) {
 		if (pageNum >= 1 && pageNum <= numPages) {
-			showTopBar(true);
+			showTopBar(false);
 			navigateToPage(pageNum, 'auto');
 		}
 	}
@@ -2126,15 +2185,19 @@
 		if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
 			e.preventDefault();
 			jumpToPage(Math.max(1, currentPage - 1));
+			preserveChromeAfterSeek();
 		} else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
 			e.preventDefault();
 			jumpToPage(Math.min(numPages, currentPage + 1));
+			preserveChromeAfterSeek();
 		} else if (e.key === 'Home') {
 			e.preventDefault();
 			jumpToPage(1);
+			preserveChromeAfterSeek();
 		} else if (e.key === 'End') {
 			e.preventDefault();
 			jumpToPage(numPages);
+			preserveChromeAfterSeek();
 		}
 	}
 
@@ -2180,12 +2243,12 @@
 			if (e.key === 'ArrowUp' || e.key === 'k') {
 				e.preventDefault();
 				if (currentPage > 1) {
-					navigateToPage(currentPage - 1);
+					navigateToPage(currentPage - 1, 'auto');
 				}
 			} else if (e.key === 'ArrowDown' || e.key === 'j' || e.key === ' ') {
 				e.preventDefault();
 				if (currentPage < numPages) {
-					navigateToPage(currentPage + 1);
+					navigateToPage(currentPage + 1, 'auto');
 				}
 			}
 		} else {
@@ -2550,8 +2613,26 @@
 		console.log('EmbedPDF ready, registry:', registry);
 		embedPdfScroll = registry.getPlugin?.('scroll')?.provides?.() ?? null;
 		embedPdfViewerReady = true;
+		pdfLoadRetryAttempts = 0;
 		topBarVisible = true;
 		resetTopBarBehavior();
+	}
+
+	function handleEmbedPdfError(message: string) {
+		const normalized = String(message || '');
+		const retryable =
+			normalized.includes('FPDF_LoadMemDocument') ||
+			normalized.toLowerCase().includes('failed to load document');
+
+		if (retryable && pdfLoadRetryAttempts < 1) {
+			pdfLoadRetryAttempts += 1;
+			embedPdfViewerReady = false;
+			error = '';
+			pdfLoadRetryToken = Date.now();
+			return;
+		}
+
+		error = normalized || 'Failed to load PDF';
 	}
 </script>
 
@@ -2587,6 +2668,12 @@
 						<line x1="6" y1="6" x2="18" y2="18"></line>
 					</svg>
 				</a>
+				<div class="embedpdf-shell-title" class:top-nav-hidden={!topBarVisible} title={getPdfDisplayTitle()}>
+					<span>{getPdfDisplayTitle()}</span>
+					{#if showCurrentSection}
+						<span class="ml-2 text-xs text-[var(--color-surface-text-muted)]">Page {currentPage} / {Math.max(numPages, currentPage)}</span>
+					{/if}
+				</div>
 				<button
 					class="embedpdf-shell-control embedpdf-fullscreen-control nav-btn"
 					onclick={toggleFullscreen}
@@ -2599,27 +2686,16 @@
 						<line x1="3" y1="21" x2="10" y2="14"></line>
 					</svg>
 				</button>
-				<div
-					bind:this={pdfProgressBarEl}
-					class="embedpdf-progress progress-bar"
-					onpointerdown={(e) => handleProgressPointerDown(e)}
-					onpointermove={(e) => handleProgressPointerMove(e)}
-					onpointerup={(e) => handleProgressPointerUp(e)}
-					onpointercancel={(e) => handleProgressPointerCancel(e)}
-					onkeydown={(e) => handleProgressBarKeydown(e)}
-					role="slider"
-					aria-label="Reading progress"
-					aria-valuemin="1"
-					aria-valuemax={Math.max(numPages, currentPage)}
-					aria-valuenow={currentPage}
-					tabindex="0"
-				>
-					<div class="progress-fill" style="--progress: {progress}%;"></div>
-					<div
-						class="progress-thumb"
-						style="left: calc({progress}% - 6px);"
-						role="presentation"
-					></div>
+				<div class="embedpdf-top-progress-shell" class:top-nav-hidden={!topBarVisible}>
+					<ReaderProgressTrack
+						progress={progress}
+						visible={topBarVisible}
+						variant="top"
+						ariaLabel="Reading progress"
+						ariaValueMin={1}
+						ariaValueMax={Math.max(numPages, currentPage)}
+						ariaValueNow={currentPage}
+					/>
 				</div>
 			{/if}
 			{#if error}
@@ -2629,17 +2705,19 @@
 				</div>
 			{:else if book && embedPdfProgressReady}
 				<div class="embedpdf-viewer-container">
+					{#key `${book.id}:${requestedFormat}:${pdfLoadRetryToken}`}
 					<EmbedPDFViewer
-						src={`/api/books/${book.id}/file${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`}
-						title={book.title || 'Untitled'}
+						src={getPdfSourceUrl()}
+						title={getPdfDisplayTitle()}
 						initialPage={embedPdfInitialPage}
 						toolbarVisible={readerChromeReady && topBarVisible}
 						onScrollActivity={handleEmbedPdfScrollActivity}
 						onPageChange={handleEmbedPdfPageChange}
 						onReady={handleEmbedPdfReady}
-						onError={(e) => error = String(e)}
+						onError={handleEmbedPdfError}
 						style="height: 100%; width: 100%;"
 					/>
+					{/key}
 				</div>
 			{/if}
 			{#if !error && !embedPdfViewerReady}
@@ -2649,6 +2727,27 @@
 				</div>
 			{/if}
 		</div>
+		{#if readerChromeReady}
+			<ReaderProgressTrack
+				bind:element={pdfProgressBarEl}
+				progress={progress}
+				visible={topBarVisible}
+				variant="bottom"
+				metaAlign="center"
+				interactive={true}
+				showThumb={true}
+				label={`Page ${currentPage} / ${Math.max(numPages, currentPage)} • ${Math.max(0, Math.min(100, Math.round(progress)))}%`}
+				ariaLabel="Reading progress"
+				ariaValueMin={1}
+				ariaValueMax={Math.max(numPages, currentPage)}
+				ariaValueNow={currentPage}
+				onpointerdown={(e) => handleProgressPointerDown(e)}
+				onpointermove={(e) => handleProgressPointerMove(e)}
+				onpointerup={(e) => handleProgressPointerUp(e)}
+				onpointercancel={(e) => handleProgressPointerCancel(e)}
+				onkeydown={(e) => handleProgressBarKeydown(e)}
+			/>
+		{/if}
 </div>
 
 <style>
@@ -2701,66 +2800,6 @@
 	.icon {
 		width: 20px;
 		height: 20px;
-	}
-
-	.progress-bar {
-		position: absolute;
-		bottom: 0;
-		left: 0;
-		right: 0;
-		height: 8px;
-		background: transparent;
-		cursor: pointer;
-		display: flex;
-		align-items: flex-end;
-		padding-bottom: 0;
-		touch-action: none;
-	}
-
-	.progress-fill {
-		position: absolute;
-		left: 0;
-		bottom: 0;
-		height: 3px;
-		background: var(--color-surface-border, rgba(55, 65, 81, 0.6));
-		border-radius: 2px;
-		width: 100%;
-	}
-
-	.progress-fill::after {
-		content: '';
-		position: absolute;
-		left: 0;
-		top: 0;
-		height: 100%;
-		width: var(--progress, 0%);
-		background: var(--color-primary-500, #22c55e);
-		border-radius: 2px;
-		transition: width 0.1s ease;
-	}
-
-	.progress-thumb {
-		position: absolute;
-		bottom: -4px;
-		width: 12px;
-		height: 12px;
-		background: var(--color-primary-500, #22c55e);
-		border: 2px solid var(--color-surface-base, #0f172a);
-		border-radius: 50%;
-		cursor: grab;
-		z-index: 10;
-		transition: left 0.05s ease, transform 0.1s ease;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-		touch-action: none;
-	}
-
-	.progress-thumb:hover {
-		transform: scale(1.2);
-	}
-
-	.progress-thumb:active {
-		cursor: grabbing;
-		transform: scale(1.1);
 	}
 
 	.reader-loading-overlay {
@@ -2828,10 +2867,6 @@
 			height: 22px;
 		}
 
-		.progress-bar {
-			height: 8px;
-		}
-
 		.loading-spinner {
 			width: 40px;
 			height: 40px;
@@ -2844,15 +2879,23 @@
 		inset: 0;
 		background: var(--color-surface-base, #0f172a);
 		z-index: 50;
+		--embedpdf-shell-control-size: 42px;
+		--embedpdf-shell-title-width: clamp(220px, 42vw, 560px);
+		--embedpdf-shell-left-reserve: clamp(128px, 18vw, 240px);
+		--embedpdf-shell-right-reserve: clamp(260px, 38vw, 520px);
 	}
 
 	:global([data-epdf-i="left-group"]) {
 		margin-left: calc(56px + max(0px, env(safe-area-inset-left))) !important;
+		margin-right: auto !important;
+		flex-shrink: 0;
 		transition: opacity 0.18s ease, transform 0.18s ease;
 	}
 
 	:global([data-epdf-i="center-group"]) {
-		transform: translateX(0);
+		margin-left: 0 !important;
+		transform: none !important;
+		flex-shrink: 0;
 		transition: opacity 0.18s ease, transform 0.18s ease;
 	}
 
@@ -2882,58 +2925,83 @@
 		transform: translateY(-10px);
 	}
 
+	:global([data-cryptorum-embedpdf-toolbar="true"]) {
+		display: flex !important;
+		align-items: center !important;
+		justify-content: flex-start !important;
+		gap: 4px !important;
+		padding-left: 0 !important;
+	}
+
 	.embedpdf-shell-control {
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		position: absolute;
-		top: 0;
-		width: 56px;
-		height: var(--reader-top-bar-height);
-		border-bottom: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
-		background: var(--color-surface-base, #0f172a);
+		top: calc((var(--reader-top-bar-height) - var(--embedpdf-shell-control-size)) / 2);
+		width: var(--embedpdf-shell-control-size);
+		height: var(--embedpdf-shell-control-size);
+		border: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
+		background: color-mix(in srgb, var(--color-surface-base, #0f172a) 92%, transparent);
 		color: var(--color-surface-text, #e2e8f0);
 		cursor: pointer;
 		text-decoration: none;
 		transition: opacity 0.18s ease, transform 0.18s ease, background-color 0.16s ease;
-		z-index: 100;
+		z-index: 130;
 	}
 
 	.embedpdf-shell-control::after {
-		content: '';
-		position: absolute;
-		top: 50%;
-		width: 1px;
-		height: 24px;
-		background: var(--color-surface-border, rgba(55, 65, 81, 0.6));
-		transform: translateY(-50%);
-		pointer-events: none;
+		display: none;
 	}
 
 	.embedpdf-close-control {
-		left: max(0px, env(safe-area-inset-left));
-		border-radius: 0 0 8px 0;
-	}
-
-	.embedpdf-close-control::after {
-		right: 0;
+		left: calc(6px + max(0px, env(safe-area-inset-left)));
+		border-radius: 10px;
 	}
 
 	.embedpdf-fullscreen-control {
-		right: max(0px, env(safe-area-inset-right));
-		border-radius: 0 0 0 8px;
+		right: calc(6px + max(0px, env(safe-area-inset-right)));
+		border-radius: 10px;
 	}
 
-	.embedpdf-fullscreen-control::after {
-		left: 0;
-	}
-
-	.embedpdf-progress.progress-bar {
-		top: calc(var(--reader-top-bar-height) - 8px);
-		bottom: auto;
-		height: 8px;
+	.embedpdf-shell-title {
+		position: absolute;
+		top: 0;
+		left: calc(var(--embedpdf-shell-left-reserve) + max(0px, env(safe-area-inset-left)));
+		right: calc(var(--embedpdf-shell-right-reserve) + max(0px, env(safe-area-inset-right)));
+		height: var(--reader-top-bar-height);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 0;
+		padding: 0 14px;
+		border-bottom: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
+		background: var(--color-surface-base, #0f172a);
+		color: var(--color-surface-text, #e2e8f0);
+		font-size: 14px;
+		font-weight: 600;
+		line-height: 1.2;
+		pointer-events: none;
 		transition: opacity 0.18s ease, transform 0.18s ease;
-		z-index: 101;
+		z-index: 110;
+	}
+
+	.embedpdf-shell-title span {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.embedpdf-top-progress-shell {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: var(--reader-top-bar-height);
+		pointer-events: none;
+		transition: opacity 0.18s ease, transform 0.18s ease;
+		z-index: 120;
 	}
 
 	.embedpdf-viewer-container {
@@ -2949,17 +3017,17 @@
 	.pdf-reader.controls-hidden .embedpdf-shell-control {
 		opacity: 0;
 		pointer-events: none;
+		transform: translateY(calc(-1 * var(--reader-top-bar-height)));
+	}
+
+	.pdf-reader.controls-hidden .embedpdf-shell-title,
+	.pdf-reader.controls-hidden .embedpdf-top-progress-shell {
+		opacity: 0;
 		transform: translateY(-100%);
 	}
 
-	.pdf-reader.controls-hidden .embedpdf-progress.progress-bar {
-		opacity: 0;
-		pointer-events: none;
-		transform: translateY(-10px);
-	}
-
-	:global(.pdf-reader.controls-hidden [data-overlay-id="page-controls"]),
-	:global(.pdf-reader.controls-hidden [data-overlay-id="page-controls"] *) {
+	:global([data-overlay-id="page-controls"]),
+	:global([data-overlay-id="page-controls"] *) {
 		opacity: 0 !important;
 		visibility: hidden !important;
 		pointer-events: none !important;
@@ -2967,8 +3035,28 @@
 	}
 
 	@media (max-width: 640px) {
-		.embedpdf-progress.progress-bar {
-			top: calc(var(--reader-top-bar-height) - 8px);
+		.embedpdf-wrapper {
+			--embedpdf-shell-control-size: 44px;
+			--embedpdf-shell-title-width: clamp(136px, 38vw, 260px);
+			--embedpdf-shell-left-reserve: 112px;
+			--embedpdf-shell-right-reserve: clamp(120px, 30vw, 220px);
+		}
+
+		.embedpdf-shell-title {
+			padding: 0 10px;
+			font-size: 13px;
+		}
+	}
+
+	@media (max-width: 420px) {
+		.embedpdf-wrapper {
+			--embedpdf-shell-title-width: 108px;
+			--embedpdf-shell-left-reserve: 104px;
+			--embedpdf-shell-right-reserve: 104px;
+		}
+
+		.embedpdf-shell-title {
+			padding: 0 8px;
 		}
 	}
 </style>

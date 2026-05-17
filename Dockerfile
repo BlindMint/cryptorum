@@ -29,6 +29,8 @@ RUN apt-get update && \
     tzdata \
     wget \
     xz-utils \
+    p7zip-full \
+    libarchive-tools \
     ffmpeg \
     fonts-liberation \
     poppler-utils \

@@ -90,9 +90,9 @@
 </script>
 
 <header class="relative z-50 overflow-visible border-b border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] backdrop-blur-sm">
-	<div class="flex items-center gap-3 px-3 py-3 lg:px-6 h-16">
+	<div class="flex h-[4.75rem] items-center gap-3 px-3 py-4 lg:h-20 lg:px-6">
 		<button
-			class="lg:hidden shrink-0 rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+			class="lg:hidden shrink-0 rounded-lg p-3 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
 			aria-label="Toggle navigation menu"
 			onclick={toggleMobileNavigation}
 		>
@@ -111,7 +111,7 @@
 
 		<button
 			type="button"
-			class={`hidden shrink-0 rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]/70 lg:inline-flex ${$desktopSidebarCollapsed ? 'bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)]' : ''}`}
+			class={`hidden shrink-0 rounded-lg p-3 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]/70 lg:inline-flex ${$desktopSidebarCollapsed ? 'bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)]' : ''}`}
 			aria-controls="app-sidebar"
 			aria-expanded={!$desktopSidebarCollapsed}
 			aria-label={$desktopSidebarCollapsed ? 'Open sidebar' : 'Collapse sidebar'}
@@ -148,7 +148,7 @@
 
 			<a
 				href="/history"
-				class="rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+				class="rounded-lg p-3 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
 				title="Reading History"
 			>
 				<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -158,7 +158,7 @@
 
 			<a
 				href="/stats"
-				class="rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+				class="rounded-lg p-3 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
 				title="Statistics"
 			>
 				<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -168,7 +168,7 @@
 
 			<a
 				href="/settings"
-				class="rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+				class="rounded-lg p-3 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
 				title="Settings"
 			>
 				<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -184,7 +184,7 @@
 
 		<button
 			type="button"
-			class="lg:hidden shrink-0 rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+			class="lg:hidden shrink-0 rounded-lg p-3 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
 			aria-label="Open quick actions"
 			aria-expanded={showMobileActions}
 			onclick={toggleMobileActions}

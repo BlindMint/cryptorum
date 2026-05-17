@@ -272,7 +272,7 @@
 								{#if formatOnCover && book.format}
 									{@const formatColor = getFormatColor(book.format)}
 									<div
-										class="absolute bottom-2 left-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+										class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
 										style="background-color: {formatColor.bg}; color: {formatColor.text};"
 									>
 										{book.format}
