@@ -9,6 +9,7 @@ services:
       - ./data:/data          # SQLite DB, covers, cache
       - /olympus/books:/books        # Book library (read-only or read-write)
       - ./bookdrop:/bookdrop  # Auto-import folder
+      - /home/steven/default_sync/Comics:/default_sync_comics 
       - ./config.yaml:/app/config.yaml
     environment:
       - TZ=America/Boise

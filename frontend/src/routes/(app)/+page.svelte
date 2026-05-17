@@ -17,6 +17,9 @@
   let continueReadingBooks = $state<any[]>([]);
   let recentBooks = $state<any[]>([]);
  	let discoverBooks = $state<any[]>([]);
+	let continueReadingLoading = $state(true);
+	let recentBooksLoading = $state(true);
+	let discoverBooksLoading = $state(true);
  	let formatOnCover = $state(true);
  	let continueReadingRowEl = $state<HTMLDivElement | null>(null);
  	let recentBooksRowEl = $state<HTMLDivElement | null>(null);
@@ -60,48 +63,88 @@
 		updateDashboardRows();
 	});
 
- 	onMount(async () => {
- 		showFormatOnCover.init();
- 		try {
-			const [libsRes, statsRes, continueRes, recentRes, discoverRes] = await Promise.all([
-				fetch('/api/libraries'),
-				fetch('/api/stats'),
-				fetch('/api/books?status=reading&sort=last_read&limit=12'),
-				fetch('/api/books?limit=12'),
-				fetch('/api/books?sort=random&limit=12&discovery=true')
-			]);
-
-			if (libsRes.ok) {
-				const libs = await libsRes.json();
+	async function loadLibraries() {
+		try {
+			const res = await fetch('/api/libraries', { cache: 'no-store' });
+			if (res.ok) {
+				const libs = await res.json();
 				stats.libraries = libs.length;
 			}
+		} catch (e) {
+			console.error('Failed to fetch libraries:', e);
+		}
+	}
 
-			if (statsRes.ok) {
-				const s = await statsRes.json();
+	async function loadStats() {
+		try {
+			const res = await fetch('/api/stats', { cache: 'no-store' });
+			if (res.ok) {
+				const s = await res.json();
 				stats.books = s.total_books;
 				stats.reading = s.reading;
 				stats.finished = s.finished;
 			}
+		} catch (e) {
+			console.error('Failed to fetch dashboard stats:', e);
+		}
+	}
 
-			if (continueRes.ok) {
-				const data = await continueRes.json();
+	async function loadContinueReading() {
+		continueReadingLoading = true;
+		try {
+			const res = await fetch('/api/books?status=reading&sort=last_read&sort_dir=desc&limit=12', { cache: 'no-store' });
+			if (res.ok) {
+				const data = await res.json();
 				continueReadingBooks = data.books || [];
 			}
+		} catch (e) {
+			console.error('Failed to fetch continue reading:', e);
+		} finally {
+			continueReadingLoading = false;
+		}
+	}
 
-			if (recentRes.ok) {
-				const data = await recentRes.json();
+	async function loadRecentBooks() {
+		recentBooksLoading = true;
+		try {
+			const res = await fetch('/api/books?limit=12', { cache: 'no-store' });
+			if (res.ok) {
+				const data = await res.json();
 				recentBooks = (data.books || []).slice(0, 12);
-				if (!statsRes.ok) stats.books = data.total || 0;
+				if (!stats.books) stats.books = data.total || 0;
 			}
+		} catch (e) {
+			console.error('Failed to fetch recently added books:', e);
+		} finally {
+			recentBooksLoading = false;
+		}
+	}
 
-			if (discoverRes.ok) {
-				const data = await discoverRes.json();
+	async function loadDiscoverBooks() {
+		discoverBooksLoading = true;
+		try {
+			const res = await fetch('/api/books?sort=random&limit=12&discovery=true', { cache: 'no-store' });
+			if (res.ok) {
+				const data = await res.json();
 				discoverBooks = data.books || [];
 			}
-			updateDashboardRows();
 		} catch (e) {
-			console.error('Failed to fetch data:', e);
+			console.error('Failed to fetch discover books:', e);
+		} finally {
+			discoverBooksLoading = false;
 		}
+	}
+
+ 	onMount(async () => {
+ 		showFormatOnCover.init();
+		await Promise.allSettled([
+			loadLibraries(),
+			loadStats(),
+			loadContinueReading(),
+			loadRecentBooks(),
+			loadDiscoverBooks()
+		]);
+		updateDashboardRows();
 	});
 
 	onMount(() => {
@@ -297,9 +340,10 @@
 											frameClass="aspect-[2/3] mb-1.5"
 											imageClass="group-hover:scale-105 transition-transform"
 											placeholderSize="md"
+											retryCount={2}
 										/>
 									{#if book.status === 'reading'}
-										<div class="absolute top-1 right-1 z-10 w-3 h-3 bg-blue-500 rounded-full"></div>
+										<div class="absolute bottom-4 right-2 z-10 h-3 w-3 rounded-full border border-black/30 bg-blue-500 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></div>
 									{/if}
 									{#if book.opened && book.percent > 0}
 										<div class="absolute bottom-1.5 left-0 right-0 z-10 h-1 bg-slate-700">
@@ -309,7 +353,7 @@
 									{#if formatOnCover && book.format}
 										{@const formatColor = getFormatColor(book.format)}
 										<div
-											class="absolute left-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+											class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
 											style="background-color: {formatColor.bg}; color: {formatColor.text};"
 										>
 											{book.format}
@@ -339,6 +383,8 @@
 						</div>
 					{/each}
 				</div>
+			{:else if continueReadingLoading}
+				<div class="py-12 text-center text-sm text-[var(--color-surface-text-muted)]">Loading continue reading...</div>
 			{:else}
 				<div class="text-center py-12">
 					<svg class="w-16 h-16 text-blue-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -375,11 +421,12 @@
 									frameClass="aspect-[2/3] mb-1.5"
 									imageClass="group-hover:scale-105 transition-transform"
 									placeholderSize="md"
+									retryCount={2}
 								/>
 								{#if formatOnCover && book.format}
 									{@const formatColor = getFormatColor(book.format)}
 									<div
-										class="absolute left-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+										class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
 										style="background-color: {formatColor.bg}; color: {formatColor.text};"
 									>
 										{book.format}
@@ -408,6 +455,8 @@
 						</div>
 					{/each}
 				</div>
+			{:else if recentBooksLoading}
+				<div class="py-12 text-center text-sm text-[var(--color-surface-text-muted)]">Loading recently added...</div>
 			{:else}
  				<div class="text-center py-12">
  					<svg class="w-16 h-16 text-[var(--color-primary-400)] mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -453,11 +502,12 @@
 									frameClass="aspect-[2/3] mb-1.5"
 									imageClass="group-hover:scale-105 transition-transform"
 									placeholderSize="md"
+									retryCount={2}
 								/>
 								{#if formatOnCover && book.format}
 									{@const formatColor = getFormatColor(book.format)}
 									<div
-										class="absolute left-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+										class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
 										style="background-color: {formatColor.bg}; color: {formatColor.text};"
 									>
 										{book.format}
@@ -486,6 +536,8 @@
 						</div>
 					{/each}
 				</div>
+			{:else if discoverBooksLoading}
+				<div class="py-12 text-center text-sm text-[var(--color-surface-text-muted)]">Loading discover...</div>
 			{:else}
  				<div class="text-center py-12">
  					<svg class="w-16 h-16 text-[var(--color-primary-400)] mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

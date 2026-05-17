@@ -610,6 +610,18 @@ func StartReadingSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, _ = appDB.Exec(`
+		INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
+		VALUES (?, 'reading', 0, ?, ?)
+		ON CONFLICT(book_id) DO UPDATE SET
+			updated_at = excluded.updated_at,
+			status = CASE
+				WHEN reading_progress.status = 'finished' THEN reading_progress.status
+				ELSE 'reading'
+			END,
+			owner_user_id = excluded.owner_user_id
+	`, bookIDInt, now, current.ID)
+
 	sessionID, _ := result.LastInsertId()
 	jsonResponse(w, http.StatusCreated, map[string]interface{}{
 		"id":         sessionID,

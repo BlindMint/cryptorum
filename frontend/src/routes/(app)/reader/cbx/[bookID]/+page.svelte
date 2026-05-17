@@ -3,8 +3,10 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { readerSettings, cbxFitModes, cbxScrollModes, type CbxReaderSetting } from '$lib/stores/readerSettings';
+	import ReaderProgressTrack from '$lib/components/ReaderProgressTrack.svelte';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
 	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
+	import { isBottomSystemGestureStart } from '$lib/utils/system-gesture-guard';
 
 	let book = $state<any>(null);
 	let loading = $state(true);
@@ -42,38 +44,64 @@
 	let lastWheelNavigationAt = 0;
 	let topBarHideTimeout: ReturnType<typeof setTimeout> | null = null;
 	let lastLongStripScrollTop = 0;
+	let preserveChromeAfterSeekUntil = 0;
 	let sessionEnded = false;
 	let handlePageExit: (() => void) | null = null;
 	let requestedFormat = $state('');
 	let topBarVisible = $state(true);
 	let stripScrollEl = $state<HTMLDivElement | null>(null);
-	let stripContentWidth = $state(1);
-	let stripTotalHeight = $state(0);
-	let visibleStripPages = $state<number[]>([]);
-	let stripPageLayouts = $state(new Map<number, { top: number; width: number; height: number }>());
 	let stripProgressSaveTimeout: ReturnType<typeof setTimeout> | null = null;
+	let stripRestoreScrollTimeout: ReturnType<typeof setTimeout> | null = null;
 	let closeTasksStarted = false;
+	let readerPointerStart: { id: number; x: number; y: number } | null = null;
+	let readerPointerMoved = false;
+	let showCurrentSection = $state(true);
+	let activeComicLoadToken = 0;
+	let loadedComicKey = '';
 
 	const TOP_BAR_HIDE_DELAY_MS = 2800;
 	const TOP_BAR_SCROLL_DELTA = 12;
+	const SEEK_SCROLL_SUPPRESS_MS = 1400;
 	const TOP_BAR_REVEAL_EDGE_PX = 72;
 	const STRIP_PADDING_PX = 16;
-	const STRIP_PAGE_GAP_PX = 8;
-	const STRIP_OVERSCAN_PX = 2400;
-	const STRIP_ESTIMATED_ASPECT_RATIO = 1.45;
 
 	const progress = $derived(numPages > 0 ? (currentPage / numPages) * 100 : 0);
 
-	onMount(async () => {
-		const bookId = $page.params.bookID;
+	async function loadComic(bookId: string, formatParam: string | null) {
+		const nextFormat = normalizeBookFormat(formatParam);
+		const nextKey = `${bookId}:${nextFormat}`;
+		if (loadedComicKey === nextKey && book) return;
+
+		const loadToken = ++activeComicLoadToken;
+		if (book && currentSessionId !== null && !sessionEnded) {
+			await endSession();
+		}
+
+		loadedComicKey = nextKey;
+		loading = true;
+		book = null;
+		numPages = 0;
+		currentPage = 1;
+		currentSpreadPages = null;
+		savedProgress = null;
+		pendingProgressPage = null;
+		leftSidebarOpen = false;
+		rightSidebarOpen = false;
+		currentSessionId = null;
+		sessionEnded = false;
+		closeTasksStarted = false;
+		requestedFormat = nextFormat;
+
 		try {
 			const res = await fetch(`/api/books/${bookId}`);
+			if (loadToken !== activeComicLoadToken) return;
 			if (res.ok) {
 				book = await res.json();
-				requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
 				await fetchProgress();
+				if (loadToken !== activeComicLoadToken) return;
 				await startSession();
 				const pagesRes = await fetch(`/api/cbx/${bookId}/pages${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`);
+				if (loadToken !== activeComicLoadToken) return;
 				if (pagesRes.ok) {
 					const data = await pagesRes.json();
 					numPages = data.pages;
@@ -82,7 +110,6 @@
 					}
 					updateSpreadPages();
 					await tick();
-					rebuildStripLayout();
 					if (isStripMode()) {
 						scrollToStripPage(currentPage, 'auto');
 					}
@@ -91,19 +118,23 @@
 		} catch (e) {
 			console.error('Failed to load book:', e);
 		} finally {
-			loading = false;
+			if (loadToken === activeComicLoadToken) {
+				loading = false;
+			}
 		}
+	}
 
-		readerSettings.subscribe(s => {
+	onMount(() => {
+		const unsubscribeSettings = readerSettings.subscribe(s => {
 			const previousScrollMode = settings.scrollMode;
 			const previousStripWidth = settings.stripMaxWidthPercent;
+			showCurrentSection = s.showCurrentSection ?? true;
 			settings = { ...s.cbx };
 			if (!settings.autoHideControls) {
 				showTopBar();
 			}
 			if (previousScrollMode !== settings.scrollMode || previousStripWidth !== settings.stripMaxWidthPercent) {
 				void tick().then(() => {
-					rebuildStripLayout();
 					if (isStripMode()) {
 						scrollToStripPage(currentPage, 'auto');
 					}
@@ -113,12 +144,27 @@
 
 		handlePageExit = () => {
 			if (closeTasksStarted) return;
+			void readerSettings.flushPendingSave(true);
 			void endSession(true);
 		};
 		window.addEventListener('pagehide', handlePageExit);
 		window.addEventListener('beforeunload', handlePageExit);
 
 		resetTopBarBehavior();
+
+		return () => {
+			unsubscribeSettings();
+		};
+	});
+
+	$effect(() => {
+		const routeBookId = $page.params.bookID;
+		const routeFormat = $page.url.searchParams.get('format');
+		if (!routeBookId) return;
+
+		queueMicrotask(() => {
+			void loadComic(routeBookId, routeFormat);
+		});
 	});
 
 	async function fetchProgress() {
@@ -224,6 +270,15 @@
 		}
 	}
 
+	function toggleTopBarFromCenterTap() {
+		if (controlsNeedToStayVisible()) return;
+		if (topBarVisible) {
+			hideTopBar();
+		} else {
+			showTopBar(settings.scrollMode !== 'long-strip' && settings.scrollMode !== 'infinite');
+		}
+	}
+
 	function scheduleTopBarAutoHide() {
 		clearTopBarHideTimeout();
 		if (controlsNeedToStayVisible() || settings.scrollMode === 'long-strip' || settings.scrollMode === 'infinite') {
@@ -243,65 +298,53 @@
 		}
 	}
 
+	function preserveChromeAfterSeek() {
+		preserveChromeAfterSeekUntil = performance.now() + SEEK_SCROLL_SUPPRESS_MS;
+		showTopBar(false);
+	}
+
+	function isReaderCenterTap(e: PointerEvent, surface: HTMLElement) {
+		const rect = surface.getBoundingClientRect();
+		if (rect.width <= 0 || rect.height <= 0) return false;
+
+		const xRatio = (e.clientX - rect.left) / rect.width;
+		const yRatio = (e.clientY - rect.top) / rect.height;
+
+		return xRatio > 0.28 && xRatio < 0.72 && yRatio > 0.12 && yRatio < 0.88;
+	}
+
 	function isStripMode() {
 		return settings.scrollMode === 'long-strip' || settings.scrollMode === 'infinite';
 	}
 
-	function getStripPageWidth() {
-		if (!stripScrollEl) return stripContentWidth;
-		const horizontalPadding = window.matchMedia('(max-width: 640px)').matches ? 16 : 32;
-		const availableWidth = Math.max(1, stripScrollEl.clientWidth - horizontalPadding);
-		return Math.max(1, Math.floor(availableWidth * (settings.stripMaxWidthPercent / 100)));
-	}
-
-	function rebuildStripLayout() {
-		if (!numPages) {
-			stripPageLayouts = new Map();
-			visibleStripPages = [];
-			stripTotalHeight = 0;
-			return;
-		}
-
-		const pageWidth = getStripPageWidth();
-		const nextLayouts = new Map<number, { top: number; width: number; height: number }>();
-		let top = STRIP_PADDING_PX;
-		for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-			const previous = stripPageLayouts.get(pageNum);
-			const height = previous?.height ?? Math.round(pageWidth * STRIP_ESTIMATED_ASPECT_RATIO);
-			nextLayouts.set(pageNum, { top, width: pageWidth, height });
-			top += height + STRIP_PAGE_GAP_PX;
-		}
-
-		stripContentWidth = pageWidth;
-		stripPageLayouts = nextLayouts;
-		stripTotalHeight = Math.max(0, top - STRIP_PAGE_GAP_PX + STRIP_PADDING_PX);
-		updateVisibleStripPages();
-	}
-
-	function updateVisibleStripPages() {
+	function updateCurrentPageFromStrip() {
 		if (!stripScrollEl || !isStripMode() || !numPages) return;
-		const viewportTop = Math.max(0, stripScrollEl.scrollTop - STRIP_OVERSCAN_PX);
-		const viewportBottom = stripScrollEl.scrollTop + stripScrollEl.clientHeight + STRIP_OVERSCAN_PX;
-		const nextVisible: number[] = [];
+		const pages = Array.from(stripScrollEl.querySelectorAll<HTMLElement>('.strip-page[data-page]'));
+		if (pages.length === 0) return;
+
+		const containerRect = stripScrollEl.getBoundingClientRect();
+		const anchorY = containerRect.top + Math.min(160, stripScrollEl.clientHeight / 3);
 		let activePage = currentPage;
 		let activePageDistance = Number.POSITIVE_INFINITY;
-		const viewportAnchor = stripScrollEl.scrollTop + Math.min(160, stripScrollEl.clientHeight / 3);
 
-		for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-			const layout = stripPageLayouts.get(pageNum);
-			if (!layout) continue;
-			const pageBottom = layout.top + layout.height;
-			if (pageBottom >= viewportTop && layout.top <= viewportBottom) {
-				nextVisible.push(pageNum);
+		for (const pageEl of pages) {
+			const pageNum = Number(pageEl.dataset.page);
+			if (!Number.isFinite(pageNum)) continue;
+
+			const rect = pageEl.getBoundingClientRect();
+			if (rect.top <= anchorY && rect.bottom >= anchorY) {
+				activePage = pageNum;
+				activePageDistance = 0;
+				break;
 			}
-			const distance = Math.abs(layout.top - viewportAnchor);
+
+			const distance = Math.min(Math.abs(rect.top - anchorY), Math.abs(rect.bottom - anchorY));
 			if (distance < activePageDistance) {
 				activePageDistance = distance;
 				activePage = pageNum;
 			}
 		}
 
-		visibleStripPages = nextVisible;
 		if (activePage !== currentPage) {
 			currentPage = activePage;
 			updateSpreadPages();
@@ -311,40 +354,26 @@
 
 	function scrollToStripPage(pageNum: number, behavior: ScrollBehavior = 'smooth') {
 		if (!stripScrollEl) return;
-		if (stripPageLayouts.size === 0) {
-			rebuildStripLayout();
-		}
-		const layout = stripPageLayouts.get(pageNum);
-		if (!layout) return;
-		stripScrollEl.scrollTo({ top: Math.max(0, layout.top - STRIP_PADDING_PX), behavior });
-		updateVisibleStripPages();
+		const pageEl = stripScrollEl.querySelector<HTMLElement>(`.strip-page[data-page="${pageNum}"]`);
+		if (!pageEl) return;
+
+		stripScrollEl.scrollTo({ top: Math.max(0, pageEl.offsetTop - STRIP_PADDING_PX), behavior });
+		updateCurrentPageFromStrip();
 	}
 
-	function handleStripImageLoad(pageNum: number, e: Event) {
-		const image = e.currentTarget as HTMLImageElement;
-		const layout = stripPageLayouts.get(pageNum);
-		if (!layout || !image.naturalWidth || !image.naturalHeight) return;
+	function getStripPageLoading(pageNum: number): 'eager' | 'lazy' {
+		return pageNum <= currentPage + 2 ? 'eager' : 'lazy';
+	}
 
-		const nextHeight = Math.round(layout.width * (image.naturalHeight / image.naturalWidth));
-		if (Math.abs(nextHeight - layout.height) < 2) return;
-
-		const currentTop = stripScrollEl?.scrollTop ?? 0;
-		const shouldPreserveAnchor = currentTop > layout.top;
-		const heightDelta = nextHeight - layout.height;
-		layout.height = nextHeight;
-
-		for (let nextPage = pageNum + 1; nextPage <= numPages; nextPage++) {
-			const nextLayout = stripPageLayouts.get(nextPage);
-			if (nextLayout) {
-				nextLayout.top += heightDelta;
-			}
+	function handleStripPageLoad(pageNum: number) {
+		if (!isStripMode() || pageNum > currentPage) return;
+		if (stripRestoreScrollTimeout) {
+			clearTimeout(stripRestoreScrollTimeout);
 		}
-
-		stripTotalHeight += heightDelta;
-		if (stripScrollEl && shouldPreserveAnchor) {
-			stripScrollEl.scrollTop = currentTop + heightDelta;
-		}
-		updateVisibleStripPages();
+		stripRestoreScrollTimeout = setTimeout(() => {
+			stripRestoreScrollTimeout = null;
+			scrollToStripPage(currentPage, 'auto');
+		}, 40);
 	}
 
 	function queueStripProgressSave() {
@@ -357,8 +386,27 @@
 		}, 650);
 	}
 
+	function handleReaderPointerDown(e: PointerEvent) {
+		if (!e.isPrimary) return;
+		readerPointerStart = { id: e.pointerId, x: e.clientX, y: e.clientY };
+		readerPointerMoved = false;
+	}
+
+	function isTouchLikePointer(e?: PointerEvent) {
+		if (e?.pointerType === 'touch') return true;
+		return typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
+	}
+
 	function handleReaderPointerMove(e: PointerEvent) {
-		if (!settings.autoHideControls || controlsNeedToStayVisible()) return;
+		if (readerPointerStart) {
+			const dx = e.clientX - readerPointerStart.x;
+			const dy = e.clientY - readerPointerStart.y;
+			if (Math.hypot(dx, dy) > 10) {
+				readerPointerMoved = true;
+			}
+		}
+
+		if (!settings.autoHideControls || controlsNeedToStayVisible() || isTouchLikePointer(e)) return;
 		if (e.clientY <= TOP_BAR_REVEAL_EDGE_PX) {
 			showTopBar(settings.scrollMode !== 'long-strip' && settings.scrollMode !== 'infinite');
 		}
@@ -367,10 +415,15 @@
 	function handleReaderPointerUp(e: PointerEvent) {
 		if (controlsNeedToStayVisible()) return;
 		const target = e.target as Element | null;
-		if (target?.closest('input, textarea, select, [contenteditable="true"], .left-sidebar, .right-sidebar, .progress-bar')) {
+		if (target?.closest('input, textarea, select, [contenteditable="true"], .left-sidebar, .right-sidebar, .progress-bar, .reader-progress, .floating-nav')) {
 			return;
 		}
-		showTopBar(settings.scrollMode !== 'long-strip' && settings.scrollMode !== 'infinite');
+		if (readerPointerStart && readerPointerStart.id !== e.pointerId) return;
+		if (readerPointerMoved) return;
+		if (isReaderCenterTap(e, e.currentTarget as HTMLElement)) {
+			toggleTopBarFromCenterTap();
+		}
+		readerPointerStart = null;
 	}
 
 	onDestroy(() => {
@@ -382,6 +435,10 @@
 		if (stripProgressSaveTimeout) {
 			clearTimeout(stripProgressSaveTimeout);
 			stripProgressSaveTimeout = null;
+		}
+		if (stripRestoreScrollTimeout) {
+			clearTimeout(stripRestoreScrollTimeout);
+			stripRestoreScrollTimeout = null;
 		}
 		if (!closeTasksStarted) {
 			void endSession(true);
@@ -397,7 +454,6 @@
 		}
 		if (key === 'scrollMode' || key === 'stripMaxWidthPercent') {
 			void tick().then(() => {
-				rebuildStripLayout();
 				if (isStripMode()) {
 					scrollToStripPage(currentPage, 'auto');
 				}
@@ -479,7 +535,7 @@
 		if (rect.width <= 0) return null;
 		const x = clientX - rect.left;
 		const percentage = Math.max(0, Math.min(1, x / rect.width));
-		const newPage = Math.round(percentage * numPages);
+		const newPage = Math.max(1, Math.round(percentage * numPages));
 		return newPage >= 1 && newPage <= numPages ? newPage : null;
 	}
 
@@ -490,9 +546,12 @@
 	}
 
 	function handleProgressPointerDown(e: PointerEvent) {
+		if (isBottomSystemGestureStart(e)) {
+			return;
+		}
 		e.preventDefault();
 		e.stopPropagation();
-		resetTopBarBehavior();
+		showTopBar(false);
 		isDraggingProgress = true;
 		pendingProgressPage = null;
 		activeProgressPointerId = e.pointerId;
@@ -529,8 +588,8 @@
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
 		e.preventDefault();
 		e.stopPropagation();
-		resetTopBarBehavior();
 		finishProgressPointer(e);
+		preserveChromeAfterSeek();
 	}
 
 	function handleProgressPointerCancel(e: PointerEvent) {
@@ -541,12 +600,12 @@
 	function handleProgressBarKeydown(e: KeyboardEvent) {
 		if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
 			e.preventDefault();
-			resetTopBarBehavior();
 			prevPage();
+			preserveChromeAfterSeek();
 		} else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
 			e.preventDefault();
-			resetTopBarBehavior();
 			nextPage();
+			preserveChromeAfterSeek();
 		}
 	}
 
@@ -630,18 +689,25 @@
 		const container = e.currentTarget as HTMLElement | null;
 		if (!container) return;
 		const scrollTop = container.scrollTop;
-		updateVisibleStripPages();
+		updateCurrentPageFromStrip();
+		if (performance.now() < preserveChromeAfterSeekUntil) {
+			showTopBar(false);
+			lastLongStripScrollTop = scrollTop;
+			return;
+		}
+
 		if (!settings.autoHideControls || controlsNeedToStayVisible()) {
 			lastLongStripScrollTop = scrollTop;
 			return;
 		}
 
 		const delta = scrollTop - lastLongStripScrollTop;
-		if (scrollTop <= 2) {
+		const touchLike = typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
+		if (scrollTop <= 2 && !touchLike) {
 			showTopBar(false);
 		} else if (delta > TOP_BAR_SCROLL_DELTA) {
 			hideTopBar();
-		} else if (delta < -TOP_BAR_SCROLL_DELTA) {
+		} else if (delta < -TOP_BAR_SCROLL_DELTA && !touchLike) {
 			showTopBar(false);
 		}
 		lastLongStripScrollTop = scrollTop;
@@ -649,6 +715,10 @@
 
 	function getPageUrl(pageNum: number): string {
 		return `/api/cbx/${book.id}/page/${pageNum}${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`;
+	}
+
+	function getPageImageClass() {
+		return `page-image fit-${settings.fitMode}`;
 	}
 
 	function resetToDefaults() {
@@ -662,7 +732,6 @@
 
 	onMount(() => {
 		const handleResize = () => {
-			rebuildStripLayout();
 			if (isStripMode()) {
 				scrollToStripPage(currentPage, 'auto');
 			}
@@ -686,6 +755,7 @@
 	class="cbx-reader"
 	style="background-color: {settings.backgroundColor};"
 	role="presentation"
+	onpointerdown={handleReaderPointerDown}
 	onpointermove={handleReaderPointerMove}
 	onpointerup={handleReaderPointerUp}
 >
@@ -708,36 +778,8 @@
 				onclick={toggleLeftSidebar}
 				class="nav-btn"
 				class:active={leftSidebarOpen}
-				title="Toggle Sidebar"
+				title="Pages"
 			>
-				<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<line x1="3" y1="6" x2="21" y2="6"></line>
-					<line x1="3" y1="12" x2="21" y2="12"></line>
-					<line x1="3" y1="18" x2="21" y2="18"></line>
-				</svg>
-			</button>
-
-			<div class="nav-divider"></div>
-
-			<div class="page-controls">
-				<button onclick={prevPage} class="nav-btn" disabled={settings.mangaMode || settings.readingDirection === 'rtl' ? currentPage >= numPages : currentPage <= 1} title="Previous Page">
-					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<polyline points="15 18 9 12 15 6"></polyline>
-					</svg>
-				</button>
-
-				<span class="page-display">{currentPage} / {numPages}</span>
-
-				<button onclick={nextPage} class="nav-btn" disabled={settings.mangaMode || settings.readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= numPages} title="Next Page">
-					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<polyline points="9 18 15 12 9 6"></polyline>
-					</svg>
-				</button>
-			</div>
-
-			<div class="nav-divider"></div>
-
-			<button onclick={toggleLeftSidebar} class="nav-btn mobile-secondary" title="Pages">
 				<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 					<rect x="3" y="3" width="7" height="7"></rect>
 					<rect x="14" y="3" width="7" height="7"></rect>
@@ -749,6 +791,9 @@
 
 		<div class="nav-center">
 			<span class="book-title">{book?.title || 'Loading...'}</span>
+			{#if showCurrentSection}
+				<span class="chapter-title">Page {currentPage} / {Math.max(numPages, currentPage)}</span>
+			{/if}
 		</div>
 
 		<div class="nav-right">
@@ -769,29 +814,34 @@
 			</button>
 		</div>
 
-		<div
-			bind:this={progressBarEl}
-			class="progress-bar"
-			onpointerdown={(e) => handleProgressPointerDown(e)}
-			onpointermove={(e) => handleProgressPointerMove(e)}
-			onpointerup={(e) => handleProgressPointerUp(e)}
-			onpointercancel={(e) => handleProgressPointerCancel(e)}
-			role="slider"
-			aria-label="Reading progress"
-			aria-valuemin="0"
-			aria-valuemax="100"
-			aria-valuenow={numPages > 0 ? Math.round((currentPage / numPages) * 100) : 0}
-			tabindex="0"
-			onkeydown={handleProgressBarKeydown}
-		>
-			<div class="progress-fill" style="--progress: {progress}%;"></div>
-			<div
-				class="progress-thumb"
-				style="left: calc({progress}% - 6px);"
-				role="presentation"
-			></div>
-		</div>
+		<ReaderProgressTrack
+			progress={progress}
+			visible={topBarVisible}
+			variant="top"
+			ariaLabel="Reading progress"
+			ariaValueNow={numPages > 0 ? Math.round((currentPage / numPages) * 100) : 0}
+		/>
 	</header>
+
+	<ReaderProgressTrack
+		bind:element={progressBarEl}
+		progress={progress}
+		visible={topBarVisible}
+		variant="bottom"
+		metaAlign="center"
+		interactive={true}
+		showThumb={true}
+		label={`Page ${currentPage} / ${numPages} • ${Math.max(0, Math.min(100, Math.round(progress)))}%`}
+		ariaLabel="Reading progress"
+		ariaValueMin={1}
+		ariaValueMax={Math.max(numPages, currentPage)}
+		ariaValueNow={currentPage}
+		onpointerdown={(e) => handleProgressPointerDown(e)}
+		onpointermove={(e) => handleProgressPointerMove(e)}
+		onpointerup={(e) => handleProgressPointerUp(e)}
+		onpointercancel={(e) => handleProgressPointerCancel(e)}
+		onkeydown={handleProgressBarKeydown}
+	/>
 
 	<!-- Main Content Area -->
 	<div class="main-content">
@@ -808,6 +858,7 @@
 							class="thumbnail-item"
 							class:active={currentPage === i + 1}
 						>
+							<img src={getPageUrl(i + 1)} alt="Page {i + 1}" class="thumbnail-image" loading="lazy" decoding="async" />
 							<span class="thumbnail-number">{i + 1}</span>
 						</button>
 					{/each}
@@ -832,21 +883,19 @@
 			{:else if numPages > 0}
 				{#if settings.scrollMode === 'long-strip' || settings.scrollMode === 'infinite'}
 					<div class="long-strip" bind:this={stripScrollEl} onscroll={handleLongStripScroll}>
-						<div
-							class="strip-content"
-							style="width: {stripContentWidth}px; height: {stripTotalHeight}px;"
-						>
-							{#each visibleStripPages as pageNum (pageNum)}
-								{@const layout = stripPageLayouts.get(pageNum)}
-								{#if layout}
-									<img
-										src={getPageUrl(pageNum)}
-										alt="Page {pageNum}"
-										class="strip-image"
-										style="top: {layout.top}px; width: {layout.width}px; filter: saturate({settings.saturation}%) brightness({settings.vibrance / 100});"
-										onload={(e) => handleStripImageLoad(pageNum, e)}
-									/>
-								{/if}
+						<div class="strip-content">
+							{#each Array(numPages) as _, i (i)}
+								{@const pageNum = i + 1}
+								<img
+									src={getPageUrl(pageNum)}
+									alt="Page {pageNum}"
+									class="strip-page"
+									data-page={pageNum}
+									loading={getStripPageLoading(pageNum)}
+									decoding="async"
+									onload={() => handleStripPageLoad(pageNum)}
+									style="width: {settings.stripMaxWidthPercent}%; filter: saturate({settings.saturation}%) brightness({settings.vibrance / 100});"
+								/>
 							{/each}
 						</div>
 					</div>
@@ -856,14 +905,14 @@
 							<img
 								src={getPageUrl(currentSpreadPages[0])}
 								alt="Page {currentSpreadPages[0]}"
-								class="page-image"
+								class={getPageImageClass()}
 								style="filter: saturate({settings.saturation}%) brightness({settings.vibrance / 100});"
 							/>
 							{#if currentSpreadPages[1] <= numPages}
 								<img
 									src={getPageUrl(currentSpreadPages[1])}
 									alt="Page {currentSpreadPages[1]}"
-									class="page-image"
+									class={getPageImageClass()}
 									style="filter: saturate({settings.saturation}%) brightness({settings.vibrance / 100});"
 								/>
 							{/if}
@@ -871,7 +920,7 @@
 							<img
 								src={getPageUrl(currentPage)}
 								alt="Page {currentPage}"
-								class="page-image"
+								class={getPageImageClass()}
 								style="filter: saturate({settings.saturation}%) brightness({settings.vibrance / 100});"
 							/>
 						{/if}
@@ -960,7 +1009,7 @@
 							<input
 								type="range"
 								min="50"
-								max="100"
+								max="150"
 								value={settings.stripMaxWidthPercent}
 								oninput={(e) => updateSetting('stripMaxWidthPercent', parseInt(e.currentTarget.value))}
 								class="range-input-full"
@@ -1098,9 +1147,10 @@
 		top: 0;
 		left: 0;
 		right: 0;
-		display: flex;
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
 		align-items: center;
-		justify-content: space-between;
+		column-gap: 16px;
 		height: var(--reader-top-bar-height);
 		padding: 0 12px;
 		background: var(--color-surface-base, #0f172a);
@@ -1124,9 +1174,17 @@
 		gap: 4px;
 	}
 
-	.nav-left { flex: 1; }
-	.nav-center { flex: 2; justify-content: center; }
-	.nav-right { flex: 1; justify-content: flex-end; }
+	.nav-left { min-width: 0; }
+	.nav-center {
+		flex-direction: column;
+		justify-content: center;
+		min-width: 0;
+		text-align: center;
+	}
+	.nav-right {
+		justify-content: flex-end;
+		min-width: 0;
+	}
 
 	.nav-btn {
 		display: flex;
@@ -1146,84 +1204,24 @@
 	.nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 	.nav-btn.active { background: var(--color-primary-500, #22c55e); color: white; }
 
-	.nav-divider {
-		width: 1px;
-		height: 24px;
-		background: var(--color-surface-border, rgba(55, 65, 81, 0.6));
-		margin: 0 8px;
-	}
-
-	.page-controls { display: flex; align-items: center; gap: 4px; }
-
-	.page-display {
-		min-width: 80px;
-		color: var(--color-surface-text, #e2e8f0);
-		font-size: 14px;
-		text-align: center;
-	}
-
 	.book-title {
 		color: var(--color-surface-text, #e2e8f0);
 		font-size: 14px;
 		font-weight: 500;
-		max-width: 300px;
+		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
+	.chapter-title {
+		color: var(--color-surface-text-muted, #94a3b8);
+		font-size: 11px;
+		font-weight: 500;
+	}
+
 	.icon { width: 20px; height: 20px; }
 	.icon-lg { width: 24px; height: 24px; }
-
-	.progress-bar {
-		position: absolute;
-		bottom: 0;
-		left: 0;
-		right: 0;
-		height: 8px;
-		background: transparent;
-		cursor: pointer;
-		display: flex;
-		align-items: flex-end;
-		touch-action: none;
-	}
-
-	.progress-fill {
-		position: absolute;
-		left: 0;
-		bottom: 0;
-		height: 3px;
-		background: var(--color-surface-border, rgba(55, 65, 81, 0.6));
-		border-radius: 2px;
-		width: 100%;
-	}
-
-	.progress-fill::after {
-		content: '';
-		position: absolute;
-		left: 0;
-		top: 0;
-		height: 100%;
-		width: var(--progress, 0%);
-		background: var(--color-primary-500, #22c55e);
-		border-radius: 2px;
-	}
-
-	.progress-thumb {
-		position: absolute;
-		bottom: -4px;
-		width: 12px;
-		height: 12px;
-		background: var(--color-primary-500, #22c55e);
-		border: 2px solid var(--color-surface-base, #0f172a);
-		border-radius: 50%;
-		cursor: grab;
-		z-index: 10;
-		transition: left 0.05s ease;
-		touch-action: none;
-	}
-
-	.progress-thumb:hover { transform: scale(1.2); }
 
 	.main-content {
 		flex: 1;
@@ -1270,9 +1268,9 @@
 
 	.thumbnail-item {
 		aspect-ratio: 3/4;
-		display: flex;
-		align-items: center;
-		justify-content: center;
+		position: relative;
+		display: block;
+		overflow: hidden;
 		border: 2px solid transparent;
 		border-radius: 4px;
 		background: var(--color-surface-overlay, rgba(15, 23, 42, 0.85));
@@ -1284,6 +1282,26 @@
 
 	.thumbnail-item:hover { border-color: var(--color-surface-border, rgba(55, 65, 81, 0.6)); }
 	.thumbnail-item.active { border-color: var(--color-primary-500, #22c55e); }
+
+	.thumbnail-image {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.thumbnail-number {
+		position: absolute;
+		left: 6px;
+		bottom: 6px;
+		padding: 2px 6px;
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.82);
+		color: #f8fafc;
+		font-size: 11px;
+		font-weight: 600;
+		line-height: 1.2;
+	}
 
 	.cbx-container {
 		flex: 1;
@@ -1300,13 +1318,43 @@
 		align-items: center;
 		justify-content: center;
 		gap: 16px;
+		width: 100%;
 		height: 100%;
+		overflow: auto;
 	}
 
 	.page-image {
+		object-fit: contain;
+		flex: 0 0 auto;
+	}
+
+	.page-image.fit-fit-page,
+	.page-image.fit-automatic {
 		max-width: 100%;
 		max-height: 100%;
-		object-fit: contain;
+		width: auto;
+		height: auto;
+	}
+
+	.page-image.fit-fit-width {
+		width: 100%;
+		max-width: 100%;
+		height: auto;
+		max-height: none;
+	}
+
+	.page-image.fit-fit-height {
+		height: 100%;
+		max-height: 100%;
+		width: auto;
+		max-width: none;
+	}
+
+	.page-image.fit-actual-size {
+		width: auto;
+		height: auto;
+		max-width: none;
+		max-height: none;
 	}
 
 	.long-strip {
@@ -1314,19 +1362,26 @@
 		height: 100%;
 		overflow-y: auto;
 		overflow-x: auto;
+		padding: 16px 8px;
+		box-sizing: border-box;
 	}
 
 	.strip-content {
-		position: relative;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 8px;
+		min-width: 100%;
 		margin: 0 auto;
 	}
 
-	.strip-image {
-		position: absolute;
-		left: 0;
+	.strip-page {
 		display: block;
 		height: auto;
+		max-width: none;
 		object-fit: contain;
+		flex: 0 0 auto;
+		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
 	}
 
 	.floating-nav {
@@ -1538,6 +1593,7 @@
 
 		.top-nav {
 			padding: 0 10px;
+			column-gap: 8px;
 		}
 
 		.nav-left,
@@ -1565,14 +1621,6 @@
 			height: 22px;
 		}
 
-		.page-controls {
-			gap: 4px;
-		}
-
-		.progress-bar {
-			height: 8px;
-		}
-
 		.left-sidebar,
 		.right-sidebar {
 			width: 100vw;
@@ -1597,9 +1645,19 @@
 			width: 100%;
 		}
 
-		.page-image {
+		.page-image.fit-fit-page,
+		.page-image.fit-automatic {
+			max-height: calc(100vh - 120px);
+		}
+
+		.page-image.fit-fit-width {
 			width: 100%;
-			height: auto;
+			max-width: 100%;
+			max-height: none;
+		}
+
+		.page-image.fit-fit-height {
+			height: calc(100vh - 120px);
 			max-height: calc(100vh - 120px);
 		}
 
