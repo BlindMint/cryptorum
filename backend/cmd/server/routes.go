@@ -175,24 +175,6 @@ func initRoutes(r *chi.Mux) {
 	// Static files
 	FileServer(r, "/_app", http.Dir("./static/_app"))
 
-	// PDF.js worker
-	r.Get("/pdf.worker.min.js", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/javascript")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		http.ServeFile(w, r, "./static/pdf.worker.min.js")
-	})
-
-	// PDF.js worker (.mjs version for legacy builds)
-	r.Get("/pdf.worker.min.mjs", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/javascript")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		http.ServeFile(w, r, "./static/pdf.worker.min.mjs")
-	})
-
 	// API routes - protected
 	r.Route("/api", func(r chi.Router) {
 		r.Use(authMiddleware)
@@ -269,6 +251,7 @@ func initRoutes(r *chi.Mux) {
 		// Authors and Series
 		r.Get("/authors", getAuthorsHandler)
 		r.Get("/series", getSeriesHandler)
+		r.Get("/filter-options", getFilterOptionsHandler)
 
 		// Metadata management
 		r.Get("/metadata/{type}", getMetadataHandler)
@@ -436,6 +419,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 	discoveryOnly := r.URL.Query().Get("discovery") == "true"
+	includeTotal := r.URL.Query().Get("include_total") != "false"
 	if filterMode != "OR" && filterMode != "NOT" {
 		filterMode = "AND"
 	}
@@ -607,15 +591,16 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(bf.format, '') as format`
 	query += baseQuery
 
-	// Count total before applying limit/offset
-	countQuery := "SELECT COUNT(*) " + baseQuery
 	var total int
-	countArgs := make([]interface{}, len(args))
-	copy(countArgs, args)
-	err := appDB.QueryRow(countQuery, countArgs...).Scan(&total)
-	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to count books")
-		return
+	if includeTotal {
+		countQuery := "SELECT COUNT(*) " + baseQuery
+		countArgs := make([]interface{}, len(args))
+		copy(countArgs, args)
+		err := appDB.QueryRow(countQuery, countArgs...).Scan(&total)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to count books")
+			return
+		}
 	}
 
 	// Handle sorting
@@ -634,8 +619,12 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		orderBy = "COALESCE(rp.updated_at, 0) " + dir + ", LOWER(COALESCE(bm.title, '')) ASC"
 	}
 
+	queryLimit := limit
+	if !includeTotal {
+		queryLimit = limit + 1
+	}
 	query += " ORDER BY " + orderBy + " LIMIT ? OFFSET ?"
-	args = append(args, limit, offset)
+	args = append(args, queryLimit, offset)
 
 	rows, err := appDB.Query(query, args...)
 	if err != nil {
@@ -660,10 +649,11 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type BooksResponse struct {
-		Books  []BookResponse `json:"books"`
-		Total  int            `json:"total"`
-		Offset int            `json:"offset"`
-		Limit  int            `json:"limit"`
+		Books   []BookResponse `json:"books"`
+		Total   *int           `json:"total,omitempty"`
+		Offset  int            `json:"offset"`
+		Limit   int            `json:"limit"`
+		HasMore bool           `json:"has_more"`
 	}
 
 	books := []BookResponse{}
@@ -677,11 +667,25 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		books = append(books, b)
 	}
 
+	hasMore := false
+	if includeTotal {
+		hasMore = offset+len(books) < total
+	} else if len(books) > limit {
+		hasMore = true
+		books = books[:limit]
+	}
+
+	var totalPtr *int
+	if includeTotal {
+		totalPtr = &total
+	}
+
 	jsonResponse(w, http.StatusOK, BooksResponse{
-		Books:  books,
-		Total:  total,
-		Offset: offset,
-		Limit:  limit,
+		Books:   books,
+		Total:   totalPtr,
+		Offset:  offset,
+		Limit:   limit,
+		HasMore: hasMore,
 	})
 }
 
@@ -2507,114 +2511,162 @@ func searchQueryValues(r *http.Request, key string, splitComma bool) []string {
 	return cleaned
 }
 
-// Authors and Series handlers
-func getAuthorsHandler(w http.ResponseWriter, r *http.Request) {
-	current := getUserFromContext(r.Context())
-	ownerClause, ownerArgs := userOwnershipClause(current, "l")
-	rows, err := appDB.Query(`
-		SELECT bm.authors, COUNT(*) as book_count
-		FROM book_metadata bm
-		JOIN book b ON bm.book_id = b.id
-		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause+` AND bm.authors IS NOT NULL AND bm.authors != '[]' AND bm.authors != ''
-		GROUP BY bm.authors
-		ORDER BY book_count DESC, bm.authors
-	`, ownerArgs...)
-	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to fetch authors")
-		return
-	}
-	defer rows.Close()
-
-	type AuthorResponse struct {
-		Name      string `json:"name"`
-		BookCount int64  `json:"book_count"`
-	}
-
-	authors := []AuthorResponse{}
-	for rows.Next() {
-		var authorsJson string
-		var bookCount int64
-		if err := rows.Scan(&authorsJson, &bookCount); err != nil {
-			continue
-		}
-
-		// Parse JSON array of authors
-		var authorList []string
-		if err := json.Unmarshal([]byte(authorsJson), &authorList); err != nil {
-			continue
-		}
-
-		// Add each author individually
-		for _, author := range authorList {
-			if author == "" {
-				continue
-			}
-			// Check if author already exists
-			found := false
-			for i, existing := range authors {
-				if existing.Name == author {
-					authors[i].BookCount += bookCount
-					found = true
-					break
-				}
-			}
-			if !found {
-				authors = append(authors, AuthorResponse{
-					Name:      author,
-					BookCount: bookCount,
-				})
-			}
-		}
-	}
-
-	// Sort by book count descending, then by name
-	sort.Slice(authors, func(i, j int) bool {
-		if authors[i].BookCount == authors[j].BookCount {
-			return authors[i].Name < authors[j].Name
-		}
-		return authors[i].BookCount > authors[j].BookCount
-	})
-
-	jsonResponse(w, http.StatusOK, authors)
+type metadataOption struct {
+	Name      string `json:"name"`
+	BookCount int64  `json:"book_count"`
 }
 
-func getSeriesHandler(w http.ResponseWriter, r *http.Request) {
-	current := getUserFromContext(r.Context())
+func sortedMetadataOptions(counts map[string]int64) []metadataOption {
+	items := make([]metadataOption, 0, len(counts))
+	for name, count := range counts {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		items = append(items, metadataOption{Name: name, BookCount: count})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].BookCount == items[j].BookCount {
+			return items[i].Name < items[j].Name
+		}
+		return items[i].BookCount > items[j].BookCount
+	})
+	return items
+}
+
+func getJSONMetadataOptions(column string, hierarchical bool, current *AppUser) ([]metadataOption, error) {
 	ownerClause, ownerArgs := userOwnershipClause(current, "l")
-	rows, err := appDB.Query(`
-		SELECT bm.series, COUNT(*) as book_count
+	rows, err := appDB.Query(fmt.Sprintf(`
+		SELECT bm.%s, COUNT(*) as book_count
 		FROM book_metadata bm
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause+` AND bm.series IS NOT NULL AND bm.series != ''
-		GROUP BY bm.series
-		ORDER BY book_count DESC, bm.series
-	`, ownerArgs...)
+		WHERE %s AND bm.%s IS NOT NULL AND bm.%s != '[]' AND bm.%s != ''
+		GROUP BY bm.%s
+	`, column, ownerClause, column, column, column, column), ownerArgs...)
 	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to fetch series")
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
-	type SeriesResponse struct {
-		Name      string `json:"name"`
-		BookCount int64  `json:"book_count"`
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var jsonStr string
+		var bookCount int64
+		if err := rows.Scan(&jsonStr, &bookCount); err != nil {
+			continue
+		}
+
+		var values []string
+		if err := json.Unmarshal([]byte(jsonStr), &values); err != nil {
+			continue
+		}
+
+		prefixesInRow := make(map[string]bool)
+		for _, value := range values {
+			if !hierarchical {
+				value = strings.TrimSpace(value)
+				if value != "" {
+					counts[value] += bookCount
+				}
+				continue
+			}
+
+			parts := strings.Split(value, ".")
+			for i := range parts {
+				prefix := strings.TrimSpace(strings.Join(parts[:i+1], "."))
+				if prefix == "" || prefixesInRow[prefix] {
+					continue
+				}
+				prefixesInRow[prefix] = true
+				counts[prefix] += bookCount
+			}
+		}
 	}
 
-	series := []SeriesResponse{}
+	return sortedMetadataOptions(counts), rows.Err()
+}
+
+func getScalarMetadataOptions(column string, current *AppUser) ([]metadataOption, error) {
+	ownerClause, ownerArgs := userOwnershipClause(current, "l")
+	rows, err := appDB.Query(fmt.Sprintf(`
+		SELECT bm.%s, COUNT(*) as book_count
+		FROM book_metadata bm
+		JOIN book b ON bm.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE %s AND bm.%s IS NOT NULL AND bm.%s != ''
+		GROUP BY bm.%s
+	`, column, ownerClause, column, column, column), ownerArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int64)
 	for rows.Next() {
 		var name string
 		var bookCount int64
 		if err := rows.Scan(&name, &bookCount); err != nil {
 			continue
 		}
-		series = append(series, SeriesResponse{
-			Name:      name,
-			BookCount: bookCount,
-		})
+		name = strings.TrimSpace(name)
+		if name != "" {
+			counts[name] += bookCount
+		}
 	}
 
+	return sortedMetadataOptions(counts), rows.Err()
+}
+
+func getFilterOptionsHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+
+	authors, err := getJSONMetadataOptions("authors", false, current)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to fetch authors")
+		return
+	}
+	series, err := getScalarMetadataOptions("series", current)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to fetch series")
+		return
+	}
+	genres, err := getJSONMetadataOptions("genres", true, current)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to fetch genres")
+		return
+	}
+	tags, err := getJSONMetadataOptions("tags", true, current)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to fetch tags")
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string][]metadataOption{
+		"authors": authors,
+		"series":  series,
+		"genres":  genres,
+		"tags":    tags,
+	})
+}
+
+// Authors and Series handlers
+func getAuthorsHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	authors, err := getJSONMetadataOptions("authors", false, current)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to fetch authors")
+		return
+	}
+	jsonResponse(w, http.StatusOK, authors)
+}
+
+func getSeriesHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	series, err := getScalarMetadataOptions("series", current)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to fetch series")
+		return
+	}
 	jsonResponse(w, http.StatusOK, series)
 }
 

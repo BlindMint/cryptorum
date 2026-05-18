@@ -1,0 +1,58 @@
+.git
+.gitignore
+.dockerignore
+
+# Local dependencies and build output
+node_modules/
+frontend/node_modules/
+frontend/build/
+frontend/.svelte-kit/
+frontend/.vite/
+frontend/.vercel/
+backend/cmd/server/static/_app/
+backend/cryptorum
+backend/server
+backend/.gocache/
+backend/.ccache/
+
+# Runtime data and mounted library folders
+data/
+covers/
+thumb/
+books/
+bookdrop/
+backups/
+
+# Local configuration and secrets
+config.yaml
+config.*.yaml
+.env
+.env.*
+*.env
+cookies.txt
+
+# Databases, logs, and temporary files
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.bak
+*.log
+*.tmp
+*.temp
+*.pid
+*.out
+
+# Optional Calibre download cache
+calibre-cache/*
+!calibre-cache/
+!calibre-cache/.gitkeep
+!calibre-cache/*.txz
+
+# Tool/editor state
+.claude/
+.codex
+.idea/
+.vscode/
+.DS_Store
