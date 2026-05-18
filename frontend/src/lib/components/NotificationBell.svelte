@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import JobListItem from './JobListItem.svelte';
-	import { notificationVisualIndicator } from '$lib/stores';
+	import { appActivity, notificationVisualIndicator } from '$lib/stores';
 
 	type NotificationItem = {
 		id: number;
@@ -30,8 +30,8 @@
 	};
 
 	let open = $state(false);
-	let notifications = $state<NotificationItem[]>([]);
-	let activeJobs = $state<JobItem[]>([]);
+	let notifications = $derived($appActivity.notifications as NotificationItem[]);
+	let activeJobs = $derived($appActivity.activeJobs as JobItem[]);
 	let unreadNotificationCount = $derived(
 		notifications.filter((item) => item.source !== 'job' && !item.read_at).length + activeJobs.length
 	);
@@ -39,7 +39,6 @@
 	let hasActiveJobs = $derived(activeJobs.length > 0);
 	let buttonRef = $state<HTMLButtonElement | null>(null);
 	let panelRef = $state<HTMLDivElement | null>(null);
-	let refreshTimer: number | null = null;
 	let {
 		mobileMenu = false,
 		panelOnly = false,
@@ -61,44 +60,21 @@
 		}).format(new Date(value * 1000));
 	}
 
-	async function loadNotifications() {
-		try {
-			const [notificationsRes, jobsRes] = await Promise.all([
-				fetch('/api/notifications?limit=20', { cache: 'no-store' }),
-				fetch('/api/jobs?status=queued,running,cancelling&limit=20', { cache: 'no-store' })
-			]);
-			if (notificationsRes.ok) {
-				const data = await notificationsRes.json();
-				const items: NotificationItem[] = data.items ?? [];
-				notifications = items.filter((item) => item.source !== 'job');
-			}
-			if (jobsRes.ok) {
-				activeJobs = await jobsRes.json();
-			}
-		} catch (error) {
-			console.error('Failed to load notifications:', error);
-		}
-	}
-
-	async function refreshStatus() {
-		await loadNotifications();
-	}
-
 	async function markNotificationRead(notificationId: number) {
 		if (notificationId < 0) return;
 		await fetch(`/api/notifications/${notificationId}/read`, { method: 'POST' });
-		await loadNotifications();
+		await appActivity.refresh();
 	}
 
 	async function removeNotification(notificationId: number) {
 		if (notificationId < 0) return;
 		await fetch(`/api/notifications/${notificationId}`, { method: 'DELETE' });
-		await loadNotifications();
+		await appActivity.refresh();
 	}
 
 	async function dismissAllNotifications() {
 		await fetch('/api/notifications', { method: 'DELETE' });
-		await loadNotifications();
+		await appActivity.refresh();
 	}
 
 	function closePanel() {
@@ -129,13 +105,11 @@
 			open = true;
 		}
 		notificationVisualIndicator.init();
-		refreshStatus();
-		refreshTimer = window.setInterval(refreshStatus, 5000);
+		appActivity.init();
 		if (!panelOnly) {
 			document.addEventListener('click', handleDocumentClick);
 		}
 		return () => {
-			if (refreshTimer) window.clearInterval(refreshTimer);
 			if (!panelOnly) {
 				document.removeEventListener('click', handleDocumentClick);
 			}

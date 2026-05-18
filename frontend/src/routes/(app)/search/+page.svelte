@@ -212,16 +212,13 @@
 
 	async function fetchFilterOptions() {
 		try {
-			const [authorsRes, seriesRes, genresRes, tagsRes] = await Promise.all([
-				fetch('/api/authors'),
-				fetch('/api/series'),
-				fetch('/api/metadata/genres'),
-				fetch('/api/metadata/tags')
-			]);
-			if (authorsRes.ok) availableAuthors = await authorsRes.json();
-			if (seriesRes.ok) availableSeries = await seriesRes.json();
-			if (genresRes.ok) availableGenres = await genresRes.json();
-			if (tagsRes.ok) availableTags = await tagsRes.json();
+			const res = await fetch('/api/filter-options');
+			if (!res.ok) return;
+			const data = await res.json();
+			availableAuthors = data.authors ?? [];
+			availableSeries = data.series ?? [];
+			availableGenres = data.genres ?? [];
+			availableTags = data.tags ?? [];
 		} catch (error) {
 			console.error('Failed to fetch filter options:', error);
 		}

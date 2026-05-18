@@ -20,7 +20,8 @@
   let scanMessage = $state('');
   let libraryName = $state('');
   let totalBooks = $state(0);
-  let hasMore = $derived(books.length < totalBooks);
+  let serverHasMore = $state(false);
+  let hasMore = $derived(serverHasMore);
 
  	// Display controls
  	let viewMode = $state('grid');
@@ -93,10 +94,12 @@
 	let librarySearch = $state('');
  	let currentOffset = $state(0);
  	const BATCH_SIZE = 50;
-	const BACKGROUND_REFRESH_INTERVAL_MS = 3000;
+	const BACKGROUND_REFRESH_ACTIVE_INTERVAL_MS = 3000;
+	const BACKGROUND_REFRESH_IDLE_INTERVAL_MS = 30000;
 	const MAX_REFRESH_LIMIT = 200;
 	const BULK_SELECTION_STORAGE_KEY = 'cryptorumLibraryBulkSelection';
 	let backgroundRefreshing = false;
+	let backgroundRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 	let searchUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function getQueryValues(params: URLSearchParams, key: string, splitComma: boolean = false): string[] {
@@ -150,7 +153,7 @@
  		}
  	}
 
-	function buildBooksUrl(offset: number = 0, limit: number = BATCH_SIZE): string {
+	function buildBooksUrl(offset: number = 0, limit: number = BATCH_SIZE, includeTotal: boolean = true): string {
 		const params = $page.url.searchParams;
 		const authors = getQueryValues(params, 'author');
 		const series = getQueryValues(params, 'series');
@@ -162,6 +165,7 @@
 		const queryParams = new URLSearchParams();
 		queryParams.set('limit', String(limit));
 		queryParams.set('offset', String(offset));
+		if (!includeTotal) queryParams.set('include_total', 'false');
 
 		if (libraryFilter) queryParams.set('library_id', libraryFilter);
 		const q = $page.url.searchParams.get('q');
@@ -187,21 +191,26 @@
  		}
 
  		try {
- 			const url = buildBooksUrl(reset ? 0 : currentOffset);
- 			const res = await fetch(url);
- 			if (res.ok) {
- 				const data = await res.json();
- 				if (data.books) {
- 					totalBooks = data.total;
- 					if (reset) {
- 						books = data.books;
- 					} else {
- 						books = [...books, ...data.books];
- 					}
- 					currentOffset = books.length;
- 					sortBooks();
- 				}
- 			}
+			const url = buildBooksUrl(reset ? 0 : currentOffset, BATCH_SIZE, reset);
+			const res = await fetch(url);
+			if (res.ok) {
+				const data = await res.json();
+				if (data.books) {
+					if (typeof data.total === 'number') {
+						totalBooks = data.total;
+					}
+					serverHasMore = typeof data.has_more === 'boolean'
+						? data.has_more
+						: books.length + data.books.length < totalBooks;
+					if (reset) {
+						books = data.books;
+					} else {
+						books = [...books, ...data.books];
+					}
+					currentOffset = books.length;
+					sortBooks();
+				}
+			}
  		} catch (e) {
  			console.error('Failed to fetch books:', e);
   		} finally {
@@ -230,7 +239,7 @@
 				MAX_REFRESH_LIMIT,
 				Math.max(BATCH_SIZE, previousBooks.length + (loadedAllKnownBooks ? BATCH_SIZE : 0))
 			);
-			const res = await fetch(buildBooksUrl(0, refreshLimit), { cache: 'no-store' });
+			const res = await fetch(buildBooksUrl(0, refreshLimit, false), { cache: 'no-store' });
 			if (res.ok) {
 				const data = await res.json();
 				if (data.books) {
@@ -242,7 +251,12 @@
 					} else {
 						books = refreshedBooks;
 					}
-					totalBooks = data.total;
+					if (typeof data.total === 'number') {
+						totalBooks = data.total;
+					}
+					if (typeof data.has_more === 'boolean') {
+						serverHasMore = data.has_more;
+					}
 					currentOffset = books.length;
 					sortBooks();
 				}
@@ -259,26 +273,40 @@
  		await fetchBooks(false);
  	}
 
+	function scheduleBackgroundRefresh(delay?: number) {
+		if (backgroundRefreshTimer !== null) {
+			window.clearTimeout(backgroundRefreshTimer);
+		}
+
+		const nextDelay = delay ?? (
+			scanning || scanMessage
+				? BACKGROUND_REFRESH_ACTIVE_INTERVAL_MS
+				: BACKGROUND_REFRESH_IDLE_INTERVAL_MS
+		);
+
+		backgroundRefreshTimer = window.setTimeout(async () => {
+			if (document.visibilityState === 'visible') {
+				await refreshBooksInBackground();
+			}
+			scheduleBackgroundRefresh();
+		}, nextDelay);
+	}
+
+	function handleVisibilityChange() {
+		if (document.visibilityState === 'visible') {
+			scheduleBackgroundRefresh(500);
+		}
+	}
+
 	async function fetchFilterOptions() {
 		try {
-			const [authorsRes, seriesRes, genresRes, tagsRes] = await Promise.all([
-				fetch('/api/authors'),
-				fetch('/api/series'),
-				fetch('/api/metadata/genres'),
-				fetch('/api/metadata/tags')
-			]);
-			if (authorsRes.ok) {
-				availableAuthors = await authorsRes.json();
-			}
-			if (seriesRes.ok) {
-				availableSeries = await seriesRes.json();
-			}
-			if (genresRes.ok) {
-				availableGenres = await genresRes.json();
-			}
-			if (tagsRes.ok) {
-				availableTags = await tagsRes.json();
-			}
+			const res = await fetch('/api/filter-options');
+			if (!res.ok) return;
+			const data = await res.json();
+			availableAuthors = data.authors ?? [];
+			availableSeries = data.series ?? [];
+			availableGenres = data.genres ?? [];
+			availableTags = data.tags ?? [];
 		} catch (e) {
 			console.error('Failed to fetch filter options:', e);
 		}
@@ -288,7 +316,6 @@
  		const filter = libraryFilter;
  		if (filter !== undefined) {
  			fetchLibraryName();
- 			fetchBooks(true);
  		}
  	});
 
@@ -409,9 +436,8 @@
  		fetchBooks(true);
  		fetchFilterOptions();
  		showFormatOnCover.init();
-		const backgroundRefresh = window.setInterval(() => {
-			void refreshBooksInBackground();
-		}, BACKGROUND_REFRESH_INTERVAL_MS);
+		scheduleBackgroundRefresh(BACKGROUND_REFRESH_IDLE_INTERVAL_MS);
+		document.addEventListener('visibilitychange', handleVisibilityChange);
 
  		// Set initial grid size based on viewport
  		const updateGridSizeForViewport = () => {
@@ -428,7 +454,10 @@
  		updateGridSizeForViewport();
 
  		return () => {
-			window.clearInterval(backgroundRefresh);
+			if (backgroundRefreshTimer !== null) {
+				window.clearTimeout(backgroundRefreshTimer);
+			}
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			if (searchUpdateTimer) clearTimeout(searchUpdateTimer);
  			if (observer) observer.disconnect();
  		};

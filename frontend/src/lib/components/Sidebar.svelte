@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { desktopSidebarCollapsed, mobileMenuOpen } from '$lib/stores';
+	import { appActivity, desktopSidebarCollapsed, mobileMenuOpen } from '$lib/stores';
 	import LibraryIconPicker from '$lib/components/LibraryIconPicker.svelte';
 	import { parseLibraryIcon } from '$lib/utils/library-icons';
 
@@ -148,6 +148,10 @@
 			activeLibraryScanJobs.some((job: any) => getJobLibraryId(job) === library.id);
 	}
 
+	$effect(() => {
+		activeLibraryScanJobs = $appActivity.activeJobs.filter((job: any) => job.job_type === 'library_scan');
+	});
+
 	onMount(async () => {
 		const storedWidth = localStorage.getItem(SIDEBAR_STORAGE_KEY);
 		if (storedWidth !== null) {
@@ -157,6 +161,7 @@
 			}
 		}
 
+		appActivity.init();
 		await loadData();
 		refreshTimer = window.setInterval(() => {
 			if (libraries.some((library) => isLibraryScanActive(library)) || activeLibraryScanJobs.length > 0) {
@@ -407,29 +412,13 @@
 				const sh = await shelvesRes.json();
 				if (sh) shelves = sh;
 			}
-
-			await loadActiveLibraryScanJobs();
+			await appActivity.refresh();
 		} catch (e) {
 			console.error('Failed to load navigation data:', e);
 		} finally {
 			isLoading = false;
 		}
 	}
-
-	async function loadActiveLibraryScanJobs() {
-		try {
-			const res = await fetch('/api/jobs?status=queued,running,cancelling&type=library_scan&limit=100', { cache: 'no-store' });
-			if (!res.ok) {
-				activeLibraryScanJobs = [];
-				return;
-			}
-			activeLibraryScanJobs = await res.json();
-		} catch (e) {
-			console.error('Failed to load active library scan jobs:', e);
-			activeLibraryScanJobs = [];
-		}
-	}
-
 
 </script>
 
