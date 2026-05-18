@@ -126,7 +126,7 @@
 		right: 0;
 		bottom: 0;
 		z-index: 115;
-		padding: 10px 18px calc(12px + env(safe-area-inset-bottom));
+		padding: 10px 18px calc(32px + env(safe-area-inset-bottom));
 		background: var(--color-surface-base, #0f172a);
 		border-top: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
 		box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.28);
@@ -231,7 +231,7 @@
 
 	@media (max-width: 768px) {
 		.reader-progress-bottom {
-			padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
+			padding: 10px 14px calc(32px + env(safe-area-inset-bottom));
 		}
 	}
 </style>

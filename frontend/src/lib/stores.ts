@@ -111,6 +111,140 @@ function createNotificationVisualIndicatorStore() {
 
 export const notificationVisualIndicator = createNotificationVisualIndicatorStore();
 
+export type ActivityJob = {
+	id: number;
+	job_type: string;
+	title: string;
+	status: string;
+	total_items: number;
+	completed_items: number;
+	failed_items: number;
+	payload?: Record<string, any>;
+	result?: Record<string, any>;
+	created_at: number;
+};
+
+export type ActivityNotification = {
+	id: number;
+	source?: 'notification' | 'job' | 'log';
+	kind: string;
+	title: string;
+	message?: string;
+	url?: string;
+	read_at?: number;
+	created_at: number;
+	job?: ActivityJob;
+};
+
+type ActivityState = {
+	notifications: ActivityNotification[];
+	activeJobs: ActivityJob[];
+	loading: boolean;
+	error: string | null;
+	lastUpdated: number;
+};
+
+function createAppActivityStore() {
+	const initialState: ActivityState = {
+		notifications: [],
+		activeJobs: [],
+		loading: false,
+		error: null,
+		lastUpdated: 0
+	};
+	const { subscribe, set, update } = writable<ActivityState>(initialState);
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	let initialized = false;
+	let inFlight: Promise<void> | null = null;
+	let latestState = initialState;
+
+	subscribe((value) => {
+		latestState = value;
+	});
+
+	function nextInterval(): number {
+		if (!browser || document.visibilityState !== 'visible') return 30000;
+		return latestState.activeJobs.length > 0 ? 5000 : 15000;
+	}
+
+	function schedule(delay = nextInterval()) {
+		if (!browser) return;
+		if (timer) window.clearTimeout(timer);
+		timer = window.setTimeout(async () => {
+			if (document.visibilityState === 'visible') {
+				await refresh();
+			} else {
+				schedule();
+			}
+		}, delay);
+	}
+
+	async function refresh(): Promise<void> {
+		if (!browser) return;
+		if (inFlight) return inFlight;
+
+		inFlight = (async () => {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				const [notificationsRes, jobsRes] = await Promise.all([
+					fetch('/api/notifications?limit=20', { cache: 'no-store' }),
+					fetch('/api/jobs?status=queued,running,cancelling&limit=100', { cache: 'no-store' })
+				]);
+
+				let notifications = latestState.notifications;
+				let activeJobs = latestState.activeJobs;
+				if (notificationsRes.ok) {
+					const data = await notificationsRes.json();
+					const items: ActivityNotification[] = data.items ?? [];
+					notifications = items.filter((item) => item.source !== 'job');
+				}
+				if (jobsRes.ok) {
+					activeJobs = await jobsRes.json();
+				}
+
+				set({
+					notifications,
+					activeJobs,
+					loading: false,
+					error: null,
+					lastUpdated: Date.now()
+				});
+			} catch (error) {
+				console.error('Failed to load app activity:', error);
+				update((state) => ({
+					...state,
+					loading: false,
+					error: 'Unable to load app activity.'
+				}));
+			} finally {
+				inFlight = null;
+				schedule();
+			}
+		})();
+
+		return inFlight;
+	}
+
+	function handleVisibilityChange() {
+		if (document.visibilityState === 'visible') {
+			schedule(250);
+		}
+	}
+
+	return {
+		subscribe,
+		init: () => {
+			if (!browser || initialized) return;
+			initialized = true;
+			document.addEventListener('visibilitychange', handleVisibilityChange);
+			void refresh();
+		},
+		refresh
+	};
+}
+
+export const appActivity = createAppActivityStore();
+
 // File format colors for badges
 export const formatColors: Record<string, { bg: string; text: string }> = {
 	epub: { bg: '#10b981', text: '#ffffff' },   // emerald-500

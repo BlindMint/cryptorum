@@ -59,9 +59,13 @@
 	let lastToolbarRoot: HTMLElement | null = null;
 	let scrollListenerTargets = new Set<HTMLElement>();
 	let scrollPositions = new WeakMap<HTMLElement, number>();
+	let scrollActivityFrame: number | null = null;
+	let pendingScrollActivity: { delta: number; scrollTop: number } | null = null;
+	let stableChromePatchCount = 0;
 
 	const documentId = 'cryptorum-pdf';
 	const maxRestoreAttempts = 8;
+	const stableChromePatchLimit = 3;
 	const appTheme = {
 		preference: 'dark' as const,
 		light: {
@@ -179,6 +183,11 @@
 		}
 		scrollListenerTargets.clear();
 		scrollPositions = new WeakMap<HTMLElement, number>();
+		if (scrollActivityFrame !== null) {
+			cancelAnimationFrame(scrollActivityFrame);
+			scrollActivityFrame = null;
+		}
+		pendingScrollActivity = null;
 	}
 
 	function queryAllDeep(selector: string, root: ParentNode): Element[] {
@@ -241,7 +250,16 @@
 		scrollPositions.set(target, scrollTop);
 
 		if (Math.abs(delta) > 0.5) {
-			onScrollActivity?.(delta, scrollTop);
+			pendingScrollActivity = { delta, scrollTop };
+			if (scrollActivityFrame === null) {
+				scrollActivityFrame = requestAnimationFrame(() => {
+					scrollActivityFrame = null;
+					if (!pendingScrollActivity) return;
+					const activity = pendingScrollActivity;
+					pendingScrollActivity = null;
+					onScrollActivity?.(activity.delta, activity.scrollTop);
+				});
+			}
 		}
 	}
 
@@ -427,6 +445,15 @@
 		}
 
 		updateEmbedPdfScrollListeners();
+		if (activeToolbarRoot && scrollListenerTargets.size > 0) {
+			stableChromePatchCount += 1;
+			if (stableChromePatchCount >= stableChromePatchLimit) {
+				chromePatchObserver?.disconnect();
+				chromePatchObserver = null;
+			}
+		} else {
+			stableChromePatchCount = 0;
+		}
 	}
 
 	function scheduleEmbedPdfChromePatch(delay = 0) {
@@ -444,7 +471,7 @@
 
 		clearChromePatchRetryTimers();
 		scheduleEmbedPdfChromePatch();
-		chromePatchRetryTimers = [50, 150, 350, 800, 1500].map((delay) =>
+		chromePatchRetryTimers = [50, 150, 350].map((delay) =>
 			setTimeout(applyEmbedPdfChromePatch, delay)
 		);
 	}
@@ -458,6 +485,7 @@
 			return;
 		}
 
+		stableChromePatchCount = 0;
 		chromePatchObserver = new MutationObserver(() => scheduleEmbedPdfChromePatch());
 		chromePatchObserver.observe(embedPdfContainerEl, { childList: true, subtree: true });
 		queueEmbedPdfChromePatchBurst();

@@ -49,7 +49,9 @@ config.*.yaml
 cookies.txt
 
 # Calibre downloads and extracted conversion caches
-calibre-cache/
+calibre-cache/*
+!calibre-cache/
+!calibre-cache/.gitkeep
 
 # Logs and temporary files
 *.log

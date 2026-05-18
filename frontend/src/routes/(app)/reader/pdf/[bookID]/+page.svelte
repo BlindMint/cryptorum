@@ -37,7 +37,6 @@
 	let embedPdfViewerReady = $state(false);
 	let embedPdfScroll: any = null;
 	let embedPdfRestoringInitialPage = false;
-	let showCurrentSection = $state(true);
 	let pdfLoadRetryToken = $state(0);
 	let pdfLoadRetryAttempts = 0;
 
@@ -209,7 +208,19 @@
 	}
 
 	function getSavedProgressPage() {
-		return savedProgress?.page > 0 ? clampPage(savedProgress.page) : 1;
+		if (savedProgress?.page > 0) {
+			return clampPage(savedProgress.page);
+		}
+
+		if (
+			typeof savedProgress?.percent === 'number' &&
+			savedProgress.percent > 0 &&
+			numPages > 0
+		) {
+			return clampPage(Math.ceil((savedProgress.percent / 100) * numPages));
+		}
+
+		return 1;
 	}
 
 	function getSafeReturnPath(value: string | null) {
@@ -372,7 +383,6 @@
 		window.addEventListener('click', globalClickListener);
 
 		unsubscribeReaderSettings = readerSettings.subscribe(s => {
-			showCurrentSection = s.showCurrentSection ?? true;
 			settings = { ...s.pdf };
 		});
 
@@ -385,6 +395,9 @@
 					book = await res.json();
 					numPages = book.page_count || 0;
 					await fetchProgress();
+					if (!savedProgress?.page && savedProgress?.percent > 0 && numPages <= 0) {
+						await fetchPdfPageCount();
+					}
 					currentPage = getSavedProgressPage();
 					embedPdfInitialPage = currentPage;
 					embedPdfRestoringInitialPage = embedPdfInitialPage > 1;
@@ -2670,9 +2683,6 @@
 				</a>
 				<div class="embedpdf-shell-title" class:top-nav-hidden={!topBarVisible} title={getPdfDisplayTitle()}>
 					<span>{getPdfDisplayTitle()}</span>
-					{#if showCurrentSection}
-						<span class="ml-2 text-xs text-[var(--color-surface-text-muted)]">Page {currentPage} / {Math.max(numPages, currentPage)}</span>
-					{/if}
 				</div>
 				<button
 					class="embedpdf-shell-control embedpdf-fullscreen-control nav-btn"
@@ -2881,8 +2891,8 @@
 		z-index: 50;
 		--embedpdf-shell-control-size: 42px;
 		--embedpdf-shell-title-width: clamp(220px, 42vw, 560px);
-		--embedpdf-shell-left-reserve: clamp(128px, 18vw, 240px);
-		--embedpdf-shell-right-reserve: clamp(260px, 38vw, 520px);
+		--embedpdf-shell-left-reserve: clamp(400px, 35vw, 420px);
+		--embedpdf-shell-right-reserve: clamp(112px, 20vw, 240px);
 	}
 
 	:global([data-epdf-i="left-group"]) {
@@ -3034,12 +3044,19 @@
 		transform: translateY(8px) !important;
 	}
 
+	@media (min-width: 641px) and (max-width: 767px) {
+		.embedpdf-wrapper {
+			--embedpdf-shell-left-reserve: 272px;
+			--embedpdf-shell-right-reserve: 84px;
+		}
+	}
+
 	@media (max-width: 640px) {
 		.embedpdf-wrapper {
 			--embedpdf-shell-control-size: 44px;
 			--embedpdf-shell-title-width: clamp(136px, 38vw, 260px);
-			--embedpdf-shell-left-reserve: 112px;
-			--embedpdf-shell-right-reserve: clamp(120px, 30vw, 220px);
+			--embedpdf-shell-left-reserve: 224px;
+			--embedpdf-shell-right-reserve: clamp(92px, 24vw, 180px);
 		}
 
 		.embedpdf-shell-title {
@@ -3051,8 +3068,8 @@
 	@media (max-width: 420px) {
 		.embedpdf-wrapper {
 			--embedpdf-shell-title-width: 108px;
-			--embedpdf-shell-left-reserve: 104px;
-			--embedpdf-shell-right-reserve: 104px;
+			--embedpdf-shell-left-reserve: 204px;
+			--embedpdf-shell-right-reserve: 84px;
 		}
 
 		.embedpdf-shell-title {
