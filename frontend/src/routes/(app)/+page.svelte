@@ -92,7 +92,7 @@
 	async function loadContinueReading() {
 		continueReadingLoading = true;
 		try {
-			const res = await fetch('/api/books?status=reading&sort=last_read&sort_dir=desc&limit=12', { cache: 'no-store' });
+			const res = await fetch('/api/books?status=reading&sort=last_read&sort_dir=desc&limit=12&include_total=false', { cache: 'no-store' });
 			if (res.ok) {
 				const data = await res.json();
 				continueReadingBooks = data.books || [];
@@ -107,7 +107,7 @@
 	async function loadRecentBooks() {
 		recentBooksLoading = true;
 		try {
-			const res = await fetch('/api/books?limit=12', { cache: 'no-store' });
+			const res = await fetch('/api/books?limit=12&include_total=false', { cache: 'no-store' });
 			if (res.ok) {
 				const data = await res.json();
 				recentBooks = (data.books || []).slice(0, 12);
@@ -123,7 +123,7 @@
 	async function loadDiscoverBooks() {
 		discoverBooksLoading = true;
 		try {
-			const res = await fetch('/api/books?sort=random&limit=12&discovery=true', { cache: 'no-store' });
+			const res = await fetch('/api/books?sort=random&limit=12&discovery=true&include_total=false', { cache: 'no-store' });
 			if (res.ok) {
 				const data = await res.json();
 				discoverBooks = data.books || [];

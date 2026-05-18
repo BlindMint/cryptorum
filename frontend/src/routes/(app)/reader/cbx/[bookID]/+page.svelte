@@ -106,7 +106,9 @@
 					const data = await pagesRes.json();
 					numPages = data.pages;
 					if (savedProgress && savedProgress.page > 0) {
-						currentPage = savedProgress.page;
+						currentPage = Math.max(1, Math.min(numPages, savedProgress.page));
+					} else if (savedProgress?.percent > 0 && numPages > 0) {
+						currentPage = Math.max(1, Math.min(numPages, Math.ceil((savedProgress.percent / 100) * numPages)));
 					}
 					updateSpreadPages();
 					await tick();
