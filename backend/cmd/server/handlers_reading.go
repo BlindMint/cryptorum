@@ -28,11 +28,11 @@ type ReadingProgress struct {
 
 // UpdateReadingProgressRequest represents a request to update reading progress
 type UpdateReadingProgressRequest struct {
-	FileID  *int64  `json:"file_id,omitempty"`
-	Percent float64 `json:"percent"`
-	CFI     string  `json:"cfi,omitempty"`
-	Page    int     `json:"page,omitempty"`
-	Status  string  `json:"status"`
+	FileID  *int64   `json:"file_id,omitempty"`
+	Percent *float64 `json:"percent,omitempty"`
+	CFI     *string  `json:"cfi,omitempty"`
+	Page    *int     `json:"page,omitempty"`
+	Status  string   `json:"status"`
 }
 
 // Annotation represents a book annotation
@@ -250,6 +250,54 @@ func UpdateReadingProgressHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	existing, err := loadReadingProgress(bookID)
+	if err != nil {
+		slog.Error("UpdateReadingProgressHandler failed to load existing progress", "book_id", bookID, "error", err)
+		errorResponse(w, http.StatusInternalServerError, "Failed to load reading progress")
+		return
+	}
+
+	fileID := existing.FileID
+	if req.FileID != nil {
+		fileID = req.FileID
+	}
+
+	percent := existing.Percent
+	if req.Percent != nil {
+		percent = *req.Percent
+	}
+
+	cfi := existing.CFI
+	if req.CFI != nil {
+		cfi = *req.CFI
+	}
+
+	page := existing.Page
+	if req.Page != nil {
+		page = *req.Page
+	}
+
+	status := existing.Status
+	if strings.TrimSpace(req.Status) != "" {
+		status = req.Status
+	}
+	if strings.TrimSpace(status) == "" || status == "unread" && (percent > 0 || page > 0 || cfi != "") {
+		status = "reading"
+	}
+
+	var fileIDValue any
+	if fileID != nil {
+		fileIDValue = *fileID
+	}
+	var cfiValue any
+	if strings.TrimSpace(cfi) != "" {
+		cfiValue = cfi
+	}
+	var pageValue any
+	if page > 0 {
+		pageValue = page
+	}
+
 	now := time.Now().Unix()
 
 	_, err = appDB.Exec(`
@@ -263,7 +311,7 @@ func UpdateReadingProgressHandler(w http.ResponseWriter, r *http.Request) {
 			status = excluded.status,
 			updated_at = excluded.updated_at,
 			owner_user_id = excluded.owner_user_id
-	`, bookIDInt, req.FileID, req.Percent, req.CFI, req.Page, req.Status, now, current.ID)
+	`, bookIDInt, fileIDValue, percent, cfiValue, pageValue, status, now, current.ID)
 
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to update reading progress")
