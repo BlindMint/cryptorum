@@ -39,8 +39,17 @@
 	let activeSettingsTab = $state<'display' | 'comic' | 'advanced'>('display');
 	let isDraggingProgress = $state(false);
 	let pendingProgressPage = $state<number | null>(null);
+	let progressPreviewPage = $state<number | null>(null);
 	let progressBarEl = $state<HTMLElement | null>(null);
 	let activeProgressPointerId: number | null = null;
+	const progressPreviewProgress = $derived(
+		progressPreviewPage !== null && numPages > 0 ? (progressPreviewPage / numPages) * 100 : null
+	);
+	const progressPreviewLabel = $derived(
+		progressPreviewPage !== null && numPages > 0
+			? `Page ${progressPreviewPage} / ${numPages} • ${Math.round((progressPreviewPage / numPages) * 100)}%`
+			: ''
+	);
 	let lastWheelNavigationAt = 0;
 	let topBarHideTimeout: ReturnType<typeof setTimeout> | null = null;
 	let lastLongStripScrollTop = 0;
@@ -547,6 +556,18 @@
 		pendingProgressPage = newPage;
 	}
 
+	function updateProgressPreview(clientX: number) {
+		const previewPage = getProgressPageFromClientX(clientX);
+		if (previewPage === null) return;
+		progressPreviewPage = previewPage;
+	}
+
+	function clearProgressPreview() {
+		if (!isDraggingProgress) {
+			progressPreviewPage = null;
+		}
+	}
+
 	function handleProgressPointerDown(e: PointerEvent) {
 		if (isBottomSystemGestureStart(e)) {
 			return;
@@ -558,10 +579,19 @@
 		pendingProgressPage = null;
 		activeProgressPointerId = e.pointerId;
 		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+		updateProgressPreview(e.clientX);
 		updateProgressDrag(e.clientX);
 	}
 
+	function handleProgressPointerEnter(e: PointerEvent) {
+		if (e.pointerType === 'touch') return;
+		updateProgressPreview(e.clientX);
+	}
+
 	function handleProgressPointerMove(e: PointerEvent) {
+		if (e.pointerType !== 'touch') {
+			updateProgressPreview(e.clientX);
+		}
 		if (!isDraggingProgress) return;
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
 
@@ -580,6 +610,7 @@
 		isDraggingProgress = false;
 		activeProgressPointerId = null;
 		pendingProgressPage = null;
+		progressPreviewPage = null;
 
 		if (targetPage !== null) {
 			goToPage(targetPage);
@@ -597,6 +628,7 @@
 	function handleProgressPointerCancel(e: PointerEvent) {
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
 		finishProgressPointer(e);
+		progressPreviewPage = null;
 	}
 
 	function handleProgressBarKeydown(e: KeyboardEvent) {
@@ -838,7 +870,11 @@
 		ariaValueMin={1}
 		ariaValueMax={Math.max(numPages, currentPage)}
 		ariaValueNow={currentPage}
+		previewLabel={progressPreviewLabel}
+		previewProgress={progressPreviewProgress}
 		onpointerdown={(e) => handleProgressPointerDown(e)}
+		onpointerenter={(e) => handleProgressPointerEnter(e)}
+		onpointerleave={() => clearProgressPreview()}
 		onpointermove={(e) => handleProgressPointerMove(e)}
 		onpointerup={(e) => handleProgressPointerUp(e)}
 		onpointercancel={(e) => handleProgressPointerCancel(e)}
