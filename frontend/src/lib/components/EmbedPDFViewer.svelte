@@ -6,6 +6,7 @@
 		PageChangeEvent,
 		ScrollCapability
 	} from '@embedpdf/plugin-scroll/preact';
+	import type { ZoomCapability, ZoomScope } from '@embedpdf/plugin-zoom/preact';
 	import type { DocumentManagerCapability } from '@embedpdf/plugin-document-manager/preact';
 	import type { IPlugin } from '@embedpdf/core';
 
@@ -66,6 +67,7 @@
 	let pendingScrollActivity: { delta: number; scrollTop: number } | null = null;
 	let stableChromePatchCount = 0;
 	let embedPdfSidebarOpen = false;
+	let embedPdfZoomScope: ZoomScope | null = null;
 
 	const documentId = 'cryptorum-pdf';
 	const maxRestoreAttempts = 8;
@@ -270,6 +272,20 @@
 					onScrollActivity?.(activity.delta, activity.scrollTop);
 				});
 			}
+		}
+	}
+
+	function handleEmbedPdfWheelZoom(event: WheelEvent) {
+		if ((!event.ctrlKey && !event.metaKey) || !embedPdfZoomScope) return;
+
+		event.preventDefault();
+		event.stopPropagation();
+		event.stopImmediatePropagation();
+
+		if (event.deltaY > 0) {
+			embedPdfZoomScope.zoomOut();
+		} else if (event.deltaY < 0) {
+			embedPdfZoomScope.zoomIn();
 		}
 	}
 
@@ -592,8 +608,10 @@
 		queueEmbedPdfChromePatchBurst();
 
 		const scroll = getCapability<ScrollCapability>(registry, 'scroll');
+		const zoom = getCapability<ZoomCapability>(registry, 'zoom');
 		const documentManager = getCapability<DocumentManagerCapability>(registry, 'document-manager');
 		const ui = getCapability<any>(registry, 'ui');
+		embedPdfZoomScope = zoom?.forDocument?.(documentId) ?? null;
 
 		if (scroll) {
 			unsubscribePageChange?.();
@@ -648,6 +666,7 @@
 		unsubscribePageChange?.();
 		unsubscribeLayoutReady?.();
 		unsubscribeSidebarChange?.();
+		embedPdfZoomScope = null;
 		if (embedPdfSidebarOpen) {
 			onSidebarOpenChange?.(false);
 		}
@@ -662,6 +681,20 @@
 		if (embedPdfContainerEl) {
 			startEmbedPdfChromeObserver();
 		}
+	});
+
+	$effect(() => {
+		const element = embedPdfContainerEl;
+		if (!element) return;
+
+		element.addEventListener('wheel', handleEmbedPdfWheelZoom, {
+			capture: true,
+			passive: false
+		});
+
+		return () => {
+			element.removeEventListener('wheel', handleEmbedPdfWheelZoom, { capture: true });
+		};
 	});
 
 	$effect(() => {
@@ -701,13 +734,18 @@
 					maxDocuments: 1
 				},
 				scroll: {
-					defaultBufferSize: 5,
+					defaultBufferSize: 10,
 					defaultPageGap: 8
 				},
 				render: {
 					withAnnotations: false,
 					withForms: false,
 					defaultImageQuality: 0.96
+				},
+				tiling: {
+					tileSize: 512,
+					overlapPx: 2.5,
+					extraRings: 1
 				},
 				disabledCategories: readingOnlyDisabledCategories
 			}}
