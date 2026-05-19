@@ -17,6 +17,7 @@
 		onScrollActivity?: (delta: number, scrollTop: number) => void;
 		onPageChange?: (page: number, totalPages: number) => void;
 		onReady?: (registry: PluginRegistry) => void;
+		onSidebarOpenChange?: (open: boolean) => void;
 		onError?: (error: string) => void;
 		style?: string;
 	}
@@ -29,6 +30,7 @@
 		onScrollActivity,
 		onPageChange,
 		onReady,
+		onSidebarOpenChange,
 		onError,
 		style = 'height: 100%; width: 100%;'
 	}: Props = $props();
@@ -51,6 +53,7 @@
 	let restoreAttempts = 0;
 	let unsubscribePageChange: (() => void) | null = null;
 	let unsubscribeLayoutReady: (() => void) | null = null;
+	let unsubscribeSidebarChange: (() => void) | null = null;
 	let restoreTimers: ReturnType<typeof setTimeout>[] = [];
 	let embedPdfContainerEl = $state<HTMLDivElement | null>(null);
 	let chromePatchObserver: MutationObserver | null = null;
@@ -62,6 +65,7 @@
 	let scrollActivityFrame: number | null = null;
 	let pendingScrollActivity: { delta: number; scrollTop: number } | null = null;
 	let stableChromePatchCount = 0;
+	let embedPdfSidebarOpen = false;
 
 	const documentId = 'cryptorum-pdf';
 	const maxRestoreAttempts = 8;
@@ -223,6 +227,12 @@
 			element.style.getPropertyPriority(property) !== priority
 		) {
 			element.style.setProperty(property, value, priority);
+		}
+	}
+
+	function removeStyle(element: HTMLElement, property: string) {
+		if (element.style.getPropertyValue(property)) {
+			element.style.removeProperty(property);
 		}
 	}
 
@@ -395,6 +405,19 @@
 			activeToolbarRoot.dataset.cryptorumEmbedpdfToolbar = 'true';
 		}
 
+		const documentContent = queryFirstDeep('#document-content');
+		if (documentContent) {
+			if (embedPdfSidebarOpen) {
+				setStyle(documentContent, 'margin-top', 'var(--reader-top-bar-height, 56px)', 'important');
+				setStyle(documentContent, 'height', 'calc(100% - var(--reader-top-bar-height, 56px))', 'important');
+				setStyle(documentContent, 'flex', '0 0 calc(100% - var(--reader-top-bar-height, 56px))', 'important');
+			} else {
+				removeStyle(documentContent, 'margin-top');
+				removeStyle(documentContent, 'height');
+				removeStyle(documentContent, 'flex');
+			}
+		}
+
 		for (const element of queryAllDeep(
 			[
 				'[data-overlay-id="page-controls"]',
@@ -496,6 +519,18 @@
 		return (plugin?.provides?.() as T | undefined) ?? null;
 	}
 
+	function hasOpenEmbedPdfSidebar(uiScope: any) {
+		const activeSidebars = uiScope?.getState?.()?.activeSidebars ?? {};
+		return Object.values(activeSidebars).some((sidebar: any) => !!sidebar?.isOpen);
+	}
+
+	function setEmbedPdfSidebarOpen(open: boolean) {
+		if (embedPdfSidebarOpen === open) return;
+		embedPdfSidebarOpen = open;
+		onSidebarOpenChange?.(open);
+		scheduleEmbedPdfChromePatch();
+	}
+
 	function restoreInitialPage(scroll: ScrollCapability, totalPages?: number, delay = 0) {
 		const targetPage = Math.max(1, Math.floor(initialPage || 1));
 		if (restoredInitialPage || targetPage <= 1) return;
@@ -558,6 +593,7 @@
 
 		const scroll = getCapability<ScrollCapability>(registry, 'scroll');
 		const documentManager = getCapability<DocumentManagerCapability>(registry, 'document-manager');
+		const ui = getCapability<any>(registry, 'ui');
 
 		if (scroll) {
 			unsubscribePageChange?.();
@@ -585,6 +621,15 @@
 			});
 		}
 
+		if (ui?.forDocument) {
+			const uiScope = ui.forDocument(documentId);
+			unsubscribeSidebarChange?.();
+			setEmbedPdfSidebarOpen(hasOpenEmbedPdfSidebar(uiScope));
+			unsubscribeSidebarChange = uiScope.onSidebarChanged?.(() => {
+				setEmbedPdfSidebarOpen(hasOpenEmbedPdfSidebar(uiScope));
+			}) ?? null;
+		}
+
 		if (onReady) {
 			onReady(registry);
 		}
@@ -602,6 +647,10 @@
 	onDestroy(() => {
 		unsubscribePageChange?.();
 		unsubscribeLayoutReady?.();
+		unsubscribeSidebarChange?.();
+		if (embedPdfSidebarOpen) {
+			onSidebarOpenChange?.(false);
+		}
 		clearRestoreTimers();
 		clearChromePatchTimer();
 		clearChromePatchRetryTimers();

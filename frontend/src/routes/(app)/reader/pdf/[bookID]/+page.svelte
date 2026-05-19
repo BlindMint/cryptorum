@@ -37,6 +37,7 @@
 	let embedPdfViewerReady = $state(false);
 	let embedPdfScroll: any = null;
 	let embedPdfRestoringInitialPage = false;
+	let embedPdfSidebarOpen = $state(false);
 	let pdfLoadRetryToken = $state(0);
 	let pdfLoadRetryAttempts = 0;
 
@@ -714,6 +715,7 @@
 			!settings.autoHideControls ||
 			leftSidebarOpen ||
 			rightSidebarOpen ||
+			embedPdfSidebarOpen ||
 			isEditingPage ||
 			isDraggingProgress
 		);
@@ -2110,8 +2112,17 @@
 
 	let isDraggingProgress = $state(false);
 	let pendingProgressPage = $state<number | null>(null);
+	let progressPreviewPage = $state<number | null>(null);
 	let pdfProgressBarEl = $state<HTMLElement | null>(null);
 	let activeProgressPointerId: number | null = null;
+	const progressPreviewProgress = $derived(
+		progressPreviewPage !== null && numPages > 0 ? (progressPreviewPage / numPages) * 100 : null
+	);
+	const progressPreviewLabel = $derived(
+		progressPreviewPage !== null && numPages > 0
+			? `Page ${progressPreviewPage} / ${numPages} • ${Math.round((progressPreviewPage / numPages) * 100)}%`
+			: ''
+	);
 
 	function getProgressPageFromClientX(clientX: number) {
 		if (!pdfProgressBarEl || numPages <= 0) return null;
@@ -2132,6 +2143,18 @@
 		currentPage = newPage;
 	}
 
+	function updateProgressPreview(clientX: number) {
+		const previewPage = getProgressPageFromClientX(clientX);
+		if (previewPage === null) return;
+		progressPreviewPage = previewPage;
+	}
+
+	function clearProgressPreview() {
+		if (!isDraggingProgress) {
+			progressPreviewPage = null;
+		}
+	}
+
 	function handleProgressPointerDown(e: PointerEvent) {
 		if (numPages <= 0) return;
 		if (isBottomSystemGestureStart(e)) {
@@ -2144,10 +2167,19 @@
 		pendingProgressPage = null;
 		activeProgressPointerId = e.pointerId;
 		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+		updateProgressPreview(e.clientX);
 		updateProgressDrag(e.clientX);
 	}
 
+	function handleProgressPointerEnter(e: PointerEvent) {
+		if (e.pointerType === 'touch') return;
+		updateProgressPreview(e.clientX);
+	}
+
 	function handleProgressPointerMove(e: PointerEvent) {
+		if (e.pointerType !== 'touch') {
+			updateProgressPreview(e.clientX);
+		}
 		if (!isDraggingProgress) return;
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
 
@@ -2166,6 +2198,7 @@
 		isDraggingProgress = false;
 		activeProgressPointerId = null;
 		pendingProgressPage = null;
+		progressPreviewPage = null;
 
 		if (targetPage !== null) {
 			jumpToPage(targetPage);
@@ -2183,6 +2216,7 @@
 	function handleProgressPointerCancel(e: PointerEvent) {
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
 		finishProgressPointer(e);
+		progressPreviewPage = null;
 	}
 
 	function jumpToPage(pageNum: number) {
@@ -2622,6 +2656,15 @@
 		}
 	}
 
+	function handleEmbedPdfSidebarOpenChange(open: boolean) {
+		embedPdfSidebarOpen = open;
+		if (open) {
+			showTopBar(false);
+		} else {
+			resetTopBarBehavior();
+		}
+	}
+
 	function handleEmbedPdfReady(registry: any) {
 		console.log('EmbedPDF ready, registry:', registry);
 		embedPdfScroll = registry.getPlugin?.('scroll')?.provides?.() ?? null;
@@ -2724,6 +2767,7 @@
 						onScrollActivity={handleEmbedPdfScrollActivity}
 						onPageChange={handleEmbedPdfPageChange}
 						onReady={handleEmbedPdfReady}
+						onSidebarOpenChange={handleEmbedPdfSidebarOpenChange}
 						onError={handleEmbedPdfError}
 						style="height: 100%; width: 100%;"
 					/>
@@ -2751,7 +2795,11 @@
 				ariaValueMin={1}
 				ariaValueMax={Math.max(numPages, currentPage)}
 				ariaValueNow={currentPage}
+				previewLabel={progressPreviewLabel}
+				previewProgress={progressPreviewProgress}
 				onpointerdown={(e) => handleProgressPointerDown(e)}
+				onpointerenter={(e) => handleProgressPointerEnter(e)}
+				onpointerleave={() => clearProgressPreview()}
 				onpointermove={(e) => handleProgressPointerMove(e)}
 				onpointerup={(e) => handleProgressPointerUp(e)}
 				onpointercancel={(e) => handleProgressPointerCancel(e)}
@@ -2951,7 +2999,7 @@
 		top: calc((var(--reader-top-bar-height) - var(--embedpdf-shell-control-size)) / 2);
 		width: var(--embedpdf-shell-control-size);
 		height: var(--embedpdf-shell-control-size);
-		border: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
+		border: none;
 		background: color-mix(in srgb, var(--color-surface-base, #0f172a) 92%, transparent);
 		color: var(--color-surface-text, #e2e8f0);
 		cursor: pointer;

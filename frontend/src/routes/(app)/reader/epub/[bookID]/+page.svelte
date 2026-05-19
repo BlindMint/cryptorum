@@ -101,6 +101,8 @@
 	let isSearching = $state(false);
 	let isDraggingProgress = $state(false);
 	let pendingProgressPage = $state<number | null>(null);
+	let progressPreviewPercent = $state<number | null>(null);
+	let progressPreviewSection = $state<number | null>(null);
 	let progressBarEl = $state<HTMLElement | null>(null);
 	let activeProgressPointerId: number | null = null;
 	let currentProgress = $state(0);
@@ -118,6 +120,13 @@
 	let readerPointerMoved = false;
 
 	const progress = $derived(currentProgress);
+	const progressPreviewLabel = $derived(
+		progressPreviewPercent !== null
+			? progressPreviewSection !== null && numChapters() > 0
+				? `Section ${progressPreviewSection} / ${numChapters()} • ${Math.round(progressPreviewPercent)}%`
+				: `${Math.round(progressPreviewPercent)}%`
+			: ''
+	);
 	const PROGRESS_SAVE_DEBOUNCE_MS = 750;
 	const PROGRESS_SAVE_MIN_DELTA = 0.05;
 	const TOP_BAR_HIDE_DELAY_MS = 2800;
@@ -974,6 +983,25 @@
 		}
 	}
 
+	function updateProgressPreview(clientX: number) {
+		const percentage = getProgressPercentageFromClientX(clientX);
+		if (percentage === null) return;
+
+		progressPreviewPercent = percentage * 100;
+		if (!settings.continuousMode && numChapters() > 0) {
+			progressPreviewSection = Math.max(1, Math.round(percentage * numChapters()));
+		} else {
+			progressPreviewSection = null;
+		}
+	}
+
+	function clearProgressPreview() {
+		if (!isDraggingProgress) {
+			progressPreviewPercent = null;
+			progressPreviewSection = null;
+		}
+	}
+
 	function handleProgressPointerDown(e: PointerEvent) {
 		if (isBottomSystemGestureStart(e)) {
 			return;
@@ -985,10 +1013,19 @@
 		pendingProgressPage = null;
 		activeProgressPointerId = e.pointerId;
 		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+		updateProgressPreview(e.clientX);
 		updateProgressDrag(e.clientX);
 	}
 
+	function handleProgressPointerEnter(e: PointerEvent) {
+		if (e.pointerType === 'touch') return;
+		updateProgressPreview(e.clientX);
+	}
+
 	function handleProgressPointerMove(e: PointerEvent) {
+		if (e.pointerType !== 'touch') {
+			updateProgressPreview(e.clientX);
+		}
 		if (!isDraggingProgress) return;
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
 
@@ -1007,6 +1044,8 @@
 		isDraggingProgress = false;
 		activeProgressPointerId = null;
 		pendingProgressPage = null;
+		progressPreviewPercent = null;
+		progressPreviewSection = null;
 
 		if (targetPage !== null) {
 			jumpToPage(targetPage);
@@ -1024,6 +1063,8 @@
 	function handleProgressPointerCancel(e: PointerEvent) {
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
 		finishProgressPointer(e);
+		progressPreviewPercent = null;
+		progressPreviewSection = null;
 	}
 
 	function handleProgressBarKeydown(e: KeyboardEvent) {
@@ -1822,7 +1863,11 @@
 		ariaValueMin={0}
 		ariaValueMax={100}
 		ariaValueNow={Math.max(0, Math.min(100, Math.round(progress)))}
+		previewLabel={progressPreviewLabel}
+		previewProgress={progressPreviewPercent}
 		onpointerdown={(e) => handleProgressPointerDown(e)}
+		onpointerenter={(e) => handleProgressPointerEnter(e)}
+		onpointerleave={() => clearProgressPreview()}
 		onpointermove={(e) => handleProgressPointerMove(e)}
 		onpointerup={(e) => handleProgressPointerUp(e)}
 		onpointercancel={(e) => handleProgressPointerCancel(e)}

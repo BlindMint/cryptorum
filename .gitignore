@@ -29,6 +29,14 @@ books/
 bookdrop/
 backups/
 
+# Local Calibre download cache
+calibre-cache/
+
+# Generated docs and scratch files; keep checked-in screenshots
+docs/*
+!docs/images/
+!docs/images/**
+
 # Databases and backups
 *.db
 *.db-*
@@ -47,11 +55,6 @@ config.*.yaml
 !.env.example
 !.env.*.example
 cookies.txt
-
-# Calibre downloads and extracted conversion caches
-calibre-cache/*
-!calibre-cache/
-!calibre-cache/.gitkeep
 
 # Logs and temporary files
 *.log

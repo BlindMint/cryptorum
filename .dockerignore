@@ -47,7 +47,6 @@ cookies.txt
 # Optional Calibre download cache
 calibre-cache/*
 !calibre-cache/
-!calibre-cache/.gitkeep
 !calibre-cache/*.txz
 
 # Tool/editor state
