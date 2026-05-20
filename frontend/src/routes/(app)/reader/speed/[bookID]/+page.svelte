@@ -335,8 +335,15 @@
 			if (res.ok) {
 				const text = await res.text();
 				words = processText(text);
-				if (savedProgress && savedProgress.speed_reader_percent > 0) {
-					currentIndex = Math.floor((savedProgress.speed_reader_percent / 100) * words.length);
+				if (words.length === 0) {
+					currentIndex = 0;
+				} else if (savedProgress?.speed_reader_word_index > 0) {
+					currentIndex = Math.max(0, Math.min(words.length - 1, savedProgress.speed_reader_word_index));
+				} else if (savedProgress?.speed_reader_percent > 0) {
+					currentIndex = Math.max(
+						0,
+						Math.min(words.length - 1, Math.floor((savedProgress.speed_reader_percent / 100) * words.length))
+					);
 				}
 			}
 		} catch (e) {

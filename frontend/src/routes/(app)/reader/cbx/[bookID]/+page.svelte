@@ -61,6 +61,7 @@
 	let stripScrollEl = $state<HTMLDivElement | null>(null);
 	let stripProgressSaveTimeout: ReturnType<typeof setTimeout> | null = null;
 	let stripRestoreScrollTimeout: ReturnType<typeof setTimeout> | null = null;
+	let isRestoringCbxProgress = false;
 	let closeTasksStarted = false;
 	let readerPointerStart: { id: number; x: number; y: number } | null = null;
 	let readerPointerMoved = false;
@@ -122,7 +123,11 @@
 					updateSpreadPages();
 					await tick();
 					if (isStripMode()) {
+						isRestoringCbxProgress = true;
 						scrollToStripPage(currentPage, 'auto');
+						setTimeout(() => {
+							isRestoringCbxProgress = false;
+						}, 250);
 					}
 				}
 			}
@@ -329,7 +334,7 @@
 	}
 
 	function updateCurrentPageFromStrip() {
-		if (!stripScrollEl || !isStripMode() || !numPages) return;
+		if (!stripScrollEl || !isStripMode() || !numPages || isRestoringCbxProgress) return;
 		const pages = Array.from(stripScrollEl.querySelectorAll<HTMLElement>('.strip-page[data-page]'));
 		if (pages.length === 0) return;
 
