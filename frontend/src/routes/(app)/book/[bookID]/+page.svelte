@@ -1253,7 +1253,7 @@
 						</button>
 				</div>
 
-				<div class="mt-4 min-h-[32rem] sm:min-h-[28rem]">
+				<div class="mt-4">
 					{#if activeTab === 'sessions'}
 						{#if sessionsLoading}
 							<div class="flex justify-center py-8">
@@ -1264,7 +1264,7 @@
 								<p class="text-[var(--color-surface-text-muted)]">No reading sessions yet</p>
 							</div>
 						{:else}
-							<div class="space-y-3">
+							<div class="max-h-[min(32rem,55dvh)] space-y-3 overflow-y-auto overscroll-contain p-1 pr-2 [scrollbar-gutter:stable]">
 									{#each sessions as session}
 										<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-[var(--color-surface-500)] hover:shadow-sm">
 											<div class="flex items-start justify-between gap-4">
