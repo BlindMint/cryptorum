@@ -37,6 +37,7 @@
 	let embedPdfViewerReady = $state(false);
 	let embedPdfScroll: any = null;
 	let embedPdfRestoringInitialPage = false;
+	let embedPdfRestoreTimers: ReturnType<typeof setTimeout>[] = [];
 	let embedPdfSidebarOpen = $state(false);
 	let pdfLoadRetryToken = $state(0);
 	let pdfLoadRetryAttempts = 0;
@@ -477,6 +478,7 @@
 	onDestroy(() => {
 		clearTopBarHideTimer();
 		clearProgressSaveTimer();
+		clearEmbedPdfRestoreTimers();
 		clearSearchTimer();
 		clearSearchFlashTimer();
 		destroyPdfLoading();
@@ -735,6 +737,11 @@
 		}
 	}
 
+	function clearEmbedPdfRestoreTimers() {
+		embedPdfRestoreTimers.forEach((timer) => clearTimeout(timer));
+		embedPdfRestoreTimers = [];
+	}
+
 	function clearSearchTimer() {
 		if (searchTimer) {
 			clearTimeout(searchTimer);
@@ -750,7 +757,7 @@
 	}
 
 	function queueProgressSave() {
-		if (!book || isRestoringProgress || currentPage === lastSavedPage) return;
+		if (!book || isRestoringProgress || embedPdfRestoringInitialPage || currentPage === lastSavedPage) return;
 		clearProgressSaveTimer();
 		progressSaveTimer = setTimeout(() => {
 			progressSaveTimer = null;
@@ -1101,6 +1108,7 @@
 		if (pageNum < 1 || pageNum > numPages) return;
 		currentPage = pageNum;
 
+		clearEmbedPdfRestoreTimers();
 		embedPdfRestoringInitialPage = false;
 		embedPdfInitialPage = pageNum;
 		try {
@@ -1291,6 +1299,40 @@
 		} else if (delta < -scrollHideThresholdPx && !touchLike) {
 			showTopBar(false);
 		}
+	}
+
+	function restoreEmbedPdfSavedPage() {
+		const targetPage = getSavedProgressPage();
+		if (!embedPdfScroll || targetPage <= 1) return;
+		if (numPages > 0 && targetPage > numPages) return;
+
+		clearEmbedPdfRestoreTimers();
+		embedPdfRestoringInitialPage = true;
+		currentPage = targetPage;
+		embedPdfInitialPage = targetPage;
+
+		const attemptRestore = () => {
+			if (!embedPdfScroll || !embedPdfRestoringInitialPage) return;
+			try {
+				const scopedScroll = embedPdfScroll.forDocument?.(embedPdfDocumentId);
+				scopedScroll?.scrollToPage?.({
+					pageNumber: targetPage,
+					behavior: 'instant',
+					alignY: 0
+				});
+				if (scopedScroll?.getCurrentPage?.() === targetPage) {
+					embedPdfRestoringInitialPage = false;
+					clearEmbedPdfRestoreTimers();
+				}
+			} catch (e) {
+				console.warn('Failed to restore saved PDF page:', e);
+			}
+		};
+
+		attemptRestore();
+		embedPdfRestoreTimers = [150, 400, 900, 1600, 2600].map((delay) =>
+			setTimeout(attemptRestore, delay)
+		);
 	}
 
 	function isReaderCenterTap(e: PointerEvent, surface: HTMLElement) {
@@ -2637,12 +2679,14 @@
 		if (embedPdfRestoringInitialPage && pageNum !== embedPdfInitialPage) {
 			if (total && total > 0 && total !== numPages) {
 				numPages = total;
+				restoreEmbedPdfSavedPage();
 			}
 			return;
 		}
 
 		if (embedPdfRestoringInitialPage && pageNum === embedPdfInitialPage) {
 			embedPdfRestoringInitialPage = false;
+			clearEmbedPdfRestoreTimers();
 		}
 
 		if (pageNum !== currentPage) {
@@ -2671,6 +2715,7 @@
 		embedPdfViewerReady = true;
 		pdfLoadRetryAttempts = 0;
 		topBarVisible = true;
+		restoreEmbedPdfSavedPage();
 		resetTopBarBehavior();
 	}
 

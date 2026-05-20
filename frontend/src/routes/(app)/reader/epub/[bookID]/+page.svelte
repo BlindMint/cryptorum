@@ -85,6 +85,8 @@
 	let continuousLoading = $state(false);
 	let continuousScrollEl: HTMLElement | null = null;
 	let isRestoringContinuousProgress = $state(false);
+	let continuousRestoreSuppressUntil = 0;
+	let continuousRestoreTimers: ReturnType<typeof setTimeout>[] = [];
 	let isRestoringPaginatedProgress = false;
 	let initialProcessing = $state(false);
 	let processingMessage = $state('Preparing book...');
@@ -308,6 +310,7 @@
 			void endSession(true);
 		}
 		clearTopBarHideTimeout();
+		clearContinuousRestoreTimers();
 		unsubTheme();
 	});
 
@@ -343,6 +346,11 @@
 			clearTimeout(topBarHideTimeout);
 			topBarHideTimeout = null;
 		}
+	}
+
+	function clearContinuousRestoreTimers() {
+		continuousRestoreTimers.forEach((timer) => clearTimeout(timer));
+		continuousRestoreTimers = [];
 	}
 
 	function controlsNeedToStayVisible() {
@@ -1510,10 +1518,27 @@
 			return;
 		}
 
-		setCurrentProgress(savedProgress.percent);
+		const savedPercent = Math.max(0, Math.min(100, savedProgress.percent));
+		setCurrentProgress(savedPercent);
 		if (!continuousScrollEl) return;
 
-		isRestoringContinuousProgress = true;
+		clearContinuousRestoreTimers();
+
+		const applySavedScrollPosition = () => {
+			if (!continuousScrollEl) return;
+
+			const maxScroll = continuousScrollEl.scrollHeight - continuousScrollEl.clientHeight;
+			if (maxScroll <= 0) return;
+
+			isRestoringContinuousProgress = true;
+			continuousRestoreSuppressUntil = performance.now() + 250;
+			continuousScrollEl.scrollTop = (savedPercent / 100) * maxScroll;
+
+			requestAnimationFrame(() => {
+				lastContinuousScrollTop = continuousScrollEl?.scrollTop ?? 0;
+				isRestoringContinuousProgress = false;
+			});
+		};
 
 		try {
 			await tick();
@@ -1524,20 +1549,12 @@
 				}
 
 				await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-
-				const maxScroll = continuousScrollEl.scrollHeight - continuousScrollEl.clientHeight;
-				if (maxScroll <= 0) {
-					continue;
-				}
-
-				const targetScrollTop = (savedProgress.percent / 100) * maxScroll;
-				continuousScrollEl.scrollTop = targetScrollTop;
-				await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-
-				if (Math.abs(continuousScrollEl.scrollTop - targetScrollTop) <= 2) {
-					return;
-				}
+				applySavedScrollPosition();
 			}
+
+			continuousRestoreTimers = [250, 750, 1500, 3000].map((delay) =>
+				setTimeout(applySavedScrollPosition, delay)
+			);
 		} finally {
 			setTimeout(() => {
 				lastContinuousScrollTop = continuousScrollEl?.scrollTop ?? 0;
@@ -1606,7 +1623,12 @@
 	}
 
 	function handleContinuousScroll() {
-		if (!continuousScrollEl || isRestoringContinuousProgress) return;
+		if (!continuousScrollEl) return;
+		if (isRestoringContinuousProgress || performance.now() < continuousRestoreSuppressUntil) {
+			lastContinuousScrollTop = continuousScrollEl.scrollTop;
+			return;
+		}
+		clearContinuousRestoreTimers();
 		const { scrollTop, scrollHeight, clientHeight } = continuousScrollEl;
 		const maxScroll = scrollHeight - clientHeight;
 		if (maxScroll > 0) {

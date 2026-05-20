@@ -86,6 +86,25 @@ type ReadingSession struct {
 	EndedAt    *int64 `json:"ended_at,omitempty"`
 }
 
+type readingProgressExecutor interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func touchReadingProgressForSession(exec readingProgressExecutor, bookID, ownerUserID, updatedAt int64) error {
+	_, err := exec.Exec(`
+		INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
+		VALUES (?, 'reading', 0, ?, ?)
+		ON CONFLICT(book_id) DO UPDATE SET
+			updated_at = excluded.updated_at,
+			status = CASE
+				WHEN reading_progress.status = 'finished' THEN reading_progress.status
+				ELSE 'reading'
+			END,
+			owner_user_id = excluded.owner_user_id
+	`, bookID, updatedAt, ownerUserID)
+	return err
+}
+
 func closeStaleReadingSessions(cutoff int64) (int64, error) {
 	if cutoff <= 0 {
 		return 0, nil
@@ -642,35 +661,43 @@ func StartReadingSessionHandler(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().Unix()
 
-	_, _ = appDB.Exec(`
+	tx, err := appDB.Begin()
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to start reading session")
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
 		UPDATE reading_session
 		SET ended_at = ?
 		WHERE book_id = ? AND ended_at IS NULL AND owner_user_id = ?
 	`, now, bookIDInt, current.ID)
-
-	result, err := appDB.Exec(`
-		INSERT INTO reading_session (book_id, reader_type, started_at, owner_user_id)
-		VALUES (?, ?, ?, ?)
-	`, bookIDInt, readerType, now, current.ID)
-
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to start reading session")
 		return
 	}
 
-	_, _ = appDB.Exec(`
-		INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
-		VALUES (?, 'reading', 0, ?, ?)
-		ON CONFLICT(book_id) DO UPDATE SET
-			updated_at = excluded.updated_at,
-			status = CASE
-				WHEN reading_progress.status = 'finished' THEN reading_progress.status
-				ELSE 'reading'
-			END,
-			owner_user_id = excluded.owner_user_id
-	`, bookIDInt, now, current.ID)
+	result, err := tx.Exec(`
+		INSERT INTO reading_session (book_id, reader_type, started_at, owner_user_id)
+		VALUES (?, ?, ?, ?)
+	`, bookIDInt, readerType, now, current.ID)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to start reading session")
+		return
+	}
+
+	if err := touchReadingProgressForSession(tx, bookIDInt, current.ID, now); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update reading progress")
+		return
+	}
 
 	sessionID, _ := result.LastInsertId()
+	if err := tx.Commit(); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to start reading session")
+		return
+	}
+
 	jsonResponse(w, http.StatusCreated, map[string]interface{}{
 		"id":         sessionID,
 		"started_at": now,
@@ -684,11 +711,42 @@ func EndReadingSessionHandler(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().Unix()
 
-	_, err := appDB.Exec(`
+	tx, err := appDB.Begin()
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to end reading session")
+		return
+	}
+	defer tx.Rollback()
+
+	var bookID int64
+	err = tx.QueryRow(`
+		SELECT book_id
+		FROM reading_session
+		WHERE id = ? AND owner_user_id = ?
+	`, sessionID, current.ID).Scan(&bookID)
+	if err == sql.ErrNoRows {
+		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to end reading session")
+		return
+	}
+
+	_, err = tx.Exec(`
 		UPDATE reading_session SET ended_at = ? WHERE id = ? AND ended_at IS NULL AND owner_user_id = ?
 	`, now, sessionID, current.ID)
-
 	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to end reading session")
+		return
+	}
+
+	if err := touchReadingProgressForSession(tx, bookID, current.ID, now); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update reading progress")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to end reading session")
 		return
 	}
