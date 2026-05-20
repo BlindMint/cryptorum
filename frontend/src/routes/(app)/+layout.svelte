@@ -137,7 +137,7 @@
 		{#if !isReaderPage}
 			<TopBar />
 		{/if}
-		<div class="flex {isReaderPage ? 'h-dvh' : 'h-[calc(100dvh-4rem-1px)]'} relative min-w-0 overflow-x-hidden">
+		<div class="flex {isReaderPage ? 'h-dvh' : 'h-[calc(100dvh-4.75rem-1px)] lg:h-[calc(100dvh-5rem-1px)]'} relative min-w-0 overflow-x-hidden">
 			{#if $mobileMenuOpen}
 				<button
 					type="button"
