@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import { readerSettings, epubThemes, fontFamilies, fontWeightOptions, pdfZoomModes, cbxFitModes, cbxScrollModes, skipIntervalOptions, sleepTimerOptions, waveformStyles, type ReaderSettings } from '$lib/stores/readerSettings';
+	import { readerSettings, epubThemes, fontFamilies, fontWeightOptions, cbxFitModes, cbxScrollModes, skipIntervalOptions, sleepTimerOptions, waveformStyles, type ReaderSettings } from '$lib/stores/readerSettings';
 	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, updateCustomTheme, removeCustomTheme, resetPrimaryToDefault, resetSurfaceToDefault, generateId, updateGlowEnabled, updateGlowAutoMode, updateGlowColor, updateGlowIntensity, updateBgImageEnabled, updateBgImageTransparency, updateBgImageDisplay, updateSelectedBgImage, addBackgroundImage, removeBackgroundImage, DEFAULT_THEME_PRIMARY, DEFAULT_THEME_SURFACE } from '$lib/stores/theme';
 	import type { BackgroundImageDisplay } from '$lib/stores/theme';
 import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
@@ -25,7 +25,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		showCurrentSection: true,
 		settingsUpdatedAt: 0,
 		epub: { fontFamily: 'serif', fontSize: 18, fontWeight: 400, fontStyle: 'normal' as const, lineHeight: 1.6, letterSpacing: 0, paragraphSpacing: 0, paragraphIndent: 0, justify: true, hyphenate: false, hyphenationLanguage: 'en', maxColumnCount: 1, gap: 5, theme: 'catppuccin', isDark: true, flow: 'paginated' as const, maxInlineSize: 680, maxBlockSize: 1440, margin: 5, continuousMaxWidth: 720, brightness: 100, contrast: 100, pageAnimation: 'slide' as const, autoAdvance: false, autoAdvanceTimer: 0, fullscreenLock: false, useStandardFullscreen: false, autoHideControls: true, customCss: '', showTextLayer: true, originalLayout: false, continuousMode: true, showImages: true, imageSize: 'fit-width' as const, imageGrayscale: false },
-		pdf: { pageSpread: 'off' as const, pageLayout: 'single' as const, pageZoom: 'auto', zoomLevel: 100, renderQuality: 'high' as const, autoHideControls: true, showSidebar: false, scrollDirection: 'vertical' as const, scrollMode: 'paged' as const, pageRotation: 0 as const, backgroundColor: '#111111', brightness: 100, contrast: 100, grayscale: 0, readingDirection: 'ltr' as const, autoCropMargins: false, textLayerEnabled: true, annotationsEnabled: true, viewMode: 'dark' as const, showChapterMarkers: false, showQuoteMarks: false, panMode: false, useStandardFullscreen: false, keepScreenOn: true },
+		pdf: { autoHideControls: true, viewMode: 'dark' as const, useStandardFullscreen: false },
 		cbx: { pageSpread: 'auto' as const, pageLayout: 'single' as const, fitMode: 'fit-width' as const, scrollMode: 'paginated' as const, backgroundColor: '#111111', readingDirection: 'ltr' as const, stripMaxWidthPercent: 100, mangaMode: false, panelViewEnabled: false, spreadHandling: 'auto' as const, pageTransitionSound: false, autoHideControls: true, useStandardFullscreen: false, vibrance: 100, saturation: 100 },
 		audio: { playbackSpeed: 1.0, skipForward: 15, skipBackward: 15, autoAdvance: false, autoHideControls: true, gaplessPlayback: true, sleepTimer: 'off' as const, sleepTimerCustom: 30, theme: 'cover-focused' as const, waveformStyle: 'line' as const, backgroundStyle: 'cover-blur' as const, voiceBoost: false, equalizerLow: 50, equalizerMid: 50, equalizerHigh: 50 },
 		speedReader: { wpm: 300, wordSize: 48, fontFamily: 'serif', fontWeight: 400, focalPoint: 0.38, centerWord: false, accentEnabled: true, accentColor: '#ef4444', accentOpacity: 1.0, focusIndicator: 'lines' as const, focusIndicatorDistance: 20, horizontalBars: true, horizontalBarsColor: '#666666', horizontalBarsOpacity: 1.0, verticalIndicator: 'off' as const, sentencePause: 350, autoSentencePause: true, keepScreenOn: true, theme: 'catppuccin', letterSpacing: 0, focusIndicatorLength: 20, showWordCount: false }
@@ -1467,156 +1467,22 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 				</div>
 				
 				<div class="p-6 space-y-6">
-					<!-- Display Settings -->
 					<div>
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Display</h3>
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-							<!-- Page Spread -->
 							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Spread</div>
-								<select 
-									value={localReaderSettings.pdf.pageSpread} 
-									onchange={(e) => updatePdfSetting('pageSpread', e.currentTarget.value)}
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Theme</div>
+								<select
+									value={localReaderSettings.pdf.viewMode}
+									onchange={(e) => updatePdfSetting('viewMode', e.currentTarget.value)}
 									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 								>
-									<option value="off">None</option>
-									<option value="even">Even</option>
-									<option value="odd">Odd</option>
+									<option value="light">Light</option>
+									<option value="dark">Dark</option>
+									<option value="trueDark">True Black</option>
 								</select>
 							</div>
 
-							<!-- Default Zoom -->
-							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Default Zoom</div>
-								<select 
-									value={localReaderSettings.pdf.pageZoom} 
-									onchange={(e) => updatePdfSetting('pageZoom', e.currentTarget.value)}
-									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-								>
-									{#each pdfZoomModes as mode}
-										<option value={mode.id}>{mode.name}</option>
-									{/each}
-								</select>
-							</div>
-
-							<!-- Scroll Mode -->
-							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Scroll Mode</div>
-								<select 
-									value={localReaderSettings.pdf.scrollMode} 
-									onchange={(e) => updatePdfSetting('scrollMode', e.currentTarget.value)}
-									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-								>
-									<option value="paged">Paged</option>
-									<option value="continuous-vertical">Continuous Vertical</option>
-									<option value="continuous-horizontal">Continuous Horizontal</option>
-								</select>
-							</div>
-
-							<!-- Page Rotation -->
-							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Rotation</div>
-								<select 
-									value={localReaderSettings.pdf.pageRotation} 
-									onchange={(e) => updatePdfSetting('pageRotation', parseInt(e.currentTarget.value))}
-									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-								>
-									<option value={0}>0°</option>
-									<option value={90}>90°</option>
-									<option value={180}>180°</option>
-									<option value={270}>270°</option>
-								</select>
-							</div>
-
-							<!-- Background Color -->
-							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Background</div>
-								<div class="flex items-center space-x-2">
-									<input
-										type="color"
-										value={localReaderSettings.pdf.backgroundColor}
-										oninput={(e) => updatePdfSetting('backgroundColor', e.currentTarget.value)}
-										class="w-10 h-10 rounded cursor-pointer"
-									>
-									<span class="text-sm text-[var(--color-surface-text)] font-mono">{localReaderSettings.pdf.backgroundColor}</span>
-								</div>
-							</div>
-						</div>
-					</div>
-
-					<!-- Reading Experience -->
-					<div>
-						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Reading Experience</h3>
-						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-							<!-- Reading Direction -->
-							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Reading Direction</div>
-								<select 
-									value={localReaderSettings.pdf.readingDirection} 
-									onchange={(e) => updatePdfSetting('readingDirection', e.currentTarget.value)}
-									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-								>
-									<option value="ltr">Left to Right</option>
-									<option value="rtl">Right to Left</option>
-								</select>
-							</div>
-
-							<!-- Auto-crop Margins -->
-							<div class="flex items-center space-x-3">
-								<input
-									type="checkbox"
-									id="autoCrop"
-									checked={localReaderSettings.pdf.autoCropMargins}
-									onchange={(e) => updatePdfSetting('autoCropMargins', e.currentTarget.checked)}
-									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
-								>
-								<label for="autoCrop" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-crop Margins</label>
-							</div>
-
-							<!-- Grayscale -->
-							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Grayscale: {localReaderSettings.pdf.grayscale}%</div>
-								<input
-									type="range"
-									min="0"
-									max="100"
-									value={localReaderSettings.pdf.grayscale}
-									oninput={(e) => updatePdfSetting('grayscale', parseInt(e.currentTarget.value))}
-									class="w-full h-2 bg-[var(--color-surface-700)] rounded-lg appearance-none cursor-pointer"
-								>
-							</div>
-						</div>
-					</div>
-
-					<!-- Advanced -->
-					<div>
-						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Advanced</h3>
-						<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-							<!-- Text Layer -->
-							<div class="flex items-center space-x-3">
-								<input
-									type="checkbox"
-									id="textLayer"
-									checked={localReaderSettings.pdf.textLayerEnabled}
-									onchange={(e) => updatePdfSetting('textLayerEnabled', e.currentTarget.checked)}
-									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
-								>
-								<label for="textLayer" class="text-sm font-medium text-[var(--color-surface-text)]">Enable Text Layer</label>
-							</div>
-
-							<!-- Annotations -->
-							<div class="flex items-center space-x-3">
-								<input
-									type="checkbox"
-									id="annotations"
-									checked={localReaderSettings.pdf.annotationsEnabled}
-									onchange={(e) => updatePdfSetting('annotationsEnabled', e.currentTarget.checked)}
-									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
-								>
-								<label for="annotations" class="text-sm font-medium text-[var(--color-surface-text)]">Enable Annotations</label>
-							</div>
-
-							<!-- Auto-hide Controls -->
 							<div class="flex items-center space-x-3">
 								<input
 									type="checkbox"
@@ -1628,6 +1494,16 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 								<label for="pdfAutoHideControls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
 							</div>
 
+							<div class="flex items-center space-x-3">
+								<input
+									type="checkbox"
+									id="pdfStandardFullscreen"
+									checked={localReaderSettings.pdf.useStandardFullscreen}
+									onchange={(e) => updatePdfSetting('useStandardFullscreen', e.currentTarget.checked)}
+									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+								>
+								<label for="pdfStandardFullscreen" class="text-sm font-medium text-[var(--color-surface-text)]">Use Standard Fullscreen</label>
+							</div>
 						</div>
 					</div>
 				</div>
