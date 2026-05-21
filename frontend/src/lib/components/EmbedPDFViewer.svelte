@@ -19,6 +19,7 @@
 		onPageChange?: (page: number, totalPages: number) => void;
 		onReady?: (registry: PluginRegistry) => void;
 		onSidebarOpenChange?: (open: boolean) => void;
+		onDocumentCenterTap?: () => void;
 		onError?: (error: string) => void;
 		style?: string;
 	}
@@ -32,6 +33,7 @@
 		onPageChange,
 		onReady,
 		onSidebarOpenChange,
+		onDocumentCenterTap,
 		onError,
 		style = 'height: 100%; width: 100%;'
 	}: Props = $props();
@@ -60,6 +62,9 @@
 	let chromePatchObserver: MutationObserver | null = null;
 	let chromePatchTimer: ReturnType<typeof setTimeout> | null = null;
 	let chromePatchRetryTimers: ReturnType<typeof setTimeout>[] = [];
+	let searchFocusTimers: ReturnType<typeof setTimeout>[] = [];
+	let searchFocusObserver: MutationObserver | null = null;
+	let searchInputWasVisible = false;
 	let lastToolbarRoot: HTMLElement | null = null;
 	let scrollListenerTargets = new Set<HTMLElement>();
 	let scrollPositions = new WeakMap<HTMLElement, number>();
@@ -68,6 +73,9 @@
 	let stableChromePatchCount = 0;
 	let embedPdfSidebarOpen = false;
 	let embedPdfZoomScope: ZoomScope | null = null;
+	let embedPdfUiScope: any = null;
+	let embedPdfThumbnailScope: any = null;
+	let embedPdfCurrentPage = $state(1);
 
 	const documentId = 'cryptorum-pdf';
 	const maxRestoreAttempts = 8;
@@ -183,6 +191,11 @@
 		chromePatchRetryTimers = [];
 	}
 
+	function clearSearchFocusTimers() {
+		searchFocusTimers.forEach((timer) => clearTimeout(timer));
+		searchFocusTimers = [];
+	}
+
 	function detachEmbedPdfScrollListeners() {
 		for (const target of scrollListenerTargets) {
 			target.removeEventListener('scroll', handleEmbedPdfInternalScroll);
@@ -216,6 +229,228 @@
 		const root = embedPdfContainerEl ?? document;
 		const element = queryAllDeep(selector, root)[0];
 		return element instanceof HTMLElement ? element : null;
+	}
+
+	function isVisibleTextInput(element: Element): element is HTMLInputElement {
+		if (!(element instanceof HTMLInputElement) || element.disabled || element.readOnly) {
+			return false;
+		}
+
+		const rect = element.getBoundingClientRect();
+		if (rect.width <= 0 || rect.height <= 0) return false;
+
+		const style = getComputedStyle(element);
+		return style.display !== 'none' && style.visibility !== 'hidden';
+	}
+
+	function getEmbedPdfSearchInput() {
+		if (!embedPdfContainerEl) return null;
+
+		const selectors = [
+			'input[type="search"]',
+			'input[placeholder="Search"]',
+			'input[aria-label="Search"]',
+			'input[aria-label*="search" i]',
+			'[data-epdf-i="search-input"] input',
+			'[data-epdf-cat~="panel-search"] input',
+			'[data-epdf-i="search-panel"] input'
+		].join(', ');
+
+		return queryAllDeep(selectors, embedPdfContainerEl).find(isVisibleTextInput) ?? null;
+	}
+
+	function getDeepActiveElement(root: Document | ShadowRoot = document): Element | null {
+		let activeElement = root.activeElement;
+		while (activeElement instanceof HTMLElement && activeElement.shadowRoot?.activeElement) {
+			activeElement = activeElement.shadowRoot.activeElement;
+		}
+		return activeElement;
+	}
+
+	function focusEmbedPdfSearchInput(selectText = true) {
+		const input = getEmbedPdfSearchInput();
+		if (!input) return false;
+
+		input.focus({ preventScroll: true });
+		if (selectText) {
+			input.select();
+		}
+
+		return getDeepActiveElement() === input;
+	}
+
+	function scheduleSearchInputFocus(selectText = true) {
+		if (typeof window === 'undefined') return;
+
+		clearSearchFocusTimers();
+		if (focusEmbedPdfSearchInput(selectText)) return;
+
+		const delays = [0, 40, 100, 200, 350];
+		searchFocusTimers = delays.map((delay) =>
+			setTimeout(() => {
+				if (focusEmbedPdfSearchInput(selectText)) {
+					clearSearchFocusTimers();
+				}
+			}, delay)
+		);
+	}
+
+	function isSearchSidebarOpen() {
+		return !!embedPdfUiScope?.isSidebarOpen?.('right', 'main', 'search-panel');
+	}
+
+	function toggleEmbedPdfSearchSidebar() {
+		if (!embedPdfUiScope) return false;
+
+		if (isSearchSidebarOpen()) {
+			clearSearchFocusTimers();
+			embedPdfUiScope.closeSidebarSlot('right', 'main');
+		} else {
+			embedPdfUiScope.setActiveSidebar('right', 'main', 'search-panel');
+			scheduleSearchInputFocus(true);
+		}
+
+		return true;
+	}
+
+	function handleSearchShortcutKeydown(event: KeyboardEvent) {
+		if (
+			(event.ctrlKey || event.metaKey) &&
+			!event.altKey &&
+			event.key.toLowerCase() === 'f'
+		) {
+			if (toggleEmbedPdfSearchSidebar()) {
+				event.preventDefault();
+				event.stopPropagation();
+				event.stopImmediatePropagation();
+			} else {
+				scheduleSearchInputFocus(true);
+			}
+		}
+	}
+
+	function eventPathIncludesSelector(event: Event, selector: string) {
+		const path = event.composedPath?.() ?? [];
+		return path.some((target) => {
+			if (!(target instanceof Element)) return false;
+			return target.matches(selector) || !!target.closest(selector);
+		});
+	}
+
+	function isSearchToggleEvent(event: Event) {
+		return eventPathIncludesSelector(
+			event,
+			[
+				'[data-epdf-i="toggle-search"]',
+				'button[data-epdf-cat~="panel-search"]',
+				'[role="button"][data-epdf-cat~="panel-search"]',
+				'button[aria-label*="search" i]',
+				'button[title*="search" i]'
+			].join(', ')
+		);
+	}
+
+	function isEmbedPdfChromeOrSidebarEvent(event: Event) {
+		return eventPathIncludesSelector(
+			event,
+			[
+				'button',
+				'a',
+				'input',
+				'textarea',
+				'select',
+				'label',
+				'[contenteditable="true"]',
+				'[role="button"]',
+				'[data-epdf-i="left-group"]',
+				'[data-epdf-i="center-group"]',
+				'[data-epdf-i="right-group"]',
+				'[data-epdf-i="sidebar-panel"]',
+				'[data-epdf-i="search-panel"]',
+				'[data-epdf-cat~="panel-sidebar"]',
+				'[data-epdf-cat~="panel-search"]'
+			].join(', ')
+		);
+	}
+
+	function isEmbedPdfCenterTap(event: PointerEvent) {
+		if (!embedPdfContainerEl) return false;
+
+		const rect = embedPdfContainerEl.getBoundingClientRect();
+		if (rect.width <= 0 || rect.height <= 0) return false;
+
+		const xRatio = (event.clientX - rect.left) / rect.width;
+		const yRatio = (event.clientY - rect.top) / rect.height;
+
+		return xRatio > 0.28 && xRatio < 0.72 && yRatio > 0.12 && yRatio < 0.88;
+	}
+
+	function closeOpenEmbedPdfSidebars() {
+		if (!embedPdfUiScope) return false;
+
+		let closed = false;
+		if (embedPdfUiScope.isSidebarOpen?.('left', 'main')) {
+			embedPdfUiScope.closeSidebarSlot('left', 'main');
+			closed = true;
+		}
+		if (embedPdfUiScope.isSidebarOpen?.('right', 'main')) {
+			embedPdfUiScope.closeSidebarSlot('right', 'main');
+			closed = true;
+		}
+		return closed;
+	}
+
+	function handleEmbedPdfClick(event: MouseEvent) {
+		if (isSearchToggleEvent(event)) {
+			scheduleSearchInputFocus(true);
+		}
+	}
+
+	function handleEmbedPdfPointerUp(event: PointerEvent) {
+		if (!event.isPrimary || isEmbedPdfChromeOrSidebarEvent(event)) return;
+
+		if (closeOpenEmbedPdfSidebars()) return;
+
+		if (isEmbedPdfCenterTap(event)) {
+			onDocumentCenterTap?.();
+		}
+	}
+
+	function updateSearchInputVisibility() {
+		const isVisible = !!getEmbedPdfSearchInput();
+		if (isVisible && !searchInputWasVisible) {
+			scheduleSearchInputFocus(true);
+		}
+		searchInputWasVisible = isVisible;
+	}
+
+	function startSearchFocusObserver() {
+		if (
+			typeof MutationObserver === 'undefined' ||
+			!embedPdfContainerEl ||
+			searchFocusObserver
+		) {
+			return;
+		}
+
+		searchInputWasVisible = !!getEmbedPdfSearchInput();
+		searchFocusObserver = new MutationObserver(updateSearchInputVisibility);
+		searchFocusObserver.observe(embedPdfContainerEl, {
+			childList: true,
+			subtree: true,
+			attributes: true,
+			attributeFilter: ['class', 'style', 'hidden', 'aria-hidden']
+		});
+	}
+
+	function scheduleThumbnailSidebarJump() {
+		if (typeof window === 'undefined' || !embedPdfThumbnailScope) return;
+
+		for (const delay of [0, 40, 120]) {
+			setTimeout(() => {
+				embedPdfThumbnailScope?.scrollToThumb?.(Math.max(0, embedPdfCurrentPage - 1));
+			}, delay);
+		}
 	}
 
 	function setStyle(
@@ -609,13 +844,16 @@
 
 		const scroll = getCapability<ScrollCapability>(registry, 'scroll');
 		const zoom = getCapability<ZoomCapability>(registry, 'zoom');
+		const thumbnail = getCapability<any>(registry, 'thumbnail');
 		const documentManager = getCapability<DocumentManagerCapability>(registry, 'document-manager');
 		const ui = getCapability<any>(registry, 'ui');
 		embedPdfZoomScope = zoom?.forDocument?.(documentId) ?? null;
+		embedPdfThumbnailScope = thumbnail?.forDocument?.(documentId) ?? null;
 
 		if (scroll) {
 			unsubscribePageChange?.();
 			unsubscribePageChange = scroll.onPageChange((event: PageChangeEvent) => {
+				embedPdfCurrentPage = event.pageNumber;
 				if (onPageChange) {
 					onPageChange(event.pageNumber, event.totalPages);
 				}
@@ -641,10 +879,17 @@
 
 		if (ui?.forDocument) {
 			const uiScope = ui.forDocument(documentId);
+			embedPdfUiScope = uiScope;
 			unsubscribeSidebarChange?.();
 			setEmbedPdfSidebarOpen(hasOpenEmbedPdfSidebar(uiScope));
-			unsubscribeSidebarChange = uiScope.onSidebarChanged?.(() => {
+			unsubscribeSidebarChange = uiScope.onSidebarChanged?.((event: any) => {
 				setEmbedPdfSidebarOpen(hasOpenEmbedPdfSidebar(uiScope));
+				if (event?.sidebarId === 'search-panel' && uiScope.isSidebarOpen?.('right', 'main', 'search-panel')) {
+					scheduleSearchInputFocus(true);
+				}
+				if (event?.sidebarId === 'sidebar-panel' && uiScope.isSidebarOpen?.('left', 'main', 'sidebar-panel')) {
+					scheduleThumbnailSidebarJump();
+				}
 			}) ?? null;
 		}
 
@@ -667,20 +912,38 @@
 		unsubscribeLayoutReady?.();
 		unsubscribeSidebarChange?.();
 		embedPdfZoomScope = null;
+		embedPdfUiScope = null;
+		embedPdfThumbnailScope = null;
 		if (embedPdfSidebarOpen) {
 			onSidebarOpenChange?.(false);
 		}
 		clearRestoreTimers();
 		clearChromePatchTimer();
 		clearChromePatchRetryTimers();
+		clearSearchFocusTimers();
 		detachEmbedPdfScrollListeners();
 		chromePatchObserver?.disconnect();
+		searchFocusObserver?.disconnect();
 	});
 
 	$effect(() => {
 		if (embedPdfContainerEl) {
 			startEmbedPdfChromeObserver();
+			startSearchFocusObserver();
 		}
+	});
+
+	$effect(() => {
+		embedPdfCurrentPage = initialPage;
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+
+		window.addEventListener('keydown', handleSearchShortcutKeydown, { capture: true });
+		return () => {
+			window.removeEventListener('keydown', handleSearchShortcutKeydown, { capture: true });
+		};
 	});
 
 	$effect(() => {
@@ -691,9 +954,13 @@
 			capture: true,
 			passive: false
 		});
+		element.addEventListener('click', handleEmbedPdfClick);
+		element.addEventListener('pointerup', handleEmbedPdfPointerUp, { capture: true });
 
 		return () => {
 			element.removeEventListener('wheel', handleEmbedPdfWheelZoom, { capture: true });
+			element.removeEventListener('click', handleEmbedPdfClick);
+			element.removeEventListener('pointerup', handleEmbedPdfPointerUp, { capture: true });
 		};
 	});
 
@@ -746,6 +1013,9 @@
 					tileSize: 512,
 					overlapPx: 2.5,
 					extraRings: 1
+				},
+				thumbnails: {
+					scrollBehavior: 'instant'
 				},
 				disabledCategories: readingOnlyDisabledCategories
 			}}

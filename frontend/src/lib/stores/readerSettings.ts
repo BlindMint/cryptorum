@@ -44,33 +44,11 @@ export interface EpubReaderSetting {
 }
 
 export type PdfViewMode = 'light' | 'dark' | 'trueDark';
-export type PdfPageLayout = 'single' | 'double';
 
 export interface PdfReaderSetting {
-	pageSpread: 'off' | 'even' | 'odd';
-	pageLayout: PdfPageLayout;
-	pageZoom: string;
-	zoomLevel: number;
-	renderQuality: 'standard' | 'high' | 'maximum';
 	autoHideControls: boolean;
-	showSidebar: boolean;
-	scrollDirection: 'vertical' | 'horizontal';
-	scrollMode: 'paged' | 'continuous-vertical';
-	pageRotation: 0 | 90 | 180 | 270;
-	backgroundColor: string;
-	brightness: number;
-	contrast: number;
-	grayscale: number;
-	readingDirection: 'ltr' | 'rtl';
-	autoCropMargins: boolean;
-	textLayerEnabled: boolean;
-	annotationsEnabled: boolean;
 	viewMode: PdfViewMode;
-	showChapterMarkers: boolean;
-	showQuoteMarks: boolean;
-	panMode: boolean;
 	useStandardFullscreen: boolean;
-	keepScreenOn: boolean;
 }
 
 export interface CbxReaderSetting {
@@ -191,30 +169,9 @@ export const defaultReaderSettings: ReaderSettings = {
 		imageGrayscale: false
 	},
 	pdf: {
-		pageSpread: 'off',
-		pageLayout: 'single',
-		pageZoom: 'auto',
-		zoomLevel: 100,
-		renderQuality: 'high',
 		autoHideControls: true,
-		showSidebar: false,
-		scrollDirection: 'vertical',
-		scrollMode: 'continuous-vertical',
-		pageRotation: 0,
-		backgroundColor: '#111111',
-		brightness: 100,
-		contrast: 100,
-		grayscale: 0,
-		readingDirection: 'ltr',
-		autoCropMargins: false,
-		textLayerEnabled: true,
-		annotationsEnabled: true,
 		viewMode: 'dark',
-		showChapterMarkers: false,
-		showQuoteMarks: false,
-		panMode: false,
-		useStandardFullscreen: false,
-		keepScreenOn: true
+		useStandardFullscreen: false
 	},
 	cbx: {
 		pageSpread: 'auto',
@@ -304,6 +261,7 @@ function migrateSettings(settings: ReaderSettings): ReaderSettings {
 			showCurrentSection: settings.showCurrentSection ?? true,
 			settingsUpdatedAt: settings.settingsUpdatedAt ?? 0,
 			epub: { ...settings.epub, theme: readerTheme },
+			pdf: normalizePdfSettings(settings.pdf),
 			speedReader: { ...settings.speedReader, theme: readerTheme }
 		};
 	}
@@ -322,15 +280,20 @@ function migrateSettings(settings: ReaderSettings): ReaderSettings {
 			flow: 'scrolled',
 			continuousMode: true
 		},
-		pdf: {
-			...settings.pdf,
-			scrollMode: settings.pdf.scrollMode === 'paged' ? 'continuous-vertical' : settings.pdf.scrollMode
-		},
+		pdf: normalizePdfSettings(settings.pdf),
 		speedReader: {
 			...settings.speedReader,
 			theme: readerTheme,
 			fontWeight: settings.speedReader.fontWeight ?? 400
 		}
+	};
+}
+
+function normalizePdfSettings(settings: (Partial<PdfReaderSetting> & Record<string, any>) | undefined): PdfReaderSetting {
+	return {
+		autoHideControls: settings?.autoHideControls ?? defaultReaderSettings.pdf.autoHideControls,
+		viewMode: settings?.viewMode ?? defaultReaderSettings.pdf.viewMode,
+		useStandardFullscreen: settings?.useStandardFullscreen ?? defaultReaderSettings.pdf.useStandardFullscreen
 	};
 }
 
@@ -359,6 +322,7 @@ function createReaderSettingsStore() {
 			showCurrentSection: value.showCurrentSection ?? true,
 			settingsUpdatedAt: value.settingsUpdatedAt ?? 0,
 			epub: { ...value.epub, theme: readerTheme },
+			pdf: normalizePdfSettings(value.pdf),
 			speedReader: { ...value.speedReader, theme: readerTheme }
 		};
 	}
@@ -632,19 +596,6 @@ export const cbxScrollModes = [
 	{ id: 'paginated', name: 'Paginated' },
 	{ id: 'infinite', name: 'Infinite Scroll' },
 	{ id: 'long-strip', name: 'Long Strip' }
-];
-
-export const pdfZoomModes = [
-	{ id: 'auto', name: 'Auto Zoom' },
-	{ id: 'page-fit', name: 'Page Fit' },
-	{ id: 'page-width', name: 'Page Width' },
-	{ id: 'actual-size', name: 'Actual Size' }
-];
-
-export const pdfBackgroundColors = [
-	{ id: 'black', name: 'Black', color: '#000000' },
-	{ id: 'dark-gray', name: 'Dark Gray', color: '#1a1a1a' },
-	{ id: 'white', name: 'White', color: '#ffffff' }
 ];
 
 export const skipIntervalOptions = [
