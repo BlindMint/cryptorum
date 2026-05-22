@@ -182,6 +182,7 @@ func initRoutes(r *chi.Mux) {
 		// Books
 		r.Route("/books", func(r chi.Router) {
 			r.Get("/", getBooksHandler)
+			r.Get("/discover", getDiscoverBooksHandler)
 			r.Post("/bulk-delete", bulkDeleteBooksHandler)
 			r.Post("/bulk-delete-by-filter", bulkDeleteByFilterHandler)
 			r.Route("/{bookID}", func(r chi.Router) {
@@ -258,6 +259,7 @@ func initRoutes(r *chi.Mux) {
 		r.Get("/metadata/suggestions", getMetadataSuggestionsHandler)
 
 		// Statistics
+		r.Get("/dashboard/summary", getDashboardSummaryHandler)
 		r.Get("/stats", GetStatsHandler)
 
 		// Reading history
@@ -3570,10 +3572,21 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	var user *AppUser
 	if subtle.ConstantTimeCompare([]byte(req.Username), []byte(appConfig.Auth.Username)) == 1 &&
 		auth.VerifyPasswordHash(req.Password, appConfig.Auth.PasswordHash) {
-		user, _ = loadUserByUsername(appConfig.Auth.Username)
+		configUser, err := loadUserByUsername(appConfig.Auth.Username)
+		if err != nil {
+			slog.Error("Login matched config credentials but failed to load user", "username", appConfig.Auth.Username, "error", err)
+			errorResponse(w, http.StatusInternalServerError, "Authentication store unavailable")
+			return
+		}
+		user = configUser
 	}
 	if user == nil {
 		dbUser, err := loadUserByUsername(req.Username)
+		if err != nil && err != sql.ErrNoRows {
+			slog.Error("Login failed to load user", "username", req.Username, "error", err)
+			errorResponse(w, http.StatusInternalServerError, "Authentication store unavailable")
+			return
+		}
 		if err == nil && auth.VerifyPasswordHash(req.Password, dbUser.PasswordHash) {
 			user = dbUser
 		}
