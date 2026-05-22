@@ -28,6 +28,7 @@
 	let embedPdfSidebarOpen = $state(false);
 	let pdfLoadRetryToken = $state(0);
 	let pdfLoadRetryAttempts = 0;
+	let progressLoaded = false;
 
 	let settings = $state<PdfReaderSetting>({ ...defaultReaderSettings.pdf });
 	let topBarHideTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -588,6 +589,7 @@
 				if (savedProgress?.page > 0) {
 					lastSavedPage = savedProgress.page;
 				}
+				progressLoaded = true;
 			}
 		} catch (e) {
 			console.error('Failed to fetch progress:', e);
@@ -619,6 +621,7 @@
 
 	async function saveProgress(keepalive = false, timeoutMs = keepalive ? 3500 : 0) {
 		if (!book) return;
+		if (!progressLoaded || !embedPdfProgressReady || embedPdfRestoringInitialPage) return;
 		clearProgressSaveTimer();
 		const percent = numPages > 0 ? (currentPage / numPages) * 100 : 0;
 		const timeout = createFetchTimeout(timeoutMs);

@@ -63,29 +63,26 @@
 		updateDashboardRows();
 	});
 
-	async function loadLibraries() {
-		try {
-			const res = await fetch('/api/libraries', { cache: 'no-store' });
-			if (res.ok) {
-				const libs = await res.json();
-				stats.libraries = libs.length;
-			}
-		} catch (e) {
-			console.error('Failed to fetch libraries:', e);
+	function handleDashboardResponse(res: Response) {
+		if (res.status === 401) {
+			window.location.href = '/login';
+			return false;
 		}
+		return res.ok;
 	}
 
-	async function loadStats() {
+	async function loadDashboardSummary() {
 		try {
-			const res = await fetch('/api/stats', { cache: 'no-store' });
-			if (res.ok) {
+			const res = await fetch('/api/dashboard/summary', { cache: 'no-store' });
+			if (handleDashboardResponse(res)) {
 				const s = await res.json();
 				stats.books = s.total_books;
+				stats.libraries = s.libraries;
 				stats.reading = s.reading;
 				stats.finished = s.finished;
 			}
 		} catch (e) {
-			console.error('Failed to fetch dashboard stats:', e);
+			console.error('Failed to fetch dashboard summary:', e);
 		}
 	}
 
@@ -93,7 +90,7 @@
 		continueReadingLoading = true;
 		try {
 			const res = await fetch('/api/books?status=reading&sort=last_read&sort_dir=desc&limit=12&include_total=false', { cache: 'no-store' });
-			if (res.ok) {
+			if (handleDashboardResponse(res)) {
 				const data = await res.json();
 				continueReadingBooks = data.books || [];
 			}
@@ -108,7 +105,7 @@
 		recentBooksLoading = true;
 		try {
 			const res = await fetch('/api/books?limit=12&include_total=false', { cache: 'no-store' });
-			if (res.ok) {
+			if (handleDashboardResponse(res)) {
 				const data = await res.json();
 				recentBooks = (data.books || []).slice(0, 12);
 				if (!stats.books) stats.books = data.total || 0;
@@ -123,8 +120,8 @@
 	async function loadDiscoverBooks() {
 		discoverBooksLoading = true;
 		try {
-			const res = await fetch('/api/books?sort=random&limit=12&discovery=true&include_total=false', { cache: 'no-store' });
-			if (res.ok) {
+			const res = await fetch('/api/books/discover?limit=12', { cache: 'no-store' });
+			if (handleDashboardResponse(res)) {
 				const data = await res.json();
 				discoverBooks = data.books || [];
 			}
@@ -138,8 +135,7 @@
  	onMount(async () => {
  		showFormatOnCover.init();
 		await Promise.allSettled([
-			loadLibraries(),
-			loadStats(),
+			loadDashboardSummary(),
 			loadContinueReading(),
 			loadRecentBooks(),
 			loadDiscoverBooks()
