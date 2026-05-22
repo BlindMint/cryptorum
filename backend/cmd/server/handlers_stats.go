@@ -98,41 +98,98 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var stats StatsResponse
+	current := getUserFromContext(r.Context())
+	ownerClause, ownerArgs := userOwnershipClause(current, "l")
+	withOwnerArgs := func(extra ...interface{}) []interface{} {
+		args := append([]interface{}{}, ownerArgs...)
+		return append(args, extra...)
+	}
+	activeBookExists := `
+		AND EXISTS (
+			SELECT 1 FROM book_file active_bf
+			WHERE active_bf.book_id = b.id AND active_bf.missing_at IS NULL
+		)`
 
 	appDB.QueryRow(`
 		SELECT COUNT(DISTINCT b.id)
 		FROM book b
 		JOIN book_file bf ON bf.book_id = b.id
-		WHERE bf.missing_at IS NULL
-	`).Scan(&stats.TotalBooks)
-	appDB.QueryRow("SELECT COALESCE(SUM(COALESCE(page_count, 0)), 0) FROM book_metadata").Scan(&stats.TotalPages)
-	appDB.QueryRow("SELECT COUNT(DISTINCT series) FROM book_metadata WHERE series IS NOT NULL AND series != ''").Scan(&stats.TotalSeries)
-	appDB.QueryRow("SELECT COUNT(DISTINCT language) FROM book_metadata WHERE language IS NOT NULL AND language != ''").Scan(&stats.TotalLanguages)
-	appDB.QueryRow("SELECT COALESCE(MIN(added_at), 0), COALESCE(MAX(added_at), 0) FROM book").Scan(&stats.LibraryFirstAddedAt, &stats.LibraryLatestAddedAt)
-	appDB.QueryRow("SELECT COUNT(*) FROM reading_progress WHERE status = 'reading'").Scan(&stats.Reading)
-	appDB.QueryRow("SELECT COUNT(*) FROM reading_progress WHERE status = 'finished'").Scan(&stats.Finished)
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+` AND bf.missing_at IS NULL
+	`, ownerArgs...).Scan(&stats.TotalBooks)
+	appDB.QueryRow(`
+		SELECT COALESCE(SUM(COALESCE(bm.page_count, 0)), 0)
+		FROM book_metadata bm
+		JOIN book b ON bm.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists, ownerArgs...).Scan(&stats.TotalPages)
+	appDB.QueryRow(`
+		SELECT COUNT(DISTINCT bm.series)
+		FROM book_metadata bm
+		JOIN book b ON bm.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists+` AND bm.series IS NOT NULL AND bm.series != ''
+	`, ownerArgs...).Scan(&stats.TotalSeries)
+	appDB.QueryRow(`
+		SELECT COUNT(DISTINCT bm.language)
+		FROM book_metadata bm
+		JOIN book b ON bm.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists+` AND bm.language IS NOT NULL AND bm.language != ''
+	`, ownerArgs...).Scan(&stats.TotalLanguages)
+	stats.TotalAuthors = countDistinctStatsJSONValues("authors", ownerClause, ownerArgs, activeBookExists)
+	stats.TotalGenres = countDistinctStatsJSONValues("genres", ownerClause, ownerArgs, activeBookExists)
+	appDB.QueryRow(`
+		SELECT COALESCE(MIN(b.added_at), 0), COALESCE(MAX(b.added_at), 0)
+		FROM book b
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists, ownerArgs...).Scan(&stats.LibraryFirstAddedAt, &stats.LibraryLatestAddedAt)
+	appDB.QueryRow(`
+		SELECT COUNT(DISTINCT rp.book_id)
+		FROM reading_progress rp
+		JOIN book b ON rp.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists+` AND rp.status = 'reading'
+	`, ownerArgs...).Scan(&stats.Reading)
+	appDB.QueryRow(`
+		SELECT COUNT(DISTINCT rp.book_id)
+		FROM reading_progress rp
+		JOIN book b ON rp.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists+` AND rp.status = 'finished'
+	`, ownerArgs...).Scan(&stats.Finished)
 	stats.Unread = stats.TotalBooks - stats.Reading - stats.Finished
 	if stats.Unread < 0 {
 		stats.Unread = 0
 	}
 
 	weekAgo := time.Now().AddDate(0, 0, -7).Unix()
-	appDB.QueryRow("SELECT COUNT(*) FROM reading_session WHERE started_at > ?", weekAgo).Scan(&stats.SessionsThisWeek)
+	appDB.QueryRow(`
+		SELECT COUNT(*)
+		FROM reading_session rs
+		JOIN book b ON rs.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+` AND rs.started_at > ?
+	`, withOwnerArgs(weekAgo)...).Scan(&stats.SessionsThisWeek)
 	appDB.QueryRow(`
 		SELECT COALESCE(SUM(COALESCE(ended_at, started_at) - started_at), 0),
 		       COALESCE(AVG(COALESCE(ended_at, started_at) - started_at), 0)
-		FROM reading_session
-	`).Scan(&stats.TotalSessionMinutes, &stats.AverageSessionMinutes)
+		FROM reading_session rs
+		JOIN book b ON rs.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause, ownerArgs...).Scan(&stats.TotalSessionMinutes, &stats.AverageSessionMinutes)
 	stats.TotalSessionMinutes /= 60
 	stats.AverageSessionMinutes /= 60
 
 	// Books by format (count distinct books, not files)
 	rows, err := appDB.Query(`
 		SELECT format, COUNT(DISTINCT book_id) as cnt
-		FROM book_file
-		WHERE missing_at IS NULL
+		FROM book_file bf
+		JOIN book b ON bf.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+` AND bf.missing_at IS NULL
 		GROUP BY format
-	`)
+	`, ownerArgs...)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -167,9 +224,11 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		appDB.QueryRow(`
 			SELECT COUNT(*),
 			       COALESCE(SUM(COALESCE(ended_at, started_at) - started_at), 0)
-			FROM reading_session
-			WHERE started_at >= ? AND started_at < ?
-		`, dayStart, dayEnd).Scan(&sessionCount, &totalSeconds)
+			FROM reading_session rs
+			JOIN book b ON rs.book_id = b.id
+			JOIN library l ON b.library_id = l.id
+			WHERE `+ownerClause+` AND rs.started_at >= ? AND rs.started_at < ?
+		`, withOwnerArgs(dayStart, dayEnd)...).Scan(&sessionCount, &totalSeconds)
 
 		stats.ReadingActivity = append(stats.ReadingActivity, ActivityDay{
 			Date:     day.Format("Mon"),
@@ -182,11 +241,13 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	genreRows, _ := appDB.Query(`
 		SELECT bm.genres, COUNT(*) as cnt
 		FROM book_metadata bm
-		WHERE bm.genres IS NOT NULL AND bm.genres != '[]'
+		JOIN book b ON bm.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists+` AND bm.genres IS NOT NULL AND bm.genres != '[]'
 		GROUP BY bm.genres
 		ORDER BY cnt DESC
 		LIMIT 10
-	`)
+	`, ownerArgs...)
 	stats.GenreDistribution = []GenreCount{}
 	for genreRows.Next() {
 		var genresJson string
@@ -230,11 +291,13 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	authorRows, _ := appDB.Query(`
 		SELECT bm.authors, COUNT(*) as cnt
 		FROM book_metadata bm
-		WHERE bm.authors IS NOT NULL AND bm.authors != '[]'
+		JOIN book b ON bm.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists+` AND bm.authors IS NOT NULL AND bm.authors != '[]'
 		GROUP BY bm.authors
 		ORDER BY cnt DESC
 		LIMIT 10
-	`)
+	`, ownerArgs...)
 	stats.AuthorDistribution = []AuthorCount{}
 	for authorRows.Next() {
 		var authorsJson string
@@ -276,13 +339,15 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Language distribution
 	languageRows, _ := appDB.Query(`
-		SELECT COALESCE(language, '') as language, COUNT(*) as cnt
-		FROM book_metadata
-		WHERE language IS NOT NULL AND language != ''
-		GROUP BY language
-		ORDER BY cnt DESC, language ASC
+		SELECT COALESCE(bm.language, '') as language, COUNT(*) as cnt
+		FROM book_metadata bm
+		JOIN book b ON bm.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists+` AND bm.language IS NOT NULL AND bm.language != ''
+		GROUP BY bm.language
+		ORDER BY cnt DESC, bm.language ASC
 		LIMIT 10
-	`)
+	`, ownerArgs...)
 	stats.LanguageDistribution = []CountItem{}
 	for languageRows.Next() {
 		var language string
@@ -294,9 +359,11 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Page count histogram using dynamic buckets and a separate missing-page-count total.
 	pageRows, _ := appDB.Query(`
-		SELECT COALESCE(page_count, 0)
-		FROM book_metadata
-	`)
+		SELECT COALESCE(bm.page_count, 0)
+		FROM book_metadata bm
+		JOIN book b ON bm.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists, ownerArgs...)
 	var pageCounts []int64
 	var maxPageCount int64
 	for pageRows.Next() {
@@ -349,16 +416,19 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	sessionRows, _ := appDB.Query(`
 		SELECT
 			CASE
-				WHEN COALESCE(ended_at, started_at) - started_at < 600 THEN '<10m'
-				WHEN COALESCE(ended_at, started_at) - started_at < 1800 THEN '10-30m'
-				WHEN COALESCE(ended_at, started_at) - started_at < 3600 THEN '30-60m'
-				WHEN COALESCE(ended_at, started_at) - started_at < 7200 THEN '1-2h'
+				WHEN COALESCE(rs.ended_at, rs.started_at) - rs.started_at < 600 THEN '<10m'
+				WHEN COALESCE(rs.ended_at, rs.started_at) - rs.started_at < 1800 THEN '10-30m'
+				WHEN COALESCE(rs.ended_at, rs.started_at) - rs.started_at < 3600 THEN '30-60m'
+				WHEN COALESCE(rs.ended_at, rs.started_at) - rs.started_at < 7200 THEN '1-2h'
 				ELSE '2h+'
 			END as bucket,
 			COUNT(*) as cnt
-		FROM reading_session
+		FROM reading_session rs
+		JOIN book b ON rs.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+`
 		GROUP BY bucket
-	`)
+	`, ownerArgs...)
 	stats.SessionBuckets = []CountItem{}
 	for sessionRows.Next() {
 		var bucket string
@@ -374,10 +444,13 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Current reading streak from most recent session days
 	streakRows, _ := appDB.Query(`
-		SELECT DISTINCT date(started_at, 'unixepoch') as day
-		FROM reading_session
+		SELECT DISTINCT date(rs.started_at, 'unixepoch') as day
+		FROM reading_session rs
+		JOIN book b ON rs.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+`
 		ORDER BY day DESC
-	`)
+	`, ownerArgs...)
 	var streakDays []string
 	for streakRows.Next() {
 		var day string
@@ -409,10 +482,12 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	ratingRows, _ := appDB.Query(`
 		SELECT ROUND(bm.rating, 0) as rating, COUNT(*) as cnt
 		FROM book_metadata bm
-		WHERE bm.rating > 0
+		JOIN book b ON bm.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists+` AND bm.rating > 0
 		GROUP BY ROUND(bm.rating, 0)
 		ORDER BY rating
-	`)
+	`, ownerArgs...)
 	stats.RatingDistribution = []RatingCount{}
 	for ratingRows.Next() {
 		var rating float64
@@ -426,10 +501,12 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	yearRows, _ := appDB.Query(`
 		SELECT bm.pub_date, COUNT(*) as cnt
 		FROM book_metadata bm
-		WHERE bm.pub_date IS NOT NULL AND bm.pub_date != '' AND LENGTH(bm.pub_date) >= 4
+		JOIN book b ON bm.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists+` AND bm.pub_date IS NOT NULL AND bm.pub_date != '' AND LENGTH(bm.pub_date) >= 4
 		GROUP BY bm.pub_date
 		ORDER BY bm.pub_date
-	`)
+	`, ownerArgs...)
 	stats.PubYearTimeline = []YearCount{}
 	for yearRows.Next() {
 		var pubDate string
@@ -468,8 +545,10 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		appDB.QueryRow(`
 			SELECT COUNT(DISTINCT rs.book_id)
 			FROM reading_session rs
-			WHERE rs.started_at >= ? AND rs.started_at < ?
-		`, dayStart, dayEnd).Scan(&booksRead)
+			JOIN book b ON rs.book_id = b.id
+			JOIN library l ON b.library_id = l.id
+			WHERE `+ownerClause+` AND rs.started_at >= ? AND rs.started_at < ?
+		`, withOwnerArgs(dayStart, dayEnd)...).Scan(&booksRead)
 
 		stats.ReadingProgress = append(stats.ReadingProgress, ReadingProgress{
 			Date:  day.Format("2006-01-02"),
@@ -479,6 +558,39 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, http.StatusOK, stats)
+}
+
+func countDistinctStatsJSONValues(column, ownerClause string, ownerArgs []interface{}, activeBookExists string) int64 {
+	rows, err := appDB.Query(`
+		SELECT bm.`+column+`
+		FROM book_metadata bm
+		JOIN book b ON bm.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists+` AND bm.`+column+` IS NOT NULL AND bm.`+column+` != '[]' AND bm.`+column+` != ''
+	`, ownerArgs...)
+	if err != nil {
+		return 0
+	}
+	defer rows.Close()
+
+	values := make(map[string]bool)
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			continue
+		}
+		var items []string
+		if err := json.Unmarshal([]byte(raw), &items); err != nil {
+			continue
+		}
+		for _, item := range items {
+			item = strings.TrimSpace(item)
+			if item != "" {
+				values[item] = true
+			}
+		}
+	}
+	return int64(len(values))
 }
 
 // GetBookTextHandler extracts plain text from any supported book format for the speed reader

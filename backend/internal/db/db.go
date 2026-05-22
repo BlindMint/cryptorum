@@ -26,8 +26,10 @@ type DB struct {
 func New(dataPath string) (*DB, error) {
 	dbPath := filepath.Join(dataPath, "cryptorum.db")
 
-	// Open SQLite database with WAL mode
-	conn, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_timeout=60")
+	// Open SQLite database with WAL mode. modernc.org/sqlite applies pragmas
+	// through repeated _pragma parameters on each pooled connection.
+	dsn := "file:" + dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)"
+	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -41,11 +43,6 @@ func New(dataPath string) (*DB, error) {
 	// slow query or background write does not serialize every request.
 	conn.SetMaxOpenConns(4)
 	conn.SetMaxIdleConns(4)
-
-	// Enable foreign keys
-	if _, err := conn.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
-	}
 
 	db := &DB{
 		DB:       conn,
