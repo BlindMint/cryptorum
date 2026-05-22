@@ -515,6 +515,12 @@
 		overflow: hidden;
 	}
 
+	.embedpdf-container :global(img),
+	.embedpdf-container :global(canvas) {
+		image-rendering: crisp-edges;
+		image-rendering: -webkit-optimize-contrast;
+	}
+
 	.embedpdf-container :global([data-epdf-i="left-group"]) {
 		margin-left: calc(var(--embedpdf-left-clearance) + max(0px, env(safe-area-inset-left))) !important;
 		margin-right: auto !important;
