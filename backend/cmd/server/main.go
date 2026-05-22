@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -107,6 +108,7 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(slowAPILogMiddleware)
 
 	// Initialize routes
 	initRoutes(r)
@@ -290,6 +292,34 @@ func jsonResponse(w http.ResponseWriter, status int, data interface{}) {
 	if data != nil {
 		json.NewEncoder(w).Encode(data)
 	}
+}
+
+func slowAPILogMiddleware(next http.Handler) http.Handler {
+	const threshold = 500 * time.Millisecond
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		start := time.Now()
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(ww, r)
+		duration := time.Since(start)
+		if duration < threshold {
+			return
+		}
+
+		slog.Warn(
+			"Slow API request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", ww.Status(),
+			"duration_ms", duration.Milliseconds(),
+			"request_id", middleware.GetReqID(r.Context()),
+		)
+	})
 }
 
 // Helper function for error responses
