@@ -141,6 +141,11 @@
 	}
 
 	onMount(() => {
+		const handleReaderVisibilityChange = () => {
+			if (document.visibilityState === 'hidden') {
+				resetInterruptedGestureState();
+			}
+		};
 		const unsubscribeSettings = readerSettings.subscribe(s => {
 			const previousScrollMode = settings.scrollMode;
 			const previousStripWidth = settings.stripMaxWidthPercent;
@@ -159,17 +164,22 @@
 		});
 
 		handlePageExit = () => {
+			resetInterruptedGestureState();
 			if (closeTasksStarted) return;
 			void readerSettings.flushPendingSave(true);
 			void endSession(true);
 		};
 		window.addEventListener('pagehide', handlePageExit);
 		window.addEventListener('beforeunload', handlePageExit);
+		window.addEventListener('blur', resetInterruptedGestureState);
+		document.addEventListener('visibilitychange', handleReaderVisibilityChange);
 
 		resetTopBarBehavior();
 
 		return () => {
 			unsubscribeSettings();
+			window.removeEventListener('blur', resetInterruptedGestureState);
+			document.removeEventListener('visibilitychange', handleReaderVisibilityChange);
 		};
 	});
 
@@ -408,6 +418,11 @@
 		readerPointerMoved = false;
 	}
 
+	function resetReaderPointerTracking() {
+		readerPointerStart = null;
+		readerPointerMoved = false;
+	}
+
 	function isTouchLikePointer(e?: PointerEvent) {
 		if (e?.pointerType === 'touch') return true;
 		return typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
@@ -429,17 +444,24 @@
 	}
 
 	function handleReaderPointerUp(e: PointerEvent) {
+		const pointerStart = readerPointerStart;
+		const pointerMoved = readerPointerMoved;
+		resetReaderPointerTracking();
+
 		if (controlsNeedToStayVisible()) return;
 		const target = e.target as Element | null;
 		if (target?.closest('input, textarea, select, [contenteditable="true"], .left-sidebar, .right-sidebar, .progress-bar, .reader-progress, .floating-nav')) {
 			return;
 		}
-		if (readerPointerStart && readerPointerStart.id !== e.pointerId) return;
-		if (readerPointerMoved) return;
+		if (pointerStart && pointerStart.id !== e.pointerId) return;
+		if (pointerMoved) return;
 		if (isReaderCenterTap(e, e.currentTarget as HTMLElement)) {
 			toggleTopBarFromCenterTap();
 		}
-		readerPointerStart = null;
+	}
+
+	function handleReaderPointerCancel() {
+		resetReaderPointerTracking();
 	}
 
 	onDestroy(() => {
@@ -622,6 +644,23 @@
 		}
 	}
 
+	function cancelProgressPointer(e?: PointerEvent) {
+		if (e && activeProgressPointerId !== null) {
+			(e.currentTarget as HTMLElement).releasePointerCapture?.(activeProgressPointerId);
+		} else if (progressBarEl && activeProgressPointerId !== null) {
+			try {
+				progressBarEl.releasePointerCapture?.(activeProgressPointerId);
+			} catch {
+				// The OS may have consumed the gesture and released capture already.
+			}
+		}
+
+		isDraggingProgress = false;
+		activeProgressPointerId = null;
+		pendingProgressPage = null;
+		progressPreviewPage = null;
+	}
+
 	function handleProgressPointerUp(e: PointerEvent) {
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
 		e.preventDefault();
@@ -632,8 +671,13 @@
 
 	function handleProgressPointerCancel(e: PointerEvent) {
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
-		finishProgressPointer(e);
-		progressPreviewPage = null;
+		cancelProgressPointer(e);
+	}
+
+	function resetInterruptedGestureState() {
+		cancelProgressPointer();
+		resetReaderPointerTracking();
+		preserveChromeAfterSeekUntil = 0;
 	}
 
 	function handleProgressBarKeydown(e: KeyboardEvent) {
@@ -797,6 +841,7 @@
 	onpointerdown={handleReaderPointerDown}
 	onpointermove={handleReaderPointerMove}
 	onpointerup={handleReaderPointerUp}
+	onpointercancel={handleReaderPointerCancel}
 >
 	<!-- Top Navigation Bar -->
 	<header class="top-nav" class:top-nav-hidden={!topBarVisible}>
