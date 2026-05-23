@@ -27,8 +27,10 @@
 	let embedPdfRestoreTimers: ReturnType<typeof setTimeout>[] = [];
 	let embedPdfSidebarOpen = $state(false);
 	let pdfLoadRetryToken = $state(0);
+	let pdfResumeToken = $state(0);
 	let pdfLoadRetryAttempts = 0;
 	let progressLoaded = false;
+	let wasPageInterrupted = false;
 
 	let settings = $state<PdfReaderSetting>({ ...defaultReaderSettings.pdf });
 	let topBarHideTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -458,6 +460,23 @@
 		preserveChromeAfterSeek();
 	}
 
+	function cancelProgressPointer(e?: PointerEvent) {
+		if (e && activeProgressPointerId !== null) {
+			(e.currentTarget as HTMLElement).releasePointerCapture?.(activeProgressPointerId);
+		} else if (pdfProgressBarEl && activeProgressPointerId !== null) {
+			try {
+				pdfProgressBarEl.releasePointerCapture?.(activeProgressPointerId);
+			} catch {
+				// Android may already have released capture when a system gesture interrupts touch input.
+			}
+		}
+
+		isDraggingProgress = false;
+		activeProgressPointerId = null;
+		pendingProgressPage = null;
+		progressPreviewPage = null;
+	}
+
 	function handleProgressPointerUp(e: PointerEvent) {
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
 		e.preventDefault();
@@ -467,8 +486,51 @@
 
 	function handleProgressPointerCancel(e: PointerEvent) {
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
-		finishProgressPointer(e);
-		progressPreviewPage = null;
+		cancelProgressPointer(e);
+	}
+
+	function recoverInterruptedPdfGesture(remountViewer = false) {
+		cancelProgressPointer();
+		preserveChromeAfterSeekUntil = 0;
+
+		if (!remountViewer || !book || !embedPdfProgressReady) return;
+
+		clearEmbedPdfRestoreTimers();
+		embedPdfScroll = null;
+		embedPdfViewerReady = false;
+		embedPdfInitialPage = currentPage;
+		embedPdfRestoringInitialPage = currentPage > 1;
+		pdfResumeToken += 1;
+	}
+
+	function handleReaderVisibilityChange() {
+		if (document.visibilityState === 'hidden') {
+			wasPageInterrupted = true;
+			recoverInterruptedPdfGesture();
+			return;
+		}
+
+		if (wasPageInterrupted) {
+			wasPageInterrupted = false;
+			recoverInterruptedPdfGesture(true);
+		}
+	}
+
+	function handleReaderWindowBlur() {
+		wasPageInterrupted = true;
+		recoverInterruptedPdfGesture();
+	}
+
+	function handleReaderWindowFocus() {
+		if (!wasPageInterrupted || document.visibilityState === 'hidden') return;
+		wasPageInterrupted = false;
+		recoverInterruptedPdfGesture(true);
+	}
+
+	function handleReaderPageShow(event: PageTransitionEvent) {
+		if (!wasPageInterrupted && !event.persisted) return;
+		wasPageInterrupted = false;
+		recoverInterruptedPdfGesture(true);
 	}
 
 	function handleProgressBarKeydown(e: KeyboardEvent) {
@@ -752,6 +814,8 @@
 			if (!mounted) return;
 
 			handlePageExit = () => {
+				wasPageInterrupted = true;
+				recoverInterruptedPdfGesture();
 				if (closeTasksStarted) return;
 				void saveProgress(true);
 				void endSession(true);
@@ -762,12 +826,20 @@
 
 		window.addEventListener('keydown', handleKeydown);
 		window.addEventListener('mousemove', handleReaderPointerMove);
+		window.addEventListener('blur', handleReaderWindowBlur);
+		window.addEventListener('focus', handleReaderWindowFocus);
+		window.addEventListener('pageshow', handleReaderPageShow);
+		document.addEventListener('visibilitychange', handleReaderVisibilityChange);
 
 		return () => {
 			mounted = false;
 			unsubscribeReaderSettings();
 			window.removeEventListener('keydown', handleKeydown);
 			window.removeEventListener('mousemove', handleReaderPointerMove);
+			window.removeEventListener('blur', handleReaderWindowBlur);
+			window.removeEventListener('focus', handleReaderWindowFocus);
+			window.removeEventListener('pageshow', handleReaderPageShow);
+			document.removeEventListener('visibilitychange', handleReaderVisibilityChange);
 			if (handlePageExit) {
 				window.removeEventListener('pagehide', handlePageExit);
 				window.removeEventListener('beforeunload', handlePageExit);
@@ -856,7 +928,7 @@
 				</div>
 			{:else if book && embedPdfProgressReady}
 				<div class="embedpdf-viewer-container">
-					{#key `${book.id}:${requestedFormat}:${pdfLoadRetryToken}`}
+					{#key `${book.id}:${requestedFormat}:${pdfLoadRetryToken}:${pdfResumeToken}`}
 					<EmbedPDFViewer
 						src={getPdfSourceUrl()}
 						title={getPdfDisplayTitle()}

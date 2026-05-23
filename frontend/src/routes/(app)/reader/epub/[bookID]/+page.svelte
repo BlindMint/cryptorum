@@ -431,6 +431,11 @@
 		readerPointerMoved = false;
 	}
 
+	function resetReaderPointerTracking() {
+		readerPointerStart = null;
+		readerPointerMoved = false;
+	}
+
 	function handleReaderPointerMove(e: PointerEvent) {
 		if (readerPointerStart) {
 			const dx = e.clientX - readerPointerStart.x;
@@ -447,17 +452,24 @@
 	}
 
 	function handleReaderPointerUp(e: PointerEvent) {
+		const pointerStart = readerPointerStart;
+		const pointerMoved = readerPointerMoved;
+		resetReaderPointerTracking();
+
 		if (controlsNeedToStayVisible()) return;
 		const target = e.target as Element | null;
 		if (target?.closest('input, textarea, select, [contenteditable="true"], .left-sidebar, .right-sidebar, .progress-bar, .reader-progress, .tap-zone, .center-reveal-zone')) {
 			return;
 		}
-		if (readerPointerStart && readerPointerStart.id !== e.pointerId) return;
-		if (readerPointerMoved) return;
+		if (pointerStart && pointerStart.id !== e.pointerId) return;
+		if (pointerMoved) return;
 		if (isReaderCenterTap(e, e.currentTarget as HTMLElement)) {
 			toggleTopBarFromCenterTap();
 		}
-		readerPointerStart = null;
+	}
+
+	function handleReaderPointerCancel() {
+		resetReaderPointerTracking();
 	}
 
 	function getReaderTheme(themeId: string | null) {
@@ -1060,6 +1072,24 @@
 		}
 	}
 
+	function cancelProgressPointer(e?: PointerEvent) {
+		if (e && activeProgressPointerId !== null) {
+			(e.currentTarget as HTMLElement).releasePointerCapture?.(activeProgressPointerId);
+		} else if (progressBarEl && activeProgressPointerId !== null) {
+			try {
+				progressBarEl.releasePointerCapture?.(activeProgressPointerId);
+			} catch {
+				// The OS may have consumed the gesture and released capture already.
+			}
+		}
+
+		isDraggingProgress = false;
+		activeProgressPointerId = null;
+		pendingProgressPage = null;
+		progressPreviewPercent = null;
+		progressPreviewSection = null;
+	}
+
 	function handleProgressPointerUp(e: PointerEvent) {
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
 		e.preventDefault();
@@ -1070,9 +1100,13 @@
 
 	function handleProgressPointerCancel(e: PointerEvent) {
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
-		finishProgressPointer(e);
-		progressPreviewPercent = null;
-		progressPreviewSection = null;
+		cancelProgressPointer(e);
+	}
+
+	function resetInterruptedGestureState() {
+		cancelProgressPointer();
+		resetReaderPointerTracking();
+		preserveChromeAfterSeekUntil = 0;
 	}
 
 	function handleProgressBarKeydown(e: KeyboardEvent) {
@@ -1665,7 +1699,13 @@
 	}
 
 	onMount(() => {
+		const handleReaderVisibilityChange = () => {
+			if (document.visibilityState === 'hidden') {
+				resetInterruptedGestureState();
+			}
+		};
 		const handlePageExit = () => {
+			resetInterruptedGestureState();
 			if (closeTasksStarted) return;
 			flushProgressSave();
 			void endSession(true);
@@ -1687,15 +1727,19 @@
 
 		window.addEventListener('pagehide', handlePageExit);
 		window.addEventListener('beforeunload', handlePageExit);
+		window.addEventListener('blur', resetInterruptedGestureState);
 		window.addEventListener('wheel', handleWheelNavigation, { passive: false });
 		window.addEventListener('resize', handleResize);
+		document.addEventListener('visibilitychange', handleReaderVisibilityChange);
 
 		return () => {
 			window.removeEventListener('pagehide', handlePageExit);
 			window.removeEventListener('beforeunload', handlePageExit);
+			window.removeEventListener('blur', resetInterruptedGestureState);
 			window.removeEventListener('wheel', handleWheelNavigation);
 			window.removeEventListener('resize', handleResize);
 			window.removeEventListener('keydown', handleKeydown);
+			document.removeEventListener('visibilitychange', handleReaderVisibilityChange);
 			if (viewportResizeTimeout) {
 				clearTimeout(viewportResizeTimeout);
 			}
@@ -1772,6 +1816,7 @@
 	onpointerdown={handleReaderPointerDown}
 	onpointermove={handleReaderPointerMove}
 	onpointerup={handleReaderPointerUp}
+	onpointercancel={handleReaderPointerCancel}
 >
 	{#if !readerReady && !error}
 		<div class="initial-loading-overlay">
