@@ -1516,12 +1516,12 @@
    						tabindex="0"
 					>
     					<div class="block">
-							<div class="relative" role="button" tabindex="0" onclick={(event) => handleCoverTap(event, book.id)} onkeydown={(event) => handleCoverKeydown(event, book.id)}>
+							<div class="relative mb-2 overflow-hidden rounded-lg" role="button" tabindex="0" onclick={(event) => handleCoverTap(event, book.id)} onkeydown={(event) => handleCoverKeydown(event, book.id)}>
 								<BookCoverFrame
 									src={book.cover_path ? getCoverThumbUrl(book.id, libraryCoverThumbSize, book.cover_updated_on) : null}
 									alt={book.title}
 									mode="cover"
-									frameClass="aspect-[2/3] mb-2"
+									frameClass="aspect-[2/3]"
 									imageClass="group-hover:scale-105 transition-transform"
 									placeholderSize="md"
 								/>

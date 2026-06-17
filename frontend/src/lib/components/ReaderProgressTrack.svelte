@@ -172,7 +172,7 @@
 		justify-content: space-between;
 		gap: 16px;
 		margin-bottom: 8px;
-		color: var(--color-surface-text-muted, #94a3b8);
+		color: var(--color-surface-text, #e2e8f0);
 		font-size: 12px;
 		font-variant-numeric: tabular-nums;
 		min-width: 0;

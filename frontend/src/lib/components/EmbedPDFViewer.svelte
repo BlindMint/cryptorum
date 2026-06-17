@@ -67,7 +67,7 @@
 	let embedPdfCurrentPage = $state(1);
 
 	const documentId = EMBEDPDF_DOCUMENT_ID;
-	const maxRestoreAttempts = 8;
+	const maxRestoreAttempts = 48;
 	const scrollActivity = createEmbedPdfScrollActivityController((delta, scrollTop) => {
 		onScrollActivity?.(delta, scrollTop);
 	});
@@ -266,14 +266,21 @@
 			? Math.min(targetPage, totalPages)
 			: targetPage;
 
+		const retryRestore = () => {
+			if (restoreAttempts < maxRestoreAttempts) {
+				const retryDelay = restoreAttempts < 10 ? 120 : restoreAttempts < 24 ? 250 : 500;
+				restoreInitialPage(scroll, totalPages, retryDelay);
+			}
+		};
+
 		const timer = setTimeout(() => {
 			if (restoredInitialPage) return;
-			if (!layoutReadySeen) {
-				restoreInitialPage(scroll, totalPages, 150);
-				return;
-			}
 
 			restoreAttempts += 1;
+			if (!layoutReadySeen) {
+				retryRestore();
+				return;
+			}
 
 			let scopedScroll: ReturnType<ScrollCapability['forDocument']>;
 			try {
@@ -284,15 +291,13 @@
 					alignY: 0
 				});
 			} catch {
-				if (restoreAttempts < maxRestoreAttempts) {
-					restoreInitialPage(scroll, totalPages, 150);
-				}
+				retryRestore();
 				return;
 			}
 
 			requestAnimationFrame(() => {
 				const currentPage = scopedScroll.getCurrentPage();
-				if (currentPage === clampedPage || restoreAttempts >= maxRestoreAttempts) {
+				if (currentPage === clampedPage) {
 					restoredInitialPage = true;
 					clearRestoreTimers();
 					if (onPageChange && totalPages && totalPages > 0) {
@@ -301,7 +306,7 @@
 					return;
 				}
 
-				restoreInitialPage(scroll, totalPages, 120);
+				retryRestore();
 			});
 		}, delay);
 

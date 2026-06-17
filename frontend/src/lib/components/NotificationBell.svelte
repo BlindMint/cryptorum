@@ -128,9 +128,10 @@
 		>
 			{#if mobileMenu}
 				<span class="flex items-center gap-3">
-					<span class="relative">
-						<svg class="h-5 w-5 text-[var(--color-surface-text-muted)] {hasActiveJobs ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
+					<span class="notification-icon-frame" class:active={hasActiveJobs}>
+						<span class="notification-activity-ring" aria-hidden="true"></span>
+						<svg class="notification-bell-icon h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
 						</svg>
 						{#if $notificationVisualIndicator && hasUnreadNotifications}
 							<span class="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[var(--color-primary-400)] ring-2 ring-[var(--color-surface-overlay)]"></span>
@@ -142,9 +143,12 @@
 					<span class="min-w-5 h-5 px-1 rounded-full bg-[var(--color-primary-500)] text-white text-[10px] font-semibold flex items-center justify-center">{unreadNotificationCount}</span>
 				{/if}
 			{:else}
-				<svg class="w-5 h-5 {hasActiveJobs ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
-				</svg>
+				<span class="notification-icon-frame" class:active={hasActiveJobs}>
+					<span class="notification-activity-ring" aria-hidden="true"></span>
+					<svg class="notification-bell-icon w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
+					</svg>
+				</span>
 				{#if $notificationVisualIndicator && hasUnreadNotifications}
 					<span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--color-primary-400)] ring-2 ring-[var(--color-surface-overlay)]"></span>
 				{/if}
@@ -242,3 +246,71 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.notification-icon-frame {
+		position: relative;
+		display: inline-flex;
+		width: 1.5rem;
+		height: 1.5rem;
+		flex-shrink: 0;
+		align-items: center;
+		justify-content: center;
+		color: inherit;
+	}
+
+	.notification-bell-icon {
+		position: relative;
+		z-index: 1;
+		transition:
+			color 180ms ease,
+			transform 180ms ease;
+	}
+
+	.notification-icon-frame.active .notification-bell-icon {
+		color: var(--color-primary-400);
+		transform: scale(0.9);
+	}
+
+	.notification-activity-ring {
+		position: absolute;
+		inset: -3px;
+		border: 2px solid color-mix(in srgb, var(--color-surface-border, rgba(55, 65, 81, 0.6)) 70%, transparent);
+		border-top-color: var(--color-primary-500, #f97316);
+		border-radius: 999px;
+		opacity: 0;
+		pointer-events: none;
+		transform: scale(0.88);
+		transition:
+			opacity 180ms ease,
+			transform 180ms ease;
+	}
+
+	.notification-icon-frame.active .notification-activity-ring {
+		opacity: 1;
+		transform: scale(1);
+		animation: notification-activity-spin 1s linear infinite;
+	}
+
+	@keyframes notification-activity-spin {
+		from {
+			transform: scale(1) rotate(0deg);
+		}
+
+		to {
+			transform: scale(1) rotate(360deg);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.notification-bell-icon,
+		.notification-activity-ring {
+			transition: none;
+		}
+
+		.notification-icon-frame.active .notification-activity-ring {
+			animation: none;
+			border-color: color-mix(in srgb, var(--color-primary-500, #f97316) 70%, transparent);
+		}
+	}
+</style>

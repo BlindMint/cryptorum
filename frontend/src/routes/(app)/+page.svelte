@@ -328,21 +328,21 @@
 						{@const readerUrl = getReaderUrl(book)}
 						<div class="dashboard-book-item relative group min-w-0 self-start" animate:flip={{ duration: 90, easing: cubicOut }}>
 							<div class="flex min-w-0 flex-col">
-								<div class="relative" role="button" tabindex="0" onclick={(event) => handleDashboardCoverTap(event, book.id)} onkeydown={(event) => handleDashboardCoverKeydown(event, book.id)}>
+								<div class="relative mb-1.5 overflow-hidden rounded-lg" role="button" tabindex="0" onclick={(event) => handleDashboardCoverTap(event, book.id)} onkeydown={(event) => handleDashboardCoverKeydown(event, book.id)}>
 										<BookCoverFrame
 											src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
 											alt={book.title}
 											mode="cover"
-											frameClass="aspect-[2/3] mb-1.5"
+											frameClass="aspect-[2/3]"
 											imageClass="group-hover:scale-105 transition-transform"
 											placeholderSize="md"
 											retryCount={2}
 										/>
 									{#if book.status === 'reading'}
-										<div class="absolute bottom-4 right-2 z-10 h-3 w-3 rounded-full border border-black/30 bg-blue-500 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></div>
+										<div class="absolute bottom-2 right-2 z-10 h-3 w-3 rounded-full border border-black/30 bg-blue-500 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></div>
 									{/if}
 									{#if book.opened && book.percent > 0}
-										<div class="absolute bottom-1.5 left-0 right-0 z-10 h-1 bg-slate-700">
+										<div class="absolute bottom-0 left-0 right-0 z-10 h-1 bg-slate-700">
 											<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
 										</div>
 									{/if}
@@ -409,12 +409,12 @@
 					{#each recentBooks.slice(0, dashboardConfig.recentlyAddedLimit) as book (book.id)}
 						{@const readerUrl = getReaderUrl(book)}
 						<div class="dashboard-book-item group flex min-w-0 flex-col self-start" animate:flip={{ duration: 90, easing: cubicOut }}>
-							<div class="relative" role="button" tabindex="0" onclick={(event) => handleDashboardCoverTap(event, book.id)} onkeydown={(event) => handleDashboardCoverKeydown(event, book.id)}>
+							<div class="relative mb-1.5 overflow-hidden rounded-lg" role="button" tabindex="0" onclick={(event) => handleDashboardCoverTap(event, book.id)} onkeydown={(event) => handleDashboardCoverKeydown(event, book.id)}>
 								<BookCoverFrame
 									src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
 									alt={book.title}
 									mode="cover"
-									frameClass="aspect-[2/3] mb-1.5"
+									frameClass="aspect-[2/3]"
 									imageClass="group-hover:scale-105 transition-transform"
 									placeholderSize="md"
 									retryCount={2}
@@ -490,12 +490,12 @@
 					{#each discoverBooks.slice(0, dashboardConfig.discoverLimit) as book (book.id)}
 						{@const readerUrl = getReaderUrl(book)}
 						<div class="dashboard-book-item group flex min-w-0 flex-col self-start" animate:flip={{ duration: 90, easing: cubicOut }}>
-							<div class="relative" role="button" tabindex="0" onclick={(event) => handleDashboardCoverTap(event, book.id)} onkeydown={(event) => handleDashboardCoverKeydown(event, book.id)}>
+							<div class="relative mb-1.5 overflow-hidden rounded-lg" role="button" tabindex="0" onclick={(event) => handleDashboardCoverTap(event, book.id)} onkeydown={(event) => handleDashboardCoverKeydown(event, book.id)}>
 								<BookCoverFrame
 									src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
 									alt={book.title}
 									mode="cover"
-									frameClass="aspect-[2/3] mb-1.5"
+									frameClass="aspect-[2/3]"
 									imageClass="group-hover:scale-105 transition-transform"
 									placeholderSize="md"
 									retryCount={2}

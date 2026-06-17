@@ -27,7 +27,6 @@
 	let embedPdfRestoreTimers: ReturnType<typeof setTimeout>[] = [];
 	let embedPdfSidebarOpen = $state(false);
 	let pdfLoadRetryToken = $state(0);
-	let pdfResumeToken = $state(0);
 	let pdfLoadRetryAttempts = 0;
 	let progressLoaded = false;
 	let wasPageInterrupted = false;
@@ -66,6 +65,7 @@
 	const seekScrollSuppressMs = 1400;
 	const progressSaveDebounceMs = 750;
 	const embedPdfDocumentId = 'cryptorum-pdf';
+	const embedPdfRestoreDelays = [0, 120, 300, 650, 1200, 2200, 3600, 5600, 8200, 11500, 15500];
 
 	const viewModeBgColors: Record<PdfViewMode, string> = {
 		light: '#ffffff',
@@ -326,7 +326,7 @@
 		currentPage = targetPage;
 		embedPdfInitialPage = targetPage;
 
-		const attemptRestore = () => {
+		const attemptRestore = (isFinalAttempt = false) => {
 			if (!embedPdfScroll || !embedPdfRestoringInitialPage) return;
 			try {
 				const scopedScroll = embedPdfScroll.forDocument?.(embedPdfDocumentId);
@@ -335,18 +335,20 @@
 					behavior: 'instant',
 					alignY: 0
 				});
-				if (scopedScroll?.getCurrentPage?.() === targetPage) {
-					embedPdfRestoringInitialPage = false;
-					clearEmbedPdfRestoreTimers();
-				}
 			} catch (e) {
 				console.warn('Failed to restore saved PDF page:', e);
 			}
+
+			if (isFinalAttempt && embedPdfRestoringInitialPage) {
+				embedPdfRestoringInitialPage = false;
+			}
 		};
 
-		attemptRestore();
-		embedPdfRestoreTimers = [150, 400, 900, 1600, 2600].map((delay) =>
-			setTimeout(attemptRestore, delay)
+		embedPdfRestoreTimers = embedPdfRestoreDelays.map((delay, index) =>
+			setTimeout(
+				() => attemptRestore(index === embedPdfRestoreDelays.length - 1),
+				delay
+			)
 		);
 	}
 
@@ -489,18 +491,9 @@
 		cancelProgressPointer(e);
 	}
 
-	function recoverInterruptedPdfGesture(remountViewer = false) {
+	function recoverInterruptedPdfGesture() {
 		cancelProgressPointer();
 		preserveChromeAfterSeekUntil = 0;
-
-		if (!remountViewer || !book || !embedPdfProgressReady) return;
-
-		clearEmbedPdfRestoreTimers();
-		embedPdfScroll = null;
-		embedPdfViewerReady = false;
-		embedPdfInitialPage = currentPage;
-		embedPdfRestoringInitialPage = currentPage > 1;
-		pdfResumeToken += 1;
 	}
 
 	function handleReaderVisibilityChange() {
@@ -512,7 +505,9 @@
 
 		if (wasPageInterrupted) {
 			wasPageInterrupted = false;
-			recoverInterruptedPdfGesture(true);
+			if (embedPdfRestoringInitialPage) {
+				restoreEmbedPdfSavedPage();
+			}
 		}
 	}
 
@@ -524,13 +519,17 @@
 	function handleReaderWindowFocus() {
 		if (!wasPageInterrupted || document.visibilityState === 'hidden') return;
 		wasPageInterrupted = false;
-		recoverInterruptedPdfGesture(true);
+		if (embedPdfRestoringInitialPage) {
+			restoreEmbedPdfSavedPage();
+		}
 	}
 
 	function handleReaderPageShow(event: PageTransitionEvent) {
 		if (!wasPageInterrupted && !event.persisted) return;
 		wasPageInterrupted = false;
-		recoverInterruptedPdfGesture(true);
+		if (embedPdfRestoringInitialPage) {
+			restoreEmbedPdfSavedPage();
+		}
 	}
 
 	function handleProgressBarKeydown(e: KeyboardEvent) {
@@ -685,7 +684,7 @@
 		if (!book) return;
 		if (!progressLoaded || !embedPdfProgressReady || embedPdfRestoringInitialPage) return;
 		clearProgressSaveTimer();
-		const percent = numPages > 0 ? (currentPage / numPages) * 100 : 0;
+		const percent = numPages > 0 ? (currentPage / numPages) * 100 : (savedProgress?.percent ?? 0);
 		const timeout = createFetchTimeout(timeoutMs);
 		try {
 			const res = await fetch(`/api/books/${book.id}/progress`, {
@@ -719,7 +718,6 @@
 		if (embedPdfRestoringInitialPage && pageNum !== embedPdfInitialPage) {
 			if (total && total > 0 && total !== numPages) {
 				numPages = total;
-				restoreEmbedPdfSavedPage();
 			}
 			return;
 		}
@@ -767,6 +765,7 @@
 		if (retryable && pdfLoadRetryAttempts < 1) {
 			pdfLoadRetryAttempts += 1;
 			embedPdfViewerReady = false;
+			clearEmbedPdfRestoreTimers();
 			error = '';
 			pdfLoadRetryToken = Date.now();
 			return;
@@ -793,7 +792,10 @@
 					book = await res.json();
 					numPages = book.page_count || 0;
 					await fetchProgress();
-					if (!savedProgress?.page && savedProgress?.percent > 0 && numPages <= 0) {
+					if (
+						numPages <= 0 &&
+						(savedProgress?.page > 0 || savedProgress?.percent > 0)
+					) {
 						await fetchPdfPageCount();
 					}
 					currentPage = getSavedProgressPage();
@@ -928,7 +930,7 @@
 				</div>
 			{:else if book && embedPdfProgressReady}
 				<div class="embedpdf-viewer-container">
-					{#key `${book.id}:${requestedFormat}:${pdfLoadRetryToken}:${pdfResumeToken}`}
+					{#key `${book.id}:${requestedFormat}:${pdfLoadRetryToken}`}
 					<EmbedPDFViewer
 						src={getPdfSourceUrl()}
 						title={getPdfDisplayTitle()}
@@ -1171,7 +1173,7 @@
 		width: var(--embedpdf-shell-control-size);
 		height: var(--embedpdf-shell-control-size);
 		border: none;
-		background: color-mix(in srgb, var(--color-surface-base, #0f172a) 92%, transparent);
+		background: transparent;
 		color: var(--color-surface-text, #e2e8f0);
 		cursor: pointer;
 		text-decoration: none;
@@ -1204,8 +1206,8 @@
 		justify-content: center;
 		min-width: 0;
 		padding: 0 14px;
-		border-bottom: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
-		background: var(--color-surface-base, #0f172a);
+		border-bottom: 1px solid transparent;
+		background: transparent;
 		color: var(--color-surface-text, #e2e8f0);
 		font-size: 14px;
 		font-weight: 600;
