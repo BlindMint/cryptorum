@@ -550,7 +550,7 @@ func (s *Scanner) processFileWithInfo(
 
 func repairsExtractedMetadata(ext string) bool {
 	switch ext {
-	case "pdf", "mobi", "azw3", "mp3", "m4a", "m4b", "flac", "ogg", "wav":
+	case "pdf", "cbz", "cbr", "cb7", "mobi", "azw3", "mp3", "m4a", "m4b", "flac", "ogg", "wav":
 		return true
 	default:
 		return false

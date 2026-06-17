@@ -3,6 +3,7 @@ package metadata
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -14,10 +15,12 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // BookMetadata represents extracted book metadata
@@ -571,22 +574,42 @@ func isDigits(value string) bool {
 
 // CBX (comic book archive) metadata extraction
 type comicInfoXML struct {
-	XMLName   xml.Name `xml:"ComicInfo"`
-	Title     string   `xml:"Title"`
-	Series    string   `xml:"Series"`
-	Summary   string   `xml:"Summary"`
-	Writer    string   `xml:"Writer"`
-	Publisher string   `xml:"Publisher"`
-	Genre     string   `xml:"Genre"`
-	Year      int      `xml:"Year"`
-	Month     int      `xml:"Month"`
-	Number    string   `xml:"Number"`
+	XMLName   xml.Name           `xml:"ComicInfo"`
+	Title     string             `xml:"Title"`
+	Series    string             `xml:"Series"`
+	Summary   string             `xml:"Summary"`
+	Writer    string             `xml:"Writer"`
+	Publisher string             `xml:"Publisher"`
+	Genre     string             `xml:"Genre"`
+	Year      int                `xml:"Year"`
+	Month     int                `xml:"Month"`
+	Number    string             `xml:"Number"`
+	Pages     []comicInfoPageXML `xml:"Pages>Page"`
+}
+
+type comicInfoPageXML struct {
+	Image int    `xml:"Image,attr"`
+	Type  string `xml:"Type,attr"`
+}
+
+type comicArchiveEntry struct {
+	Name string
+}
+
+type comicArchiveCommand struct {
+	name        string
+	listArgs    func(filePath string) []string
+	extractArgs func(filePath string, entryName string) []string
 }
 
 func extractCBXMetadata(filePath string) (*BookMetadata, error) {
-	metadata := &BookMetadata{
-		Authors: []string{},
-		Genres:  []string{},
+	metadata := extractFromFilename(filePath)
+	metadata.Source = "cbx"
+	if metadata.Authors == nil {
+		metadata.Authors = []string{}
+	}
+	if metadata.Genres == nil {
+		metadata.Genres = []string{}
 	}
 
 	ext := strings.ToLower(filepath.Ext(filePath))
@@ -604,8 +627,9 @@ func extractCBXMetadata(filePath string) (*BookMetadata, error) {
 		metadata.PageCount = len(imageFiles)
 
 		// Look for ComicInfo.xml
+		var comicInfo comicInfoXML
 		for _, f := range reader.File {
-			if strings.EqualFold(f.Name, "ComicInfo.xml") {
+			if strings.EqualFold(archiveEntryBaseName(f.Name), "ComicInfo.xml") {
 				rc, err := f.Open()
 				if err != nil {
 					break
@@ -616,41 +640,24 @@ func extractCBXMetadata(filePath string) (*BookMetadata, error) {
 					break
 				}
 
-				var comicInfo comicInfoXML
 				if err := xml.Unmarshal(data, &comicInfo); err == nil {
-					if comicInfo.Title != "" {
-						metadata.Title = comicInfo.Title
-					}
-					if comicInfo.Series != "" {
-						metadata.Series = comicInfo.Series
-					}
-					if comicInfo.Summary != "" {
-						metadata.Description = comicInfo.Summary
-					}
-					if comicInfo.Writer != "" {
-						metadata.Authors = append(metadata.Authors, comicInfo.Writer)
-					}
-					if comicInfo.Publisher != "" {
-						metadata.Publisher = comicInfo.Publisher
-					}
-					if comicInfo.Genre != "" {
-						metadata.Genres = append(metadata.Genres, strings.Split(comicInfo.Genre, ",")...)
-					}
+					applyComicInfoMetadata(metadata, comicInfo)
 				}
 				break
 			}
 		}
 
-		metadata.CoverData = extractFirstZipImage(imageFiles)
+		metadata.CoverData = extractBestZipComicCover(imageFiles, comicInfo)
 
-	case ".cbr":
-		// RAR archive - would need rardecode library
-		// For now, just use filename
-		metadata = extractFromFilename(filePath)
-
-	case ".cb7":
-		// 7z archive - not supported in pure Go easily
-		metadata = extractFromFilename(filePath)
+	case ".cbr", ".cb7":
+		entries, command, err := listExternalComicArchive(filePath, ext)
+		if err == nil {
+			imageEntries := comicImageEntries(entries)
+			metadata.PageCount = len(imageEntries)
+			comicInfo := extractExternalComicInfo(filePath, ext, command, entries)
+			applyComicInfoMetadata(metadata, comicInfo)
+			metadata.CoverData = extractBestExternalComicCover(filePath, ext, command, imageEntries, comicInfo)
+		}
 	}
 
 	if !isRenderableCoverData(metadata.CoverData) {
@@ -672,18 +679,51 @@ func isImageFile(filename string) bool {
 func zipImageFiles(reader *zip.ReadCloser) []*zip.File {
 	files := make([]*zip.File, 0, len(reader.File))
 	for _, f := range reader.File {
-		if isImageFile(f.Name) && !strings.Contains(f.Name, "__") {
+		if !f.FileInfo().IsDir() && isImageFile(f.Name) && !isIgnoredArchiveEntryName(f.Name) {
 			files = append(files, f)
 		}
 	}
 	sort.Slice(files, func(i, j int) bool {
-		return strings.ToLower(files[i].Name) < strings.ToLower(files[j].Name)
+		return naturalCompareArchiveNames(files[i].Name, files[j].Name) < 0
 	})
 	return files
 }
 
-func extractFirstZipImage(files []*zip.File) []byte {
-	for _, f := range files {
+func applyComicInfoMetadata(metadata *BookMetadata, comicInfo comicInfoXML) {
+	if comicInfo.Title != "" {
+		metadata.Title = strings.TrimSpace(comicInfo.Title)
+	}
+	if comicInfo.Series != "" {
+		metadata.Series = strings.TrimSpace(comicInfo.Series)
+	}
+	if comicInfo.Summary != "" {
+		metadata.Description = strings.TrimSpace(comicInfo.Summary)
+	}
+	if comicInfo.Writer != "" {
+		metadata.Authors = cleanStringList(strings.Split(comicInfo.Writer, ","))
+	}
+	if comicInfo.Publisher != "" {
+		metadata.Publisher = strings.TrimSpace(comicInfo.Publisher)
+	}
+	if comicInfo.Genre != "" {
+		metadata.Genres = cleanStringList(strings.Split(comicInfo.Genre, ","))
+	}
+	if comicInfo.Year > 0 && metadata.PubDate == "" {
+		if comicInfo.Month >= 1 && comicInfo.Month <= 12 {
+			metadata.PubDate = fmt.Sprintf("%04d-%02d", comicInfo.Year, comicInfo.Month)
+		} else {
+			metadata.PubDate = strconv.Itoa(comicInfo.Year)
+		}
+	}
+	if comicInfo.Number != "" && metadata.SeriesNumber == 0 {
+		if number, err := strconv.ParseFloat(strings.TrimSpace(comicInfo.Number), 64); err == nil {
+			metadata.SeriesNumber = number
+		}
+	}
+}
+
+func extractBestZipComicCover(files []*zip.File, comicInfo comicInfoXML) []byte {
+	for _, f := range selectZipComicCoverCandidates(files, comicInfo) {
 		rc, err := f.Open()
 		if err != nil {
 			continue
@@ -694,8 +734,413 @@ func extractFirstZipImage(files []*zip.File) []byte {
 			return data
 		}
 	}
-
 	return nil
+}
+
+func selectZipComicCoverCandidates(files []*zip.File, comicInfo comicInfoXML) []*zip.File {
+	candidates := []*zip.File{}
+	seen := map[*zip.File]bool{}
+
+	add := func(f *zip.File) {
+		if f != nil && !seen[f] {
+			seen[f] = true
+			candidates = append(candidates, f)
+		}
+	}
+
+	for _, page := range comicInfo.Pages {
+		if isComicCoverPageType(page.Type) && page.Image >= 0 && page.Image < len(files) {
+			add(files[page.Image])
+		}
+	}
+
+	for _, f := range namedZipComicCoverCandidates(files) {
+		add(f)
+	}
+
+	for _, f := range files {
+		add(f)
+	}
+
+	return candidates
+}
+
+func namedZipComicCoverCandidates(files []*zip.File) []*zip.File {
+	type candidate struct {
+		file     *zip.File
+		priority int
+	}
+
+	candidates := []candidate{}
+	for _, f := range files {
+		if priority := archiveCoverNamePriority(f.Name); priority < 100 {
+			candidates = append(candidates, candidate{file: f, priority: priority})
+		}
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].priority != candidates[j].priority {
+			return candidates[i].priority < candidates[j].priority
+		}
+		return naturalCompareArchiveNames(candidates[i].file.Name, candidates[j].file.Name) < 0
+	})
+
+	out := make([]*zip.File, 0, len(candidates))
+	for _, candidate := range candidates {
+		out = append(out, candidate.file)
+	}
+	return out
+}
+
+func listExternalComicArchive(filePath, ext string) ([]comicArchiveEntry, comicArchiveCommand, error) {
+	commands := externalComicArchiveCommands(ext)
+	var lastErr error
+
+	for _, command := range commands {
+		if _, err := exec.LookPath(command.name); err != nil {
+			lastErr = err
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		output, err := exec.CommandContext(ctx, command.name, command.listArgs(filePath)...).CombinedOutput()
+		cancel()
+		if err != nil {
+			lastErr = fmt.Errorf("%s failed to list comic archive: %w: %s", command.name, err, strings.TrimSpace(string(output)))
+			continue
+		}
+
+		entries := parseExternalComicArchiveList(command.name, string(output))
+		if len(comicImageEntries(entries)) == 0 {
+			lastErr = fmt.Errorf("%s found no image pages in comic archive", command.name)
+			continue
+		}
+
+		return entries, command, nil
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no supported comic extraction tool found")
+	}
+	return nil, comicArchiveCommand{}, lastErr
+}
+
+func externalComicArchiveCommands(ext string) []comicArchiveCommand {
+	commands := []comicArchiveCommand{}
+	if ext == ".cbr" {
+		commands = append(commands, comicArchiveCommand{
+			name: "unrar",
+			listArgs: func(filePath string) []string {
+				return []string{"lb", "-c-", "--", filePath}
+			},
+			extractArgs: func(filePath string, entryName string) []string {
+				return []string{"p", "-inul", "-c-", "--", filePath, entryName}
+			},
+		})
+	}
+
+	commands = append(commands,
+		comicArchiveCommand{
+			name: "7z",
+			listArgs: func(filePath string) []string {
+				return []string{"l", "-slt", "--", filePath}
+			},
+			extractArgs: func(filePath string, entryName string) []string {
+				return []string{"x", "-so", "-bd", "-y", "--", filePath, entryName}
+			},
+		},
+		comicArchiveCommand{
+			name: "bsdtar",
+			listArgs: func(filePath string) []string {
+				return []string{"-tf", filePath}
+			},
+			extractArgs: func(filePath string, entryName string) []string {
+				return []string{"-xOf", filePath, entryName}
+			},
+		},
+	)
+
+	return commands
+}
+
+func parseExternalComicArchiveList(toolName, output string) []comicArchiveEntry {
+	names := []string{}
+	if toolName == "7z" {
+		for _, line := range strings.Split(output, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "Path = ") {
+				names = append(names, strings.TrimSpace(strings.TrimPrefix(line, "Path = ")))
+			}
+		}
+	} else {
+		for _, line := range strings.Split(output, "\n") {
+			names = append(names, strings.TrimSpace(line))
+		}
+	}
+
+	entries := make([]comicArchiveEntry, 0, len(names))
+	for _, name := range names {
+		if name == "" || name == "." || strings.HasSuffix(name, "/") || strings.HasSuffix(name, "\\") || isIgnoredArchiveEntryName(name) {
+			continue
+		}
+		if isImageFile(name) {
+			entries = append(entries, comicArchiveEntry{Name: name})
+			continue
+		}
+		if strings.EqualFold(archiveEntryBaseName(name), "ComicInfo.xml") {
+			entries = append(entries, comicArchiveEntry{Name: name})
+		}
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return naturalCompareArchiveNames(entries[i].Name, entries[j].Name) < 0
+	})
+
+	return entries
+}
+
+func comicImageEntries(entries []comicArchiveEntry) []comicArchiveEntry {
+	images := make([]comicArchiveEntry, 0, len(entries))
+	for _, entry := range entries {
+		if isImageFile(entry.Name) {
+			images = append(images, entry)
+		}
+	}
+	sort.Slice(images, func(i, j int) bool {
+		return naturalCompareArchiveNames(images[i].Name, images[j].Name) < 0
+	})
+	return images
+}
+
+func extractExternalComicInfo(filePath, ext string, preferredCommand comicArchiveCommand, entries []comicArchiveEntry) comicInfoXML {
+	for _, entry := range entries {
+		if !strings.EqualFold(archiveEntryBaseName(entry.Name), "ComicInfo.xml") {
+			continue
+		}
+		for _, command := range orderedExternalComicArchiveCommands(ext, preferredCommand) {
+			if _, err := exec.LookPath(command.name); err != nil {
+				continue
+			}
+			data, err := extractExternalComicArchiveEntry(filePath, command, entry.Name)
+			if err != nil {
+				continue
+			}
+			var comicInfo comicInfoXML
+			if err := xml.Unmarshal(data, &comicInfo); err == nil {
+				return comicInfo
+			}
+		}
+	}
+	return comicInfoXML{}
+}
+
+func extractBestExternalComicCover(filePath, ext string, preferredCommand comicArchiveCommand, imageEntries []comicArchiveEntry, comicInfo comicInfoXML) []byte {
+	commands := orderedExternalComicArchiveCommands(ext, preferredCommand)
+	for _, entry := range selectExternalComicCoverCandidates(imageEntries, comicInfo) {
+		for _, command := range commands {
+			if _, err := exec.LookPath(command.name); err != nil {
+				continue
+			}
+			data, err := extractExternalComicArchiveEntry(filePath, command, entry.Name)
+			if err == nil && isRenderableCoverData(data) {
+				return data
+			}
+		}
+	}
+	return nil
+}
+
+func orderedExternalComicArchiveCommands(ext string, preferred comicArchiveCommand) []comicArchiveCommand {
+	commands := []comicArchiveCommand{}
+	if preferred.name != "" {
+		commands = append(commands, preferred)
+	}
+	for _, command := range externalComicArchiveCommands(ext) {
+		if command.name != preferred.name {
+			commands = append(commands, command)
+		}
+	}
+	return commands
+}
+
+func extractExternalComicArchiveEntry(filePath string, command comicArchiveCommand, entryName string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, command.name, command.extractArgs(filePath, entryName)...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	data, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("%s failed to extract %s: %w: %s", command.name, entryName, err, strings.TrimSpace(stderr.String()))
+	}
+	return data, nil
+}
+
+func selectExternalComicCoverCandidates(entries []comicArchiveEntry, comicInfo comicInfoXML) []comicArchiveEntry {
+	candidates := []comicArchiveEntry{}
+	seen := map[string]bool{}
+
+	add := func(entry comicArchiveEntry) {
+		key := strings.ToLower(entry.Name)
+		if entry.Name != "" && !seen[key] {
+			seen[key] = true
+			candidates = append(candidates, entry)
+		}
+	}
+
+	for _, page := range comicInfo.Pages {
+		if isComicCoverPageType(page.Type) && page.Image >= 0 && page.Image < len(entries) {
+			add(entries[page.Image])
+		}
+	}
+
+	for _, entry := range namedExternalComicCoverCandidates(entries) {
+		add(entry)
+	}
+
+	for _, entry := range entries {
+		add(entry)
+	}
+
+	return candidates
+}
+
+func namedExternalComicCoverCandidates(entries []comicArchiveEntry) []comicArchiveEntry {
+	type candidate struct {
+		entry    comicArchiveEntry
+		priority int
+	}
+
+	candidates := []candidate{}
+	for _, entry := range entries {
+		if priority := archiveCoverNamePriority(entry.Name); priority < 100 {
+			candidates = append(candidates, candidate{entry: entry, priority: priority})
+		}
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].priority != candidates[j].priority {
+			return candidates[i].priority < candidates[j].priority
+		}
+		return naturalCompareArchiveNames(candidates[i].entry.Name, candidates[j].entry.Name) < 0
+	})
+
+	out := make([]comicArchiveEntry, 0, len(candidates))
+	for _, candidate := range candidates {
+		out = append(out, candidate.entry)
+	}
+	return out
+}
+
+func isComicCoverPageType(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	return normalized == "frontcover" || normalized == "front cover" || normalized == "cover"
+}
+
+func archiveCoverNamePriority(name string) int {
+	base := strings.ToLower(strings.TrimSuffix(archiveEntryBaseName(name), filepath.Ext(name)))
+	switch base {
+	case "cover":
+		return 0
+	case "front", "frontcover", "front_cover", "folder", "poster":
+		return 5
+	case "thumbnail", "thumb":
+		return 20
+	default:
+		if strings.Contains(base, "frontcover") || strings.Contains(base, "front_cover") {
+			return 10
+		}
+		if strings.Contains(base, "cover") {
+			return 15
+		}
+		if strings.Contains(base, "front") || strings.Contains(base, "folder") {
+			return 25
+		}
+	}
+	return 100
+}
+
+func isIgnoredArchiveEntryName(name string) bool {
+	normalized := strings.ReplaceAll(name, "\\", "/")
+	if strings.HasPrefix(normalized, "__MACOSX/") || strings.Contains(normalized, "/__MACOSX/") {
+		return true
+	}
+	for _, part := range strings.Split(normalized, "/") {
+		if part == "" {
+			continue
+		}
+		if strings.HasPrefix(part, ".") {
+			return true
+		}
+	}
+	return false
+}
+
+func archiveEntryBaseName(name string) string {
+	return path.Base(strings.ReplaceAll(name, "\\", "/"))
+}
+
+func naturalCompareArchiveNames(a, b string) int {
+	a = strings.ToLower(strings.ReplaceAll(a, "\\", "/"))
+	b = strings.ToLower(strings.ReplaceAll(b, "\\", "/"))
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		aDigit := a[i] >= '0' && a[i] <= '9'
+		bDigit := b[j] >= '0' && b[j] <= '9'
+		if aDigit && bDigit {
+			iStart, jStart := i, j
+			for i < len(a) && a[i] >= '0' && a[i] <= '9' {
+				i++
+			}
+			for j < len(b) && b[j] >= '0' && b[j] <= '9' {
+				j++
+			}
+			aNum := strings.TrimLeft(a[iStart:i], "0")
+			bNum := strings.TrimLeft(b[jStart:j], "0")
+			if aNum == "" {
+				aNum = "0"
+			}
+			if bNum == "" {
+				bNum = "0"
+			}
+			if len(aNum) != len(bNum) {
+				if len(aNum) < len(bNum) {
+					return -1
+				}
+				return 1
+			}
+			if aNum != bNum {
+				if aNum < bNum {
+					return -1
+				}
+				return 1
+			}
+			if (i - iStart) != (j - jStart) {
+				if (i - iStart) < (j - jStart) {
+					return -1
+				}
+				return 1
+			}
+			continue
+		}
+
+		if a[i] != b[j] {
+			if a[i] < b[j] {
+				return -1
+			}
+			return 1
+		}
+		i++
+		j++
+	}
+	if len(a) == len(b) {
+		return 0
+	}
+	if len(a) < len(b) {
+		return -1
+	}
+	return 1
 }
 
 func findFolderCoverImage(filePath string) []byte {

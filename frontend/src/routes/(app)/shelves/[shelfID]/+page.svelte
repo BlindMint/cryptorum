@@ -260,12 +260,12 @@
 						tabindex="0"
 					>
 						<a href="/book/{book.id}" class="block" onclick={saveRouteScrollPosition}>
-							<div class="relative">
+							<div class="relative mb-2 overflow-hidden rounded-lg">
 								<BookCoverFrame
 									src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
 									alt={book.title}
 									mode="cover"
-									frameClass="aspect-[2/3] mb-2"
+									frameClass="aspect-[2/3]"
 									imageClass="group-hover:scale-105 transition-transform"
 									placeholderSize="md"
 								/>

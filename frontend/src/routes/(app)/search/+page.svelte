@@ -916,20 +916,20 @@
 							tabindex="0"
 						>
 							<a href="/book/{book.id}" class="block" onclick={saveRouteScrollPosition}>
-								<div class="relative">
+								<div class="relative mb-2 overflow-hidden rounded-lg">
 									<BookCoverFrame
 										src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
 										alt={book.title}
 										mode="cover"
-										frameClass="aspect-[2/3] mb-2"
+										frameClass="aspect-[2/3]"
 										imageClass="group-hover:scale-105 transition-transform"
 										placeholderSize="md"
 									/>
 									{#if book.status === 'reading' || book.status === 'finished'}
-										<span class="absolute bottom-4 right-2 z-10 h-2.5 w-2.5 rounded-full border border-black/30 bg-[var(--color-primary-500)] shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></span>
+										<span class="absolute bottom-2 right-2 z-10 h-2.5 w-2.5 rounded-full border border-black/30 bg-[var(--color-primary-500)] shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></span>
 									{/if}
 									{#if book.opened && book.percent > 0}
-										<div class="absolute bottom-1.5 left-0 right-0 z-10 h-1 bg-slate-700">
+										<div class="absolute bottom-0 left-0 right-0 z-10 h-1 bg-slate-700">
 											<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
 										</div>
 									{/if}
