@@ -1,5 +1,6 @@
 import { writable, derived } from 'svelte/store';
 import { browser } from '$app/environment';
+import { isAudioFormat, SUPPORTED_AUDIO_FORMATS } from '$lib/utils/book-formats';
 
 const READER_SETTINGS_VERSION = 5;
 const READER_SETTINGS_VERSION_KEY = 'readerSettingsVersion';
@@ -624,12 +625,12 @@ export const supportedReaderFormats = {
 	epub: ['epub', 'mobi', 'azw', 'azw3', 'cbz', 'cbr', 'cbt'],
 	pdf: ['pdf'],
 	cbx: ['cbz', 'cbr', 'cb7', 'cbt'],
-	audio: ['mp3', 'm4b', 'm4a', 'opus', 'ogg', 'aac']
+	audio: [...SUPPORTED_AUDIO_FORMATS]
 };
 
-export function getReaderTypeForFormat(format: string): 'epub' | 'pdf' | 'cbx' | 'audio' | 'epub' {
+export function getReaderTypeForFormat(format: string): 'epub' | 'pdf' | 'cbx' | 'audio' {
 	const f = format.toLowerCase();
-	if (['mp3', 'm4b', 'm4a', 'opus', 'ogg', 'aac'].includes(f)) return 'audio';
+	if (isAudioFormat(f)) return 'audio';
 	if (['pdf'].includes(f)) return 'pdf';
 	if (['cbz', 'cbr', 'cb7', 'cbt'].includes(f)) return 'cbx';
 	return 'epub';

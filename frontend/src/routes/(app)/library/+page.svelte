@@ -2,9 +2,9 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { gridSize, showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { appActivity, gridSize, showFormatOnCover, getFormatColor } from '$lib/stores';
 	import { getCoverThumbUrl, getLibraryCoverThumbSize } from '$lib/utils/covers';
-	import { getBookReaderHref } from '$lib/utils/book-formats';
+	import { getBookReaderHref, isAudioFormat } from '$lib/utils/book-formats';
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
@@ -466,12 +466,26 @@
 	async function scanLibrary() {
 		scanning = true;
 		scanMessage = 'Scanning...';
+		const pendingJob = appActivity.startPendingJob({
+			job_type: 'library_scan',
+			title: libraryFilter ? `Scan library: ${libraryName || 'Library'}` : 'Scan libraries',
+			payload: libraryFilter ? { library_id: Number(libraryFilter), library_name: libraryName || undefined } : {}
+		});
 		try {
 			const res = libraryFilter
 				? await fetch(`/api/libraries/${libraryFilter}/scan`, { method: 'POST' })
 				: await fetch('/api/scan', { method: 'POST' });
 			const data = await res.json().catch(() => ({}));
 			if (res.ok) {
+				const jobIds = libraryFilter
+					? [data.job_id].filter(Boolean)
+					: [...(data.queued_jobs ?? []), ...(data.existing_jobs ?? [])];
+				if (jobIds.length > 0) {
+					appActivity.confirmPendingJob(pendingJob, jobIds);
+				} else {
+					appActivity.removePendingJob(pendingJob);
+				}
+				await appActivity.refresh();
 				scanMessage = 'Scan started. Updating automatically...';
 				setTimeout(async () => {
  					await fetchBooks(true);
@@ -479,10 +493,12 @@
  					scanning = false;
  				}, 5000);
  			} else {
+				appActivity.failPendingJob(pendingJob, 'Unable to queue library scan.');
  				scanMessage = `Scan failed: ${data.error || 'Unknown error'}`;
  				scanning = false;
  			}
  		} catch (e) {
+			appActivity.failPendingJob(pendingJob, 'Unable to queue library scan.');
  			scanMessage = 'Scan failed. Check console for details.';
  			scanning = false;
  		}
@@ -617,10 +633,12 @@
     }
 
 	function getReaderUrl(book: any): string {
-		if (book.format === 'pdf') return getBookReaderHref(book.id, book.format, '/library');
-		if (['cbz', 'cbr', 'cb7', 'cbt'].includes(book.format)) return `/reader/cbx/${book.id}`;
-		if (['mp3', 'm4a', 'm4b', 'flac', 'ogg', 'wav'].includes(book.format)) return `/reader/audio/${book.id}`;
-		return `/reader/epub/${book.id}`;
+		return getBookReaderHref(book.id, book.format, '/library');
+	}
+
+	function getReaderActionLabel(book: any): string {
+		const title = book.title || 'book';
+		return isAudioFormat(book.format) ? `Play audio for ${title}` : `Read ${title}`;
 	}
 
 	function isTouchLike(): boolean {
@@ -837,6 +855,12 @@
 		if (selectedBooks.size === 0 || metadataLookupQueueing) return;
 		showMetadataMenu = false;
 		metadataLookupQueueing = true;
+		const selectedCount = selectedBooks.size;
+		const pendingJob = appActivity.startPendingJob({
+			job_type: 'metadata_lookup',
+			title: `Bulk metadata lookup (${selectedCount} books)`,
+			total_items: selectedCount
+		});
 		try {
 			const res = await fetch('/api/jobs/metadata-lookup', {
 				method: 'POST',
@@ -847,9 +871,12 @@
 				throw new Error(await res.text());
 			}
 			metadataLookupJob = await res.json();
+			appActivity.confirmPendingJob(pendingJob, metadataLookupJob);
+			await appActivity.refresh();
 			showBulkMetadataReview = true;
 		} catch (error) {
 			console.error('Failed to queue metadata lookup:', error);
+			appActivity.failPendingJob(pendingJob, 'Unable to queue metadata lookup.');
 		} finally {
 			metadataLookupQueueing = false;
 		}
@@ -1520,6 +1547,7 @@
 								<BookCoverFrame
 									src={book.cover_path ? getCoverThumbUrl(book.id, libraryCoverThumbSize, book.cover_updated_on) : null}
 									alt={book.title}
+									format={book.format}
 									mode="cover"
 									frameClass="aspect-[2/3]"
 									imageClass="group-hover:scale-105 transition-transform"
@@ -1549,13 +1577,13 @@
 										</svg>
 									</a>
 									{#if bulkSelectMode}
-										<button type="button" class="cover-action-button bottom-action opacity-45 cursor-not-allowed" aria-label="Reading is disabled during bulk selection" onclick={(event) => event.stopPropagation()}>
+										<button type="button" class="cover-action-button bottom-action opacity-45 cursor-not-allowed" aria-label="Opening is disabled during bulk selection" onclick={(event) => event.stopPropagation()}>
 											<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 												<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
 											</svg>
 										</button>
 									{:else}
-										<a href={getReaderUrl(book)} class="cover-action-button bottom-action" aria-label="Read {book.title || 'book'}" onclick={(event) => event.stopPropagation()}>
+										<a href={getReaderUrl(book)} class="cover-action-button bottom-action" aria-label={getReaderActionLabel(book)} onclick={(event) => event.stopPropagation()}>
 											<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 												<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
 											</svg>
@@ -1604,6 +1632,7 @@
 								<BookCoverFrame
 									src={book.cover_path ? getCoverThumbUrl(book.id, 'small', book.cover_updated_on) : null}
 									alt={book.title}
+									format={book.format}
 									mode="cover"
 									frameClass="w-12 h-16 flex-shrink-0"
 									imageClass="object-cover"

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { appActivity } from '$lib/stores';
 
 	type MetadataCandidate = {
 		provider: string;
@@ -342,6 +343,7 @@
 
 	async function applyAllSelected() {
 		applying = true;
+		let pendingJob: string | null = null;
 		try {
 			const selectedItems = targets
 				.filter((target) => target.selectedIndex >= 0 && target.results[target.selectedIndex])
@@ -363,6 +365,11 @@
 				return;
 			}
 
+			pendingJob = appActivity.startPendingJob({
+				job_type: 'metadata_apply',
+				title: `Bulk metadata update (${selectedItems.length} books)`,
+				total_items: selectedItems.length
+			});
 			const res = await fetch('/api/jobs/metadata-apply', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -374,10 +381,23 @@
 
 			if (!res.ok) {
 				const text = await res.text();
+				appActivity.failPendingJob(pendingJob, 'Unable to queue metadata update.');
 				throw new Error(text || `Queue failed (${res.status})`);
 			}
+			const job = await res.json().catch(() => null);
+			if (job?.id) {
+				appActivity.confirmPendingJob(pendingJob, job);
+			} else {
+				appActivity.confirmPendingJob(pendingJob);
+			}
+			await appActivity.refresh();
 
 			await onApplied?.();
+		} catch (error) {
+			if (pendingJob) {
+				appActivity.failPendingJob(pendingJob, 'Unable to queue metadata update.');
+			}
+			console.error('Failed to apply selected metadata:', error);
 		} finally {
 			applying = false;
 		}

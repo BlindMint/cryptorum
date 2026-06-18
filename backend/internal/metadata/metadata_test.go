@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"cryptorum/internal/coverprefs"
 )
 
 func TestExtractCBZMetadataUsesComicInfoFrontCover(t *testing.T) {
@@ -71,6 +73,66 @@ func TestExtractCBZMetadataFallsBackToFirstPage(t *testing.T) {
 	assertCoverColor(t, meta.CoverData, color.NRGBA{R: 220, A: 255})
 }
 
+func TestExtractCBZMetadataCropsWideFirstPageFallbackRight(t *testing.T) {
+	spread := splitColorPNGBytes(t, 8, 4, color.NRGBA{R: 220, A: 255}, color.NRGBA{B: 220, A: 255})
+	cbzPath := writeCBZ(t, map[string][]byte{
+		"Pages/Page 1.png": spread,
+	})
+
+	meta, err := ExtractWithOptions(cbzPath, ExtractOptions{
+		ComicSpreadFallbackSide: coverprefs.ComicSpreadFallbackRight,
+	})
+	if err != nil {
+		t.Fatalf("extract metadata: %v", err)
+	}
+	assertCoverColor(t, meta.CoverData, color.NRGBA{B: 220, A: 255})
+	assertCoverDimensions(t, meta.CoverData, 4, 4)
+}
+
+func TestExtractCBZMetadataDoesNotCropWideFallbackWithoutOption(t *testing.T) {
+	spread := splitColorPNGBytes(t, 8, 4, color.NRGBA{R: 220, A: 255}, color.NRGBA{B: 220, A: 255})
+	cbzPath := writeCBZ(t, map[string][]byte{
+		"Pages/Page 1.png": spread,
+	})
+
+	meta, err := Extract(cbzPath)
+	if err != nil {
+		t.Fatalf("extract metadata: %v", err)
+	}
+	assertCoverDimensions(t, meta.CoverData, 8, 4)
+}
+
+func TestExtractCBZMetadataCropsWideFirstPageFallbackLeft(t *testing.T) {
+	spread := splitColorPNGBytes(t, 8, 4, color.NRGBA{R: 220, A: 255}, color.NRGBA{B: 220, A: 255})
+	cbzPath := writeCBZ(t, map[string][]byte{
+		"Pages/Page 1.png": spread,
+	})
+
+	meta, err := ExtractWithOptions(cbzPath, ExtractOptions{
+		ComicSpreadFallbackSide: coverprefs.ComicSpreadFallbackLeft,
+	})
+	if err != nil {
+		t.Fatalf("extract metadata: %v", err)
+	}
+	assertCoverColor(t, meta.CoverData, color.NRGBA{R: 220, A: 255})
+	assertCoverDimensions(t, meta.CoverData, 4, 4)
+}
+
+func TestExtractCBZMetadataDoesNotCropNamedWideCover(t *testing.T) {
+	spread := splitColorPNGBytes(t, 8, 4, color.NRGBA{R: 220, A: 255}, color.NRGBA{B: 220, A: 255})
+	cbzPath := writeCBZ(t, map[string][]byte{
+		"Pages/front_cover.png": spread,
+	})
+
+	meta, err := ExtractWithOptions(cbzPath, ExtractOptions{
+		ComicSpreadFallbackSide: coverprefs.ComicSpreadFallbackRight,
+	})
+	if err != nil {
+		t.Fatalf("extract metadata: %v", err)
+	}
+	assertCoverDimensions(t, meta.CoverData, 8, 4)
+}
+
 func pngBytes(t *testing.T, c color.NRGBA) []byte {
 	t.Helper()
 
@@ -84,6 +146,27 @@ func pngBytes(t *testing.T, c color.NRGBA) []byte {
 	var out bytes.Buffer
 	if err := png.Encode(&out, img); err != nil {
 		t.Fatalf("encode png: %v", err)
+	}
+	return out.Bytes()
+}
+
+func splitColorPNGBytes(t *testing.T, width, height int, left, right color.NRGBA) []byte {
+	t.Helper()
+
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			if x < width/2 {
+				img.SetNRGBA(x, y, left)
+			} else {
+				img.SetNRGBA(x, y, right)
+			}
+		}
+	}
+
+	var out bytes.Buffer
+	if err := png.Encode(&out, img); err != nil {
+		t.Fatalf("encode split png: %v", err)
 	}
 	return out.Bytes()
 }
@@ -128,5 +211,16 @@ func assertCoverColor(t *testing.T, data []byte, expected color.NRGBA) {
 	got := color.NRGBAModel.Convert(img.At(0, 0)).(color.NRGBA)
 	if got != expected {
 		t.Fatalf("expected cover color %+v, got %+v", expected, got)
+	}
+}
+
+func assertCoverDimensions(t *testing.T, data []byte, width, height int) {
+	t.Helper()
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode cover config: %v", err)
+	}
+	if cfg.Width != width || cfg.Height != height {
+		t.Fatalf("expected cover dimensions %dx%d, got %dx%d", width, height, cfg.Width, cfg.Height)
 	}
 }

@@ -22,7 +22,7 @@
 		bare?: boolean;
 	}>();
 
-	const activeStatuses = ['queued', 'running', 'cancelling'];
+	const activeStatuses = ['starting', 'queued', 'running', 'cancelling'];
 
 	function isActive(status: string) {
 		return activeStatuses.includes(status);
@@ -47,6 +47,8 @@
 
 	function statusClass(status: string) {
 		switch (status) {
+			case 'starting':
+				return 'bg-[var(--color-primary-500)]/15 text-[var(--color-primary-300)] border-[var(--color-primary-500)]/30';
 			case 'completed':
 				return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
 			case 'running':

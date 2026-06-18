@@ -121,6 +121,7 @@ export type ActivityJob = {
 	failed_items: number;
 	payload?: Record<string, any>;
 	result?: Record<string, any>;
+	error?: string;
 	created_at: number;
 };
 
@@ -144,6 +145,20 @@ type ActivityState = {
 	lastUpdated: number;
 };
 
+export type PendingActivityJobInput = {
+	job_type: string;
+	title: string;
+	total_items?: number;
+	payload?: Record<string, any>;
+};
+
+type PendingActivityJob = {
+	token: string;
+	job: ActivityJob;
+	expectedJobIds: number[];
+	expiresAt: number;
+};
+
 function createAppActivityStore() {
 	const initialState: ActivityState = {
 		notifications: [],
@@ -157,6 +172,8 @@ function createAppActivityStore() {
 	let initialized = false;
 	let inFlight: Promise<void> | null = null;
 	let latestState = initialState;
+	let pendingCounter = 0;
+	const pendingJobs = new Map<string, PendingActivityJob>();
 
 	subscribe((value) => {
 		latestState = value;
@@ -165,6 +182,41 @@ function createAppActivityStore() {
 	function nextInterval(): number {
 		if (!browser || document.visibilityState !== 'visible') return 30000;
 		return latestState.activeJobs.length > 0 ? 5000 : 15000;
+	}
+
+	function mergePendingJobs(activeJobs: ActivityJob[]): ActivityJob[] {
+		const now = Date.now();
+		for (const [token, pending] of pendingJobs) {
+			const matchedExpectedJob = pending.expectedJobIds.length > 0 &&
+				pending.expectedJobIds.some((id) => activeJobs.some((job) => job.id === id));
+			if (matchedExpectedJob || pending.expiresAt <= now) {
+				pendingJobs.delete(token);
+			}
+		}
+		const pending = Array.from(pendingJobs.values())
+			.sort((a, b) => b.job.created_at - a.job.created_at)
+			.map((entry) => entry.job);
+		return [...pending, ...activeJobs];
+	}
+
+	function refreshActiveJobsFromPending() {
+		update((state) => ({
+			...state,
+			activeJobs: mergePendingJobs(state.activeJobs.filter((job) => job.id > 0)),
+			lastUpdated: Date.now()
+		}));
+	}
+
+	function pendingExpiry(status: string) {
+		switch (status) {
+			case 'failed':
+				return Date.now() + 8000;
+			case 'queued':
+			case 'running':
+				return Date.now() + 15000;
+			default:
+				return Date.now() + 30000;
+		}
 	}
 
 	function schedule(delay = nextInterval()) {
@@ -199,7 +251,7 @@ function createAppActivityStore() {
 					notifications = items.filter((item) => item.source !== 'job');
 				}
 				if (jobsRes.ok) {
-					activeJobs = await jobsRes.json();
+					activeJobs = mergePendingJobs(await jobsRes.json());
 				}
 
 				set({
@@ -239,7 +291,67 @@ function createAppActivityStore() {
 			document.addEventListener('visibilitychange', handleVisibilityChange);
 			void refresh();
 		},
-		refresh
+		refresh,
+		startPendingJob: (input: PendingActivityJobInput) => {
+			const token = `pending-${Date.now()}-${++pendingCounter}`;
+			pendingJobs.set(token, {
+				token,
+				expectedJobIds: [],
+				expiresAt: pendingExpiry('starting'),
+				job: {
+					id: -pendingCounter,
+					job_type: input.job_type,
+					title: input.title,
+					status: 'starting',
+					total_items: input.total_items ?? 0,
+					completed_items: 0,
+					failed_items: 0,
+					payload: { ...(input.payload ?? {}), optimistic: true },
+					created_at: Math.floor(Date.now() / 1000)
+				}
+			});
+			refreshActiveJobsFromPending();
+			schedule(750);
+			return token;
+		},
+		confirmPendingJob: (token: string, jobOrIds?: ActivityJob | number | number[]) => {
+			const pending = pendingJobs.get(token);
+			if (!pending) return;
+			if (typeof jobOrIds === 'number') {
+				pending.expectedJobIds = [jobOrIds];
+				pending.job = { ...pending.job, id: -Math.abs(pending.job.id), status: 'queued' };
+			} else if (Array.isArray(jobOrIds)) {
+				pending.expectedJobIds = jobOrIds.filter((id) => id > 0);
+				pending.job = { ...pending.job, status: 'queued' };
+			} else if (jobOrIds) {
+				pending.expectedJobIds = [jobOrIds.id].filter((id) => id > 0);
+				pending.job = { ...pending.job, ...jobOrIds };
+			} else {
+				pending.job = { ...pending.job, status: 'queued' };
+			}
+			pending.expiresAt = pendingExpiry(pending.job.status);
+			pendingJobs.set(token, pending);
+			refreshActiveJobsFromPending();
+			schedule(250);
+		},
+		failPendingJob: (token: string, error = 'Unable to start job.') => {
+			const pending = pendingJobs.get(token);
+			if (!pending) return;
+			pending.expectedJobIds = [];
+			pending.expiresAt = pendingExpiry('failed');
+			pending.job = {
+				...pending.job,
+				status: 'failed',
+				error
+			};
+			pendingJobs.set(token, pending);
+			refreshActiveJobsFromPending();
+			schedule(5000);
+		},
+		removePendingJob: (token: string) => {
+			if (!pendingJobs.delete(token)) return;
+			refreshActiveJobsFromPending();
+		}
 	};
 }
 
@@ -254,6 +366,12 @@ export const formatColors: Record<string, { bg: string; text: string }> = {
 	mobi: { bg: '#06b6d4', text: '#ffffff' },   // cyan-500
 	azw: { bg: '#ec4899', text: '#ffffff' },    // pink-500
 	azw3: { bg: '#ec4899', text: '#ffffff' },    // pink-500
+	mp3: { bg: '#0ea5e9', text: '#ffffff' },    // sky-500
+	m4a: { bg: '#0ea5e9', text: '#ffffff' },    // sky-500
+	m4b: { bg: '#0ea5e9', text: '#ffffff' },    // sky-500
+	flac: { bg: '#0ea5e9', text: '#ffffff' },   // sky-500
+	ogg: { bg: '#0ea5e9', text: '#ffffff' },    // sky-500
+	wav: { bg: '#0ea5e9', text: '#ffffff' },    // sky-500
 	default: { bg: '#6b7280', text: '#ffffff' }  // gray-500
 };
 

@@ -19,6 +19,7 @@ import (
 
 	"cryptorum/internal/auth"
 	"cryptorum/internal/config"
+	"cryptorum/internal/coverprefs"
 	"cryptorum/internal/db"
 	"cryptorum/internal/scanner"
 )
@@ -710,30 +711,31 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type BookDetail struct {
-		ID                 int64   `json:"id"`
-		LibraryID          int64   `json:"library_id"`
-		LibraryName        string  `json:"library_name"`
-		AddedAt            int64   `json:"added_at"`
-		Title              string  `json:"title"`
-		Authors            string  `json:"authors"`
-		Series             string  `json:"series"`
-		SeriesNumber       float64 `json:"series_number"`
-		Publisher          string  `json:"publisher"`
-		PubDate            string  `json:"pub_date"`
-		Description        string  `json:"description"`
-		CoverPath          string  `json:"cover_path"`
-		CoverUpdatedOn     int64   `json:"cover_updated_on"`
-		Rating             float64 `json:"rating"`
-		Genres             string  `json:"genres"`
-		Tags               string  `json:"tags"`
-		ISBN               string  `json:"isbn"`
-		ASIN               string  `json:"asin"`
-		Language           string  `json:"language"`
-		PageCount          int     `json:"page_count"`
-		Status             string  `json:"status"`
-		Percent            float64 `json:"percent"`
-		SpeedReaderPercent float64 `json:"speed_reader_percent"`
-		Opened             bool    `json:"opened"`
+		ID                  int64   `json:"id"`
+		LibraryID           int64   `json:"library_id"`
+		LibraryName         string  `json:"library_name"`
+		AddedAt             int64   `json:"added_at"`
+		Title               string  `json:"title"`
+		Authors             string  `json:"authors"`
+		Series              string  `json:"series"`
+		SeriesNumber        float64 `json:"series_number"`
+		Publisher           string  `json:"publisher"`
+		PubDate             string  `json:"pub_date"`
+		Description         string  `json:"description"`
+		CoverPath           string  `json:"cover_path"`
+		CoverUpdatedOn      int64   `json:"cover_updated_on"`
+		Rating              float64 `json:"rating"`
+		Genres              string  `json:"genres"`
+		Tags                string  `json:"tags"`
+		ISBN                string  `json:"isbn"`
+		ASIN                string  `json:"asin"`
+		Language            string  `json:"language"`
+		PageCount           int     `json:"page_count"`
+		ComicSpreadFallback string  `json:"comic_spread_fallback"`
+		Status              string  `json:"status"`
+		Percent             float64 `json:"percent"`
+		SpeedReaderPercent  float64 `json:"speed_reader_percent"`
+		Opened              bool    `json:"opened"`
 	}
 
 	var book BookDetail
@@ -757,6 +759,7 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(bm.asin, '') as asin,
 		       COALESCE(bm.language, '') as language,
 		       COALESCE(bm.page_count, 0) as page_count,
+		       COALESCE(bm.comic_spread_fallback, 'inherit') as comic_spread_fallback,
 		       COALESCE(rp.status, 'unread') as status,
 		       COALESCE(rp.percent, 0) as percent,
 		       COALESCE(rp.speed_reader_percent, 0) as speed_reader_percent,
@@ -770,7 +773,7 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 		&book.ID, &book.LibraryID, &book.AddedAt, &book.LibraryName,
 		&book.Title, &book.Authors, &book.Series, &book.SeriesNumber,
 		&book.Publisher, &book.PubDate, &book.Description, &book.CoverPath,
-		&book.CoverUpdatedOn, &book.Rating, &book.Genres, &book.Tags, &book.ISBN, &book.ASIN, &book.Language, &book.PageCount,
+		&book.CoverUpdatedOn, &book.Rating, &book.Genres, &book.Tags, &book.ISBN, &book.ASIN, &book.Language, &book.PageCount, &book.ComicSpreadFallback,
 		&book.Status, &book.Percent, &book.SpeedReaderPercent, &opened,
 	)
 
@@ -802,21 +805,22 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Title        string   `json:"title"`
-		Authors      []string `json:"authors"`
-		Series       string   `json:"series"`
-		SeriesNumber float64  `json:"series_number"`
-		Publisher    string   `json:"publisher"`
-		PubDate      string   `json:"pub_date"`
-		Description  string   `json:"description"`
-		Rating       float64  `json:"rating"`
-		Status       string   `json:"status"`
-		Genres       []string `json:"genres"`
-		Tags         []string `json:"tags"`
-		ISBN         string   `json:"isbn"`
-		ASIN         string   `json:"asin"`
-		Language     string   `json:"language"`
-		PageCount    int      `json:"page_count"`
+		Title               string   `json:"title"`
+		Authors             []string `json:"authors"`
+		Series              string   `json:"series"`
+		SeriesNumber        float64  `json:"series_number"`
+		Publisher           string   `json:"publisher"`
+		PubDate             string   `json:"pub_date"`
+		Description         string   `json:"description"`
+		Rating              float64  `json:"rating"`
+		Status              string   `json:"status"`
+		Genres              []string `json:"genres"`
+		Tags                []string `json:"tags"`
+		ISBN                string   `json:"isbn"`
+		ASIN                string   `json:"asin"`
+		Language            string   `json:"language"`
+		PageCount           int      `json:"page_count"`
+		ComicSpreadFallback *string  `json:"comic_spread_fallback"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		errorResponse(w, http.StatusBadRequest, "Invalid request body")
@@ -826,12 +830,18 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 	authorsJSON, _ := json.Marshal(req.Authors)
 	genresJSON, _ := json.Marshal(req.Genres)
 	tagsJSON, _ := json.Marshal(req.Tags)
+	comicSpreadFallback := coverprefs.ComicSpreadFallbackInherit
+	updateComicSpreadFallback := 0
+	if req.ComicSpreadFallback != nil {
+		comicSpreadFallback = coverprefs.NormalizeComicSpreadFallback(*req.ComicSpreadFallback, true)
+		updateComicSpreadFallback = 1
+	}
 
 	// Upsert metadata
 	_, err = appDB.Exec(`
 		INSERT INTO book_metadata (book_id, title, authors, series, series_number, publisher, pub_date,
-		                           description, rating, genres, tags, isbn, asin, language, page_count, owner_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		                           description, rating, genres, tags, isbn, asin, language, page_count, comic_spread_fallback, owner_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(book_id) DO UPDATE SET
 		    title = excluded.title,
 		    authors = excluded.authors,
@@ -847,9 +857,11 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 		    asin = excluded.asin,
 		    language = excluded.language,
 		    page_count = excluded.page_count,
+		    comic_spread_fallback = CASE WHEN ? = 1 THEN excluded.comic_spread_fallback ELSE comic_spread_fallback END,
 		    owner_user_id = excluded.owner_user_id
 	`, bookID, req.Title, string(authorsJSON), req.Series, req.SeriesNumber, req.Publisher, req.PubDate,
-		req.Description, req.Rating, string(genresJSON), string(tagsJSON), req.ISBN, req.ASIN, req.Language, req.PageCount, current.ID)
+		req.Description, req.Rating, string(genresJSON), string(tagsJSON), req.ISBN, req.ASIN, req.Language, req.PageCount,
+		comicSpreadFallback, current.ID, updateComicSpreadFallback)
 
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to update book metadata")
@@ -1512,12 +1524,13 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := appDB.Query(`
 		SELECT l.id, l.name, COALESCE(l.icon, '') as icon,
 		       COALESCE(l.exclude_from_suggestions, 0) as exclude_from_suggestions,
+		       COALESCE(l.comic_spread_fallback, 'inherit') as comic_spread_fallback,
 		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL THEN b.id END) as book_count
 		FROM library l
 		LEFT JOIN book b ON l.id = b.library_id
 		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
 		WHERE `+ownerClause+`
-		GROUP BY l.id, l.name, l.icon, l.exclude_from_suggestions
+		GROUP BY l.id, l.name, l.icon, l.exclude_from_suggestions, l.comic_spread_fallback
 		ORDER BY l.name
 	`, ownerArgs...)
 	if err != nil {
@@ -1531,6 +1544,7 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 		Name                   string `json:"name"`
 		Icon                   string `json:"icon"`
 		ExcludeFromSuggestions bool   `json:"exclude_from_suggestions"`
+		ComicSpreadFallback    string `json:"comic_spread_fallback"`
 		BookCount              int64  `json:"book_count"`
 		IsImporting            bool   `json:"is_importing"`
 	}
@@ -1539,7 +1553,7 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var lib LibraryResponse
 		var excludeFromSuggestions int
-		if err := rows.Scan(&lib.ID, &lib.Name, &lib.Icon, &excludeFromSuggestions, &lib.BookCount); err != nil {
+		if err := rows.Scan(&lib.ID, &lib.Name, &lib.Icon, &excludeFromSuggestions, &lib.ComicSpreadFallback, &lib.BookCount); err != nil {
 			continue
 		}
 		lib.ExcludeFromSuggestions = excludeFromSuggestions == 1
@@ -1560,6 +1574,7 @@ func getLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		Name                   string   `json:"name"`
 		Icon                   string   `json:"icon"`
 		ExcludeFromSuggestions bool     `json:"exclude_from_suggestions"`
+		ComicSpreadFallback    string   `json:"comic_spread_fallback"`
 		BookCount              int64    `json:"book_count"`
 		Paths                  []string `json:"paths"`
 	}
@@ -1568,15 +1583,16 @@ func getLibraryHandler(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT l.id, l.name, COALESCE(l.icon, '') as icon,
 		       COALESCE(l.exclude_from_suggestions, 0) as exclude_from_suggestions,
+		       COALESCE(l.comic_spread_fallback, 'inherit') as comic_spread_fallback,
 		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL THEN b.id END) as book_count
 		FROM library l
 		LEFT JOIN book b ON l.id = b.library_id
 		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
 		WHERE l.id = ? AND ` + ownerClause + `
-		GROUP BY l.id, l.exclude_from_suggestions
+		GROUP BY l.id, l.exclude_from_suggestions, l.comic_spread_fallback
 	`
 	var excludeFromSuggestions int
-	err := appDB.QueryRow(query, append([]interface{}{libraryID}, ownerArgs...)...).Scan(&lib.ID, &lib.Name, &lib.Icon, &excludeFromSuggestions, &lib.BookCount)
+	err := appDB.QueryRow(query, append([]interface{}{libraryID}, ownerArgs...)...).Scan(&lib.ID, &lib.Name, &lib.Icon, &excludeFromSuggestions, &lib.ComicSpreadFallback, &lib.BookCount)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Library not found")
 		return
@@ -2099,6 +2115,7 @@ func createLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		Name                   string   `json:"name"`
 		Icon                   string   `json:"icon"`
 		ExcludeFromSuggestions bool     `json:"exclude_from_suggestions"`
+		ComicSpreadFallback    string   `json:"comic_spread_fallback"`
 		Paths                  []string `json:"paths"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
@@ -2119,7 +2136,8 @@ func createLibraryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	result, err := tx.Exec(`INSERT INTO library (id, name, icon, owner_user_id, exclude_from_suggestions) VALUES (?, ?, ?, ?, ?)`, libraryID, req.Name, req.Icon, current.ID, boolToInt(req.ExcludeFromSuggestions))
+	comicSpreadFallback := coverprefs.NormalizeComicSpreadFallback(req.ComicSpreadFallback, true)
+	result, err := tx.Exec(`INSERT INTO library (id, name, icon, owner_user_id, exclude_from_suggestions, comic_spread_fallback) VALUES (?, ?, ?, ?, ?, ?)`, libraryID, req.Name, req.Icon, current.ID, boolToInt(req.ExcludeFromSuggestions), comicSpreadFallback)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to create library")
 		return
@@ -2150,6 +2168,7 @@ func createLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		"name":                     req.Name,
 		"icon":                     req.Icon,
 		"exclude_from_suggestions": req.ExcludeFromSuggestions,
+		"comic_spread_fallback":    comicSpreadFallback,
 		"paths":                    req.Paths,
 		"scan_job_id":              scanJobID,
 		"scan_queued":              scanQueued,
@@ -2180,6 +2199,7 @@ func updateLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		Name                   string   `json:"name"`
 		Icon                   string   `json:"icon"`
 		ExcludeFromSuggestions bool     `json:"exclude_from_suggestions"`
+		ComicSpreadFallback    string   `json:"comic_spread_fallback"`
 		Paths                  []string `json:"paths"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
@@ -2194,7 +2214,8 @@ func updateLibraryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	_, err = tx.Exec(`UPDATE library SET name = ?, icon = ?, exclude_from_suggestions = ? WHERE id = ?`, req.Name, req.Icon, boolToInt(req.ExcludeFromSuggestions), libraryID)
+	comicSpreadFallback := coverprefs.NormalizeComicSpreadFallback(req.ComicSpreadFallback, true)
+	_, err = tx.Exec(`UPDATE library SET name = ?, icon = ?, exclude_from_suggestions = ?, comic_spread_fallback = ? WHERE id = ?`, req.Name, req.Icon, boolToInt(req.ExcludeFromSuggestions), comicSpreadFallback, libraryID)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to update library")
 		return
@@ -2920,11 +2941,13 @@ func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	// Fetch libraries from DB
 	rows, err := appDB.Query(`
 		SELECT l.id, l.name, COALESCE(l.icon, '') as icon,
+		       COALESCE(l.exclude_from_suggestions, 0) as exclude_from_suggestions,
+		       COALESCE(l.comic_spread_fallback, 'inherit') as comic_spread_fallback,
 		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL THEN b.id END) as book_count
 		FROM library l
 		LEFT JOIN book b ON l.id = b.library_id
 		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
-		GROUP BY l.id, l.name, l.icon
+		GROUP BY l.id, l.name, l.icon, l.exclude_from_suggestions, l.comic_spread_fallback
 		ORDER BY l.name
 	`)
 	if err != nil {
@@ -2934,20 +2957,24 @@ func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type LibraryResponse struct {
-		ID          int64    `json:"id"`
-		Name        string   `json:"name"`
-		Icon        string   `json:"icon"`
-		BookCount   int64    `json:"book_count"`
-		Paths       []string `json:"paths"`
-		IsImporting bool     `json:"is_importing"`
+		ID                     int64    `json:"id"`
+		Name                   string   `json:"name"`
+		Icon                   string   `json:"icon"`
+		ExcludeFromSuggestions bool     `json:"exclude_from_suggestions"`
+		ComicSpreadFallback    string   `json:"comic_spread_fallback"`
+		BookCount              int64    `json:"book_count"`
+		Paths                  []string `json:"paths"`
+		IsImporting            bool     `json:"is_importing"`
 	}
 
 	libraries := []LibraryResponse{}
 	for rows.Next() {
 		var lib LibraryResponse
-		if err := rows.Scan(&lib.ID, &lib.Name, &lib.Icon, &lib.BookCount); err != nil {
+		var excludeFromSuggestions int
+		if err := rows.Scan(&lib.ID, &lib.Name, &lib.Icon, &excludeFromSuggestions, &lib.ComicSpreadFallback, &lib.BookCount); err != nil {
 			continue
 		}
+		lib.ExcludeFromSuggestions = excludeFromSuggestions == 1
 
 		// Fetch paths
 		paths := []string{}
