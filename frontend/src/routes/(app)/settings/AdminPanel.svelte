@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { appActivity } from '$lib/stores';
 	import UsersPanel from './UsersPanel.svelte';
 
 	type BackupItem = {
@@ -105,14 +106,29 @@
 	async function createBackupNow() {
 		creatingBackup = true;
 		backupError = '';
+		const pendingJob = appActivity.startPendingJob({
+			job_type: 'database_backup',
+			title: 'Database backup',
+			total_items: 1,
+			payload: { trigger: 'manual' }
+		});
 		try {
 			const res = await fetch('/api/backups', { method: 'POST' });
 			if (!res.ok) {
+				appActivity.failPendingJob(pendingJob, 'Unable to queue backup.');
 				throw new Error('Failed to create backup');
 			}
+			const job = await res.json();
+			if (job?.id) {
+				appActivity.confirmPendingJob(pendingJob, job);
+			} else {
+				appActivity.confirmPendingJob(pendingJob);
+			}
+			await appActivity.refresh();
 			await loadBackups();
 		} catch (error) {
 			console.error('Failed to create backup:', error);
+			appActivity.failPendingJob(pendingJob, 'Unable to queue backup.');
 			backupError = 'Unable to queue backup.';
 		} finally {
 			creatingBackup = false;

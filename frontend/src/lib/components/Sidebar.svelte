@@ -11,6 +11,7 @@
 		icon: string;
 		book_count: number;
 		exclude_from_suggestions?: boolean;
+		comic_spread_fallback?: string;
 		is_importing?: boolean;
 		paths?: string[];
 	}
@@ -41,6 +42,7 @@
 		name: '',
 		icon: '',
 		exclude_from_suggestions: false,
+		comic_spread_fallback: 'inherit',
 		paths: ['']
 	});
 	let originalLibraryPaths = $state<string[]>([]);
@@ -54,6 +56,12 @@
 	const SIDEBAR_MIN_WIDTH = 240;
 	const SIDEBAR_MAX_WIDTH = 400;
 	const SIDEBAR_STORAGE_KEY = 'sidebarWidth';
+	const inheritedComicSpreadFallbackOptions = [
+		{ value: 'inherit', label: 'Inherit' },
+		{ value: 'right', label: 'Right side' },
+		{ value: 'left', label: 'Left side' },
+		{ value: 'disabled', label: 'Disabled' }
+	];
 
 	function clampSidebarWidth(width: number): number {
 		return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -184,7 +192,7 @@
 	function openLibraryModal() {
 		editingLibrary = null;
 		originalLibraryPaths = [];
-		libraryForm = { name: '', icon: '', exclude_from_suggestions: false, paths: [''] };
+		libraryForm = { name: '', icon: '', exclude_from_suggestions: false, comic_spread_fallback: 'inherit', paths: [''] };
 		showLibraryModal = true;
 	}
 
@@ -232,6 +240,7 @@
 				name: fullLibrary.name || '',
 				icon: fullLibrary.icon || '',
 				exclude_from_suggestions: !!fullLibrary.exclude_from_suggestions,
+				comic_spread_fallback: fullLibrary.comic_spread_fallback || 'inherit',
 				paths: fullLibrary.paths?.length ? [...fullLibrary.paths] : ['']
 			};
 			showLibraryModal = true;
@@ -312,19 +321,39 @@
 
 	async function scanLibrary(library: any) {
 		closeLibraryMenu();
+		const pendingJob = appActivity.startPendingJob({
+			job_type: 'library_scan',
+			title: `Scan library: ${library.name}`,
+			payload: { library_id: library.id, library_name: library.name }
+		});
 		try {
 			const response = await fetch(`/api/libraries/${library.id}/scan`, { method: 'POST' });
 			if (response.ok) {
+				const result = await response.json().catch(() => null);
+				if (result?.job_id) {
+					appActivity.confirmPendingJob(pendingJob, result.job_id);
+				} else {
+					appActivity.confirmPendingJob(pendingJob);
+				}
+				await appActivity.refresh();
 				await loadData();
+			} else {
+				appActivity.failPendingJob(pendingJob, 'Unable to queue library scan.');
 			}
 		} catch (e) {
 			console.error('Failed to scan library:', e);
+			appActivity.failPendingJob(pendingJob, 'Unable to queue library scan.');
 		}
 	}
 
 	async function regenerateLibraryCovers(library: Library | null, mode: 'all' | 'missing' = 'all') {
 		if (!library) return;
 		closeLibraryMenu();
+		const pendingJob = appActivity.startPendingJob({
+			job_type: 'cover_regenerate',
+			title: mode === 'all' ? `Regenerate covers for ${library.name}` : `Regenerate missing covers for ${library.name}`,
+			payload: { mode, library_id: library.id, library_name: library.name }
+		});
 		try {
 			const response = await fetch('/api/settings/book-covers/regenerate', {
 				method: 'POST',
@@ -332,10 +361,20 @@
 				body: JSON.stringify({ mode, library_id: library.id })
 			});
 			if (!response.ok) {
+				appActivity.failPendingJob(pendingJob, 'Unable to queue cover regeneration.');
 				console.error('Failed to queue library cover regeneration:', await response.text());
+				return;
 			}
+			const job = await response.json().catch(() => null);
+			if (job?.id) {
+				appActivity.confirmPendingJob(pendingJob, job);
+			} else {
+				appActivity.confirmPendingJob(pendingJob);
+			}
+			await appActivity.refresh();
 		} catch (e) {
 			console.error('Failed to queue library cover regeneration:', e);
+			appActivity.failPendingJob(pendingJob, 'Unable to queue cover regeneration.');
 		}
 	}
 
@@ -762,6 +801,21 @@
 							class="mt-1 h-4 w-4 shrink-0 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 						>
 					</label>
+				</div>
+
+				<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
+					<label for="sidebar-library-comic-spread-fallback" class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
+						Wide Comic Fallback Cover
+					</label>
+					<select
+						id="sidebar-library-comic-spread-fallback"
+						bind:value={libraryForm.comic_spread_fallback}
+						class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-sm text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+					>
+						{#each inheritedComicSpreadFallbackOptions as option}
+							<option value={option.value}>{option.label}</option>
+						{/each}
+					</select>
 				</div>
 
 					<div>
