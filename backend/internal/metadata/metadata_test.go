@@ -41,6 +41,42 @@ func TestExtractCBZMetadataUsesComicInfoFrontCover(t *testing.T) {
 	assertCoverColor(t, meta.CoverData, color.NRGBA{B: 220, A: 255})
 }
 
+func TestExtractCBZMetadataParsesRomanComicInfoNumber(t *testing.T) {
+	red := pngBytes(t, color.NRGBA{R: 220, A: 255})
+	cbzPath := writeCBZ(t, map[string][]byte{
+		"Pages/Page 01.png": red,
+		"ComicInfo.xml": []byte(`<ComicInfo>
+			<Title>ComicInfo Title</Title>
+			<Series>Test Series</Series>
+			<Number>IV</Number>
+		</ComicInfo>`),
+	})
+
+	meta, err := Extract(cbzPath)
+	if err != nil {
+		t.Fatalf("extract metadata: %v", err)
+	}
+	if meta.SeriesNumber != 4 {
+		t.Fatalf("expected series number 4, got %v", meta.SeriesNumber)
+	}
+	if meta.SeriesNumberDisplay != "IV" {
+		t.Fatalf("expected series number display IV, got %q", meta.SeriesNumberDisplay)
+	}
+}
+
+func TestExtractFilenameParsesRomanSeriesNumber(t *testing.T) {
+	meta := ExtractFilename(filepath.Join(t.TempDir(), "Author - Test Series IV - Title.epub"))
+	if meta.Series != "Test Series" {
+		t.Fatalf("expected series Test Series, got %q", meta.Series)
+	}
+	if meta.SeriesNumber != 4 {
+		t.Fatalf("expected series number 4, got %v", meta.SeriesNumber)
+	}
+	if meta.SeriesNumberDisplay != "IV" {
+		t.Fatalf("expected series number display IV, got %q", meta.SeriesNumberDisplay)
+	}
+}
+
 func TestExtractCBZMetadataPrefersNamedCoverImage(t *testing.T) {
 	red := pngBytes(t, color.NRGBA{R: 220, A: 255})
 	blue := pngBytes(t, color.NRGBA{B: 220, A: 255})

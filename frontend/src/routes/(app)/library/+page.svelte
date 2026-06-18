@@ -26,8 +26,8 @@
  	// Display controls
  	let viewMode = $state('grid');
   let localGridSize = $state(4);
-  let sortBy = $state('title');
-	let sortDir = $state<'asc' | 'desc'>('asc');
+  let sortBy = $state($page.url.searchParams.get('sort') || 'title');
+	let sortDir = $state<'asc' | 'desc'>($page.url.searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc');
   let gridStyle = $derived(viewMode === 'grid' ? `grid-template-columns: repeat(${localGridSize}, minmax(0, 1fr))` : '');
   let libraryCoverThumbSize = $derived(getLibraryCoverThumbSize(localGridSize));
   let showSettingsMenu = $state(false);
@@ -323,6 +323,8 @@
 		// Re-fetch when URL params change
 		$page.url.search;
 		librarySearch = $page.url.searchParams.get('q') || '';
+		sortBy = $page.url.searchParams.get('sort') || sortBy || 'title';
+		sortDir = $page.url.searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc';
 		fetchBooks(true);
 	});
 
@@ -533,6 +535,8 @@
 				case 'last_read':
 					comparison = (a.last_read_at || a.added_at || 0) - (b.last_read_at || b.added_at || 0);
 					break;
+				case 'series':
+					return compareSeriesBooks(a, b);
 				default:
 					comparison = 0;
 			}
@@ -540,9 +544,27 @@
  		});
  	}
 
+	function compareSeriesBooks(a: any, b: any) {
+		const aSeries = String(a.series || '').trim();
+		const bSeries = String(b.series || '').trim();
+		if (!aSeries && bSeries) return 1;
+		if (aSeries && !bSeries) return -1;
+
+		const seriesComparison = aSeries.localeCompare(bSeries);
+		if (seriesComparison !== 0) return sortDir === 'desc' ? -seriesComparison : seriesComparison;
+
+		const aNumber = Number(a.series_number || 0);
+		const bNumber = Number(b.series_number || 0);
+		if (aNumber && !bNumber) return -1;
+		if (!aNumber && bNumber) return 1;
+		if (aNumber !== bNumber) return sortDir === 'desc' ? bNumber - aNumber : aNumber - bNumber;
+		return (a.title || '').localeCompare(b.title || '');
+	}
+
 	const sortOptions = [
 		{ value: 'title', label: 'Title' },
 		{ value: 'authors', label: 'Author' },
+		{ value: 'series', label: 'Series' },
 		{ value: 'added_at', label: 'Date Added' },
 		{ value: 'last_read', label: 'Last Read' }
 	];
@@ -562,12 +584,18 @@
 	function setSort(value: string) {
 		sortBy = value;
 		showSortMenu = false;
-		void fetchBooks(true);
+		const url = new URL(window.location.href);
+		url.searchParams.set('sort', sortBy);
+		url.searchParams.set('sort_dir', sortDir);
+		navigateWithFilters(url, true);
 	}
 
 	function toggleSortDirection() {
 		sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-		void fetchBooks(true);
+		const url = new URL(window.location.href);
+		url.searchParams.set('sort', sortBy);
+		url.searchParams.set('sort_dir', sortDir);
+		navigateWithFilters(url, true);
 	}
 
 	function updateScopedSearch(value: string) {

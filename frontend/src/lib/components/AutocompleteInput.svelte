@@ -1,13 +1,18 @@
 <script lang="ts">
+	import { lenientSearchMatch } from '$lib/utils/search';
+
+	type MetadataSuggestionField = 'authors' | 'series' | 'publishers' | 'languages' | 'genres' | 'tags';
+
 	interface Props {
 		value: string;
 		placeholder?: string;
-		field: 'genres' | 'tags';
+		field: MetadataSuggestionField;
+		multiple?: boolean;
 		onchange: (value: string) => void;
 		id?: string;
 	}
 
-	let { value = $bindable(''), placeholder = '', field, onchange, id }: Props = $props();
+	let { value = $bindable(''), placeholder = '', field, multiple, onchange, id }: Props = $props();
 
 	let suggestions: string[] = $state([]);
 	let showDropdown = $state(false);
@@ -18,16 +23,36 @@
 
 	async function fetchSuggestions() {
 		try {
-			const res = await fetch(`/api/metadata/suggestions?field=${field}`);
+			const res = await fetch('/api/filter-options');
 			if (res.ok) {
-				suggestions = await res.json();
+				const data = await res.json();
+				suggestions = extractSuggestionNames(data[field]);
 			}
 		} catch {
 			suggestions = [];
 		}
 	}
 
+	function extractSuggestionNames(items: unknown): string[] {
+		if (!Array.isArray(items)) return [];
+		return items
+			.map((item) => {
+				if (typeof item === 'string') return item;
+				const name = (item as { name?: unknown })?.name;
+				return typeof name === 'string' ? name : '';
+			})
+			.map((item) => item.trim())
+			.filter(Boolean);
+	}
+
+	function isMultipleValueField(): boolean {
+		return multiple ?? (field === 'genres' || field === 'tags');
+	}
+
 	function getLastSegment(input: string): { before: string; segment: string; after: string } {
+		if (!isMultipleValueField()) {
+			return { before: '', segment: input, after: '' };
+		}
 		const lastCommaIndex = input.lastIndexOf(',');
 		if (lastCommaIndex === -1) {
 			return { before: '', segment: input, after: '' };
@@ -45,7 +70,15 @@
 		}
 		const lower = segment.toLowerCase();
 		return suggestions
-			.filter(s => s.toLowerCase().includes(lower))
+			.filter(s => s.toLowerCase().includes(lower) || lenientSearchMatch(segment, s))
+			.sort((a, b) => {
+				const aLower = a.toLowerCase();
+				const bLower = b.toLowerCase();
+				const aStarts = aLower.startsWith(lower);
+				const bStarts = bLower.startsWith(lower);
+				if (aStarts !== bStarts) return aStarts ? -1 : 1;
+				return a.localeCompare(b);
+			})
 			.slice(0, 20);
 	}
 

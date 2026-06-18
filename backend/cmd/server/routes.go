@@ -22,6 +22,7 @@ import (
 	"cryptorum/internal/coverprefs"
 	"cryptorum/internal/db"
 	"cryptorum/internal/scanner"
+	"cryptorum/internal/seriesnum"
 )
 
 type filterList []string
@@ -119,7 +120,7 @@ func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []inter
 		args = append(args, user.ID)
 	}
 	for _, value := range req.Author {
-		addFilterCondition(`EXISTS (SELECT 1 FROM json_each(COALESCE(bm.authors, '[]')) WHERE value = ?)`, value)
+		addAuthorFilterCondition(addFilterCondition, "bm.authors", value)
 	}
 	for _, value := range req.Series {
 		addFilterCondition("COALESCE(bm.series, '') = ?", value)
@@ -510,8 +511,11 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		searchText := `LOWER(
 			COALESCE(bm.title, '') || ' ' ||
 			COALESCE(bm.authors, '') || ' ' ||
+			REPLACE(REPLACE(COALESCE(bm.authors, ''), '.', ''), ' ', '') || ' ' ||
 			COALESCE(bm.description, '') || ' ' ||
 			COALESCE(bm.series, '') || ' ' ||
+			COALESCE(bm.series_number_display, '') || ' ' ||
+			CASE WHEN COALESCE(bm.series_number, 0) != 0 THEN CAST(bm.series_number AS TEXT) ELSE '' END || ' ' ||
 			COALESCE(bm.isbn, '') || ' ' ||
 			COALESCE(bm.asin, '')
 		)`
@@ -523,7 +527,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	// Author filter - searches in JSON authors array
 	if author != "" {
 		for _, value := range queryValues("author", false) {
-			addFilterCondition(`EXISTS (SELECT 1 FROM json_each(COALESCE(bm.authors, '[]')) WHERE value = ?)`, value)
+			addAuthorFilterCondition(addFilterCondition, "bm.authors", value)
 		}
 	}
 
@@ -585,6 +589,9 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT b.id, b.library_id, b.added_at,
 		       COALESCE(bm.title, '') as title,
 		       COALESCE(bm.authors, '[]') as authors,
+		       COALESCE(bm.series, '') as series,
+		       COALESCE(bm.series_number, 0) as series_number,
+		       COALESCE(bm.series_number_display, '') as series_number_display,
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(bm.cover_updated_on, 0) as cover_updated_on,
 		       COALESCE(rp.status, 'unread') as status,
@@ -620,6 +627,8 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		orderBy = "b.added_at " + dir + ", b.id " + dir
 	} else if sortBy == "last_read" {
 		orderBy = "COALESCE(rp.updated_at, 0) " + dir + ", LOWER(COALESCE(bm.title, '')) ASC"
+	} else if sortBy == "series" {
+		orderBy = "CASE WHEN COALESCE(bm.series, '') = '' THEN 1 ELSE 0 END ASC, LOWER(COALESCE(bm.series, '')) " + dir + ", CASE WHEN COALESCE(bm.series_number, 0) = 0 THEN 1 ELSE 0 END ASC, bm.series_number " + dir + ", LOWER(COALESCE(bm.title, '')) ASC"
 	}
 
 	queryLimit := limit
@@ -637,18 +646,21 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type BookResponse struct {
-		ID             int64   `json:"id"`
-		LibraryID      int64   `json:"library_id"`
-		AddedAt        int64   `json:"added_at"`
-		Title          string  `json:"title"`
-		Authors        string  `json:"authors"`
-		CoverPath      string  `json:"cover_path"`
-		CoverUpdatedOn int64   `json:"cover_updated_on"`
-		Status         string  `json:"status"`
-		Percent        float64 `json:"percent"`
-		Opened         bool    `json:"opened"`
-		LastReadAt     int64   `json:"last_read_at"`
-		Format         string  `json:"format"`
+		ID                  int64   `json:"id"`
+		LibraryID           int64   `json:"library_id"`
+		AddedAt             int64   `json:"added_at"`
+		Title               string  `json:"title"`
+		Authors             string  `json:"authors"`
+		Series              string  `json:"series,omitempty"`
+		SeriesNumber        float64 `json:"series_number,omitempty"`
+		SeriesNumberDisplay string  `json:"series_number_display,omitempty"`
+		CoverPath           string  `json:"cover_path"`
+		CoverUpdatedOn      int64   `json:"cover_updated_on"`
+		Status              string  `json:"status"`
+		Percent             float64 `json:"percent"`
+		Opened              bool    `json:"opened"`
+		LastReadAt          int64   `json:"last_read_at"`
+		Format              string  `json:"format"`
 	}
 
 	type BooksResponse struct {
@@ -663,7 +675,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var b BookResponse
 		var opened int
-		if err := rows.Scan(&b.ID, &b.LibraryID, &b.AddedAt, &b.Title, &b.Authors, &b.CoverPath, &b.CoverUpdatedOn, &b.Status, &b.Percent, &opened, &b.LastReadAt, &b.Format); err != nil {
+		if err := rows.Scan(&b.ID, &b.LibraryID, &b.AddedAt, &b.Title, &b.Authors, &b.Series, &b.SeriesNumber, &b.SeriesNumberDisplay, &b.CoverPath, &b.CoverUpdatedOn, &b.Status, &b.Percent, &opened, &b.LastReadAt, &b.Format); err != nil {
 			continue
 		}
 		b.Opened = opened == 1
@@ -719,6 +731,7 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 		Authors             string  `json:"authors"`
 		Series              string  `json:"series"`
 		SeriesNumber        float64 `json:"series_number"`
+		SeriesNumberDisplay string  `json:"series_number_display"`
 		Publisher           string  `json:"publisher"`
 		PubDate             string  `json:"pub_date"`
 		Description         string  `json:"description"`
@@ -747,6 +760,7 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(bm.authors, '[]') as authors,
 		       COALESCE(bm.series, '') as series,
 		       COALESCE(bm.series_number, 0) as series_number,
+		       COALESCE(bm.series_number_display, '') as series_number_display,
 		       COALESCE(bm.publisher, '') as publisher,
 		       COALESCE(bm.pub_date, '') as pub_date,
 		       COALESCE(bm.description, '') as description,
@@ -772,7 +786,7 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 	`, bookID).Scan(
 		&book.ID, &book.LibraryID, &book.AddedAt, &book.LibraryName,
 		&book.Title, &book.Authors, &book.Series, &book.SeriesNumber,
-		&book.Publisher, &book.PubDate, &book.Description, &book.CoverPath,
+		&book.SeriesNumberDisplay, &book.Publisher, &book.PubDate, &book.Description, &book.CoverPath,
 		&book.CoverUpdatedOn, &book.Rating, &book.Genres, &book.Tags, &book.ISBN, &book.ASIN, &book.Language, &book.PageCount, &book.ComicSpreadFallback,
 		&book.Status, &book.Percent, &book.SpeedReaderPercent, &opened,
 	)
@@ -805,25 +819,31 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Title               string   `json:"title"`
-		Authors             []string `json:"authors"`
-		Series              string   `json:"series"`
-		SeriesNumber        float64  `json:"series_number"`
-		Publisher           string   `json:"publisher"`
-		PubDate             string   `json:"pub_date"`
-		Description         string   `json:"description"`
-		Rating              float64  `json:"rating"`
-		Status              string   `json:"status"`
-		Genres              []string `json:"genres"`
-		Tags                []string `json:"tags"`
-		ISBN                string   `json:"isbn"`
-		ASIN                string   `json:"asin"`
-		Language            string   `json:"language"`
-		PageCount           int      `json:"page_count"`
-		ComicSpreadFallback *string  `json:"comic_spread_fallback"`
+		Title               string          `json:"title"`
+		Authors             []string        `json:"authors"`
+		Series              string          `json:"series"`
+		SeriesNumber        json.RawMessage `json:"series_number"`
+		Publisher           string          `json:"publisher"`
+		PubDate             string          `json:"pub_date"`
+		Description         string          `json:"description"`
+		Rating              float64         `json:"rating"`
+		Status              string          `json:"status"`
+		Genres              []string        `json:"genres"`
+		Tags                []string        `json:"tags"`
+		ISBN                string          `json:"isbn"`
+		ASIN                string          `json:"asin"`
+		Language            string          `json:"language"`
+		PageCount           int             `json:"page_count"`
+		ComicSpreadFallback *string         `json:"comic_spread_fallback"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		errorResponse(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	seriesNumber, seriesNumberDisplay, err := seriesnum.ParseJSON(req.SeriesNumber)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -839,14 +859,15 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Upsert metadata
 	_, err = appDB.Exec(`
-		INSERT INTO book_metadata (book_id, title, authors, series, series_number, publisher, pub_date,
+		INSERT INTO book_metadata (book_id, title, authors, series, series_number, series_number_display, publisher, pub_date,
 		                           description, rating, genres, tags, isbn, asin, language, page_count, comic_spread_fallback, owner_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(book_id) DO UPDATE SET
 		    title = excluded.title,
 		    authors = excluded.authors,
 		    series = excluded.series,
 		    series_number = excluded.series_number,
+		    series_number_display = excluded.series_number_display,
 		    publisher = excluded.publisher,
 		    pub_date = excluded.pub_date,
 		    description = excluded.description,
@@ -859,7 +880,7 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 		    page_count = excluded.page_count,
 		    comic_spread_fallback = CASE WHEN ? = 1 THEN excluded.comic_spread_fallback ELSE comic_spread_fallback END,
 		    owner_user_id = excluded.owner_user_id
-	`, bookID, req.Title, string(authorsJSON), req.Series, req.SeriesNumber, req.Publisher, req.PubDate,
+	`, bookID, req.Title, string(authorsJSON), req.Series, seriesNumber, seriesNumberDisplay, req.Publisher, req.PubDate,
 		req.Description, req.Rating, string(genresJSON), string(tagsJSON), req.ISBN, req.ASIN, req.Language, req.PageCount,
 		comicSpreadFallback, current.ID, updateComicSpreadFallback)
 
@@ -1359,7 +1380,7 @@ func getSimilarBooksHandler(w http.ResponseWriter, r *http.Request) {
 
 		for _, author := range bookAuthorList {
 			for _, targetAuthor := range targetAuthorList {
-				if strings.EqualFold(strings.TrimSpace(author), strings.TrimSpace(targetAuthor)) {
+				if authorNamesMatch(author, targetAuthor) {
 					score += 50
 					if matchType == "" {
 						matchType = "author"
@@ -2588,8 +2609,10 @@ func getJSONMetadataOptions(column string, hierarchical bool, current *AppUser) 
 		for _, value := range values {
 			if !hierarchical {
 				value = strings.TrimSpace(value)
-				if value != "" {
-					counts[value] += bookCount
+				key := normalizedAuthorMatchKey(value)
+				if key != "" && !prefixesInRow[key] {
+					prefixesInRow[key] = true
+					counts[canonicalAuthorOptionName(value)] += bookCount
 				}
 				continue
 			}
@@ -2663,12 +2686,24 @@ func getFilterOptionsHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch tags")
 		return
 	}
+	publishers, err := getScalarMetadataOptions("publisher", current)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to fetch publishers")
+		return
+	}
+	languages, err := getScalarMetadataOptions("language", current)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to fetch languages")
+		return
+	}
 
 	jsonResponse(w, http.StatusOK, map[string][]metadataOption{
-		"authors": authors,
-		"series":  series,
-		"genres":  genres,
-		"tags":    tags,
+		"authors":    authors,
+		"series":     series,
+		"genres":     genres,
+		"tags":       tags,
+		"publishers": publishers,
+		"languages":  languages,
 	})
 }
 
@@ -2797,12 +2832,13 @@ func getMetadataHandler(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			for _, author := range authorList {
-				if author == "" {
+				key := normalizedAuthorMatchKey(author)
+				if key == "" {
 					continue
 				}
 				found := false
 				for i, existing := range metadata {
-					if existing.Name == author {
+					if normalizedAuthorMatchKey(existing.Name) == key {
 						metadata[i].BookCount += bookCount
 						found = true
 						break
@@ -2810,7 +2846,7 @@ func getMetadataHandler(w http.ResponseWriter, r *http.Request) {
 				}
 				if !found {
 					metadata = append(metadata, MetadataResponse{
-						Name:      author,
+						Name:      canonicalAuthorOptionName(author),
 						BookCount: bookCount,
 					})
 				}

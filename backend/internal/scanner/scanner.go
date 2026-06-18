@@ -667,14 +667,15 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 
 	_, err := s.db.Exec(`
 		INSERT INTO book_metadata
-		    (book_id, title, authors, series, series_number, publisher, pub_date,
+		    (book_id, title, authors, series, series_number, series_number_display, publisher, pub_date,
 		     description, rating, genres, isbn, asin, language, page_count, cover_path, cover_updated_on, owner_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(book_id) DO UPDATE SET
 		    title         = COALESCE(NULLIF(excluded.title, ''), title),
 		    authors       = COALESCE(NULLIF(excluded.authors, '[]'), authors),
 		    series        = COALESCE(NULLIF(excluded.series, ''), series),
 		    series_number = COALESCE(NULLIF(excluded.series_number, 0), series_number),
+		    series_number_display = COALESCE(NULLIF(excluded.series_number_display, ''), series_number_display),
 		    publisher     = COALESCE(NULLIF(excluded.publisher, ''), publisher),
 		    pub_date      = COALESCE(NULLIF(excluded.pub_date, ''), pub_date),
 		    description   = COALESCE(NULLIF(excluded.description, ''), description),
@@ -689,7 +690,7 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 		        WHEN excluded.cover_path != '' THEN excluded.cover_updated_on
 		        ELSE cover_updated_on
 		    END
-	`, bookID, meta.Title, string(authorsJSON), meta.Series, meta.SeriesNumber,
+	`, bookID, meta.Title, string(authorsJSON), meta.Series, meta.SeriesNumber, meta.SeriesNumberDisplay,
 		meta.Publisher, meta.PubDate, meta.Description, meta.Rating,
 		string(genresJSON), meta.ISBN, meta.ASIN, meta.Language, meta.PageCount, coverPath, coverUpdatedOn, ownerUserID)
 

@@ -212,6 +212,13 @@
 		}
 	}
 
+	function formatSeriesNumber(item: any): string {
+		if (item?.series_number_display) return item.series_number_display;
+		const value = Number(item?.series_number || 0);
+		if (!value) return '';
+		return Number.isInteger(value) ? String(value) : String(value);
+	}
+
 	function normalizeAuthorName(name: string): string {
 		if (!name) return name;
 
@@ -458,7 +465,7 @@
 		editForm = {
 			title: book.title || '',
 			series: book.series || '',
-			series_number: book.series_number || '',
+			series_number: formatSeriesNumber(book),
 			publisher: book.publisher || '',
 			pub_date: book.pub_date || '',
 			description: book.description || '',
@@ -586,7 +593,7 @@
 					title: editForm.title,
 					authors: authorsArray,
 					series: editForm.series,
-					series_number: editForm.series_number === '' ? 0 : parseFloat(editForm.series_number),
+					series_number: String(editForm.series_number || '').trim(),
 					publisher: editForm.publisher,
 					pub_date: editForm.pub_date,
 					description: editForm.description,
@@ -762,6 +769,12 @@
 						</button>
 					</div>
 				</div>
+				{#if getPrimaryFilePath()}
+					<div class="mb-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)]/50 p-3">
+						<div class="mb-1 text-sm text-[var(--color-surface-text-muted)]">Path</div>
+						<div class="break-all font-mono text-xs text-[var(--color-surface-text)]">{getPrimaryFilePath()}</div>
+					</div>
+				{/if}
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 					<div>
 						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-title">Title</label>
@@ -772,12 +785,16 @@
 						<div class="space-y-2">
 							{#each authorsList as author, i}
 								<div class="flex items-center space-x-2">
-									<input
-										type="text"
-										bind:value={authorsList[i]}
-										placeholder="Author name"
-										class="flex-1 bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-									/>
+									<div class="min-w-0 flex-1">
+										<AutocompleteInput
+											id={`book-author-${i}`}
+											bind:value={authorsList[i]}
+											placeholder="Author name"
+											field="authors"
+											multiple={false}
+											onchange={(v) => authorsList[i] = v}
+										/>
+									</div>
 										<button
 											onclick={() => authorsList.splice(i, 1)}
 											class="group rounded-md p-2 text-red-400 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40"
@@ -802,7 +819,13 @@
 					</div>
 					<div>
 						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-publisher">Publisher</label>
-						<input id="book-publisher" type="text" bind:value={editForm.publisher} class="w-full bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
+						<AutocompleteInput
+							id="book-publisher"
+							bind:value={editForm.publisher}
+							field="publishers"
+							multiple={false}
+							onchange={(v) => editForm.publisher = v}
+						/>
 					</div>
 					<div>
 						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-pub-date">Published Date</label>
@@ -810,7 +833,13 @@
 					</div>
 					<div>
 						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-language">Language</label>
-						<input id="book-language" type="text" bind:value={editForm.language} class="w-full bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
+						<AutocompleteInput
+							id="book-language"
+							bind:value={editForm.language}
+							field="languages"
+							multiple={false}
+							onchange={(v) => editForm.language = v}
+						/>
 					</div>
 					<div>
 						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-isbn">ISBN</label>
@@ -856,8 +885,17 @@
 					<div class="md:col-span-2">
 						<div class="block text-sm text-[var(--color-surface-text-muted)] mb-1">Series</div>
 						<div class="flex gap-2">
-							<input id="book-series" type="text" bind:value={editForm.series} placeholder="Series name" class="flex-1 bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
-							<input id="book-series-number" type="number" bind:value={editForm.series_number} min="0" placeholder="#" class="w-20 bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
+							<div class="min-w-0 flex-1">
+								<AutocompleteInput
+									id="book-series"
+									bind:value={editForm.series}
+									placeholder="Series name"
+									field="series"
+									multiple={false}
+									onchange={(v) => editForm.series = v}
+								/>
+							</div>
+							<input id="book-series-number" type="text" bind:value={editForm.series_number} placeholder="#" class="w-24 bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
 						</div>
 					</div>
 					<div class="md:col-span-2">
@@ -1189,8 +1227,8 @@
 											>
 												{book.series}
 											</button>
-									{#if book.series_number}
-										<span class="text-[var(--color-surface-text-muted)]"> #{book.series_number}</span>
+									{#if formatSeriesNumber(book)}
+										<span class="text-[var(--color-surface-text-muted)]"> #{formatSeriesNumber(book)}</span>
 									{/if}
 								</dd>
 							</div>
