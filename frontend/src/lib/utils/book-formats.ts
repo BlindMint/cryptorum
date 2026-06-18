@@ -1,11 +1,14 @@
-const AUDIO_FORMATS = new Set(['mp3', 'm4a', 'm4b', 'flac', 'ogg', 'wav', 'aac', 'opus']);
+export const SUPPORTED_AUDIO_FORMATS = ['mp3', 'm4a', 'm4b', 'flac', 'ogg', 'wav'] as const;
+
+const AUDIO_FORMATS = new Set<string>(SUPPORTED_AUDIO_FORMATS);
 const PDF_FORMATS = new Set(['pdf']);
 const CBX_FORMATS = new Set(['cbz', 'cbr', 'cb7', 'cbt']);
 const TEXT_FORMATS = new Set(['epub', 'mobi', 'azw', 'azw3', 'azw4', 'fb2', 'docx', 'html', 'rtf', 'txt', 'text', 'odt', 'pdb', 'lrf']);
-const FORMAT_PRIORITY = ['epub', 'pdf', 'cbz', 'cbr', 'cb7', 'cbt', 'mobi', 'azw3', 'azw4', 'fb2', 'docx', 'html', 'rtf', 'txt', 'text', 'odt', 'pdb', 'lrf', 'mp3', 'm4b', 'm4a', 'flac', 'ogg', 'wav', 'aac', 'opus'];
+const FORMAT_PRIORITY = ['epub', 'pdf', 'cbz', 'cbr', 'cb7', 'cbt', 'mobi', 'azw3', 'azw4', 'fb2', 'docx', 'html', 'rtf', 'txt', 'text', 'odt', 'pdb', 'lrf', 'mp3', 'm4b', 'm4a', 'flac', 'ogg', 'wav'];
 const TEXT_PRIORITY = ['epub', 'mobi', 'azw3', 'azw4', 'fb2', 'docx', 'html', 'rtf', 'txt', 'text', 'odt', 'pdb', 'lrf'];
 
 export type ReaderRouteKind = 'epub' | 'pdf' | 'cbx' | 'audio' | null;
+export type BookMediaKind = 'book' | 'audio';
 
 export type BookFile = {
 	format?: string;
@@ -23,6 +26,14 @@ export function getReaderRouteKind(format: string | null | undefined): ReaderRou
 	if (CBX_FORMATS.has(normalized)) return 'cbx';
 	if (TEXT_FORMATS.has(normalized)) return 'epub';
 	return null;
+}
+
+export function isAudioFormat(format: string | null | undefined): boolean {
+	return AUDIO_FORMATS.has(normalizeBookFormat(format));
+}
+
+export function getBookMediaKind(format: string | null | undefined): BookMediaKind {
+	return isAudioFormat(format) ? 'audio' : 'book';
 }
 
 function appendReturnTo(href: string, returnTo?: string | null): string {

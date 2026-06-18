@@ -8,9 +8,10 @@ import (
 	"encoding/xml"
 	"fmt"
 	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
+	"image/draw"
+	"image/gif"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"log/slog"
 	"os"
@@ -21,7 +22,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"cryptorum/internal/coverprefs"
 )
+
+const comicSpreadFallbackAspectThreshold = 1.25
 
 // BookMetadata represents extracted book metadata
 type BookMetadata struct {
@@ -42,8 +47,17 @@ type BookMetadata struct {
 	Source       string   `json:"-"`
 }
 
+type ExtractOptions struct {
+	ComicSpreadFallbackSide string
+}
+
 // Extract extracts metadata from a book file based on its format
 func Extract(filePath string) (*BookMetadata, error) {
+	return ExtractWithOptions(filePath, ExtractOptions{})
+}
+
+// ExtractWithOptions extracts metadata from a book file with caller-provided extraction options.
+func ExtractWithOptions(filePath string, options ExtractOptions) (*BookMetadata, error) {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	if ext != "" {
 		ext = ext[1:] // Remove dot
@@ -55,7 +69,7 @@ func Extract(filePath string) (*BookMetadata, error) {
 	case "pdf":
 		return extractPDFMetadata(filePath)
 	case "cbz", "cbr", "cb7":
-		return extractCBXMetadata(filePath)
+		return extractCBXMetadata(filePath, options)
 	case "mp3", "m4a", "m4b", "flac", "ogg", "wav":
 		return extractAudioMetadata(filePath)
 	case "mobi", "azw3":
@@ -602,7 +616,7 @@ type comicArchiveCommand struct {
 	extractArgs func(filePath string, entryName string) []string
 }
 
-func extractCBXMetadata(filePath string) (*BookMetadata, error) {
+func extractCBXMetadata(filePath string, options ExtractOptions) (*BookMetadata, error) {
 	metadata := extractFromFilename(filePath)
 	metadata.Source = "cbx"
 	if metadata.Authors == nil {
@@ -647,7 +661,7 @@ func extractCBXMetadata(filePath string) (*BookMetadata, error) {
 			}
 		}
 
-		metadata.CoverData = extractBestZipComicCover(imageFiles, comicInfo)
+		metadata.CoverData = extractBestZipComicCover(imageFiles, comicInfo, options)
 
 	case ".cbr", ".cb7":
 		entries, command, err := listExternalComicArchive(filePath, ext)
@@ -656,7 +670,7 @@ func extractCBXMetadata(filePath string) (*BookMetadata, error) {
 			metadata.PageCount = len(imageEntries)
 			comicInfo := extractExternalComicInfo(filePath, ext, command, entries)
 			applyComicInfoMetadata(metadata, comicInfo)
-			metadata.CoverData = extractBestExternalComicCover(filePath, ext, command, imageEntries, comicInfo)
+			metadata.CoverData = extractBestExternalComicCover(filePath, ext, command, imageEntries, comicInfo, options)
 		}
 	}
 
@@ -722,44 +736,60 @@ func applyComicInfoMetadata(metadata *BookMetadata, comicInfo comicInfoXML) {
 	}
 }
 
-func extractBestZipComicCover(files []*zip.File, comicInfo comicInfoXML) []byte {
-	for _, f := range selectZipComicCoverCandidates(files, comicInfo) {
-		rc, err := f.Open()
+type zipComicCoverCandidate struct {
+	file              *zip.File
+	firstPageFallback bool
+}
+
+type externalComicCoverCandidate struct {
+	entry             comicArchiveEntry
+	firstPageFallback bool
+}
+
+func extractBestZipComicCover(files []*zip.File, comicInfo comicInfoXML, options ExtractOptions) []byte {
+	for _, candidate := range selectZipComicCoverCandidates(files, comicInfo) {
+		rc, err := candidate.file.Open()
 		if err != nil {
 			continue
 		}
 		data, err := io.ReadAll(rc)
 		rc.Close()
 		if err == nil && isRenderableCoverData(data) {
+			if candidate.firstPageFallback {
+				return cropComicSpreadFallbackCover(data, options.ComicSpreadFallbackSide)
+			}
 			return data
 		}
 	}
 	return nil
 }
 
-func selectZipComicCoverCandidates(files []*zip.File, comicInfo comicInfoXML) []*zip.File {
-	candidates := []*zip.File{}
+func selectZipComicCoverCandidates(files []*zip.File, comicInfo comicInfoXML) []zipComicCoverCandidate {
+	candidates := []zipComicCoverCandidate{}
 	seen := map[*zip.File]bool{}
 
-	add := func(f *zip.File) {
+	add := func(f *zip.File, firstPageFallback bool) {
 		if f != nil && !seen[f] {
 			seen[f] = true
-			candidates = append(candidates, f)
+			candidates = append(candidates, zipComicCoverCandidate{
+				file:              f,
+				firstPageFallback: firstPageFallback,
+			})
 		}
 	}
 
 	for _, page := range comicInfo.Pages {
 		if isComicCoverPageType(page.Type) && page.Image >= 0 && page.Image < len(files) {
-			add(files[page.Image])
+			add(files[page.Image], false)
 		}
 	}
 
 	for _, f := range namedZipComicCoverCandidates(files) {
-		add(f)
+		add(f, false)
 	}
 
-	for _, f := range files {
-		add(f)
+	for index, f := range files {
+		add(f, index == 0)
 	}
 
 	return candidates
@@ -934,15 +964,18 @@ func extractExternalComicInfo(filePath, ext string, preferredCommand comicArchiv
 	return comicInfoXML{}
 }
 
-func extractBestExternalComicCover(filePath, ext string, preferredCommand comicArchiveCommand, imageEntries []comicArchiveEntry, comicInfo comicInfoXML) []byte {
+func extractBestExternalComicCover(filePath, ext string, preferredCommand comicArchiveCommand, imageEntries []comicArchiveEntry, comicInfo comicInfoXML, options ExtractOptions) []byte {
 	commands := orderedExternalComicArchiveCommands(ext, preferredCommand)
-	for _, entry := range selectExternalComicCoverCandidates(imageEntries, comicInfo) {
+	for _, candidate := range selectExternalComicCoverCandidates(imageEntries, comicInfo) {
 		for _, command := range commands {
 			if _, err := exec.LookPath(command.name); err != nil {
 				continue
 			}
-			data, err := extractExternalComicArchiveEntry(filePath, command, entry.Name)
+			data, err := extractExternalComicArchiveEntry(filePath, command, candidate.entry.Name)
 			if err == nil && isRenderableCoverData(data) {
+				if candidate.firstPageFallback {
+					return cropComicSpreadFallbackCover(data, options.ComicSpreadFallbackSide)
+				}
 				return data
 			}
 		}
@@ -977,30 +1010,33 @@ func extractExternalComicArchiveEntry(filePath string, command comicArchiveComma
 	return data, nil
 }
 
-func selectExternalComicCoverCandidates(entries []comicArchiveEntry, comicInfo comicInfoXML) []comicArchiveEntry {
-	candidates := []comicArchiveEntry{}
+func selectExternalComicCoverCandidates(entries []comicArchiveEntry, comicInfo comicInfoXML) []externalComicCoverCandidate {
+	candidates := []externalComicCoverCandidate{}
 	seen := map[string]bool{}
 
-	add := func(entry comicArchiveEntry) {
+	add := func(entry comicArchiveEntry, firstPageFallback bool) {
 		key := strings.ToLower(entry.Name)
 		if entry.Name != "" && !seen[key] {
 			seen[key] = true
-			candidates = append(candidates, entry)
+			candidates = append(candidates, externalComicCoverCandidate{
+				entry:             entry,
+				firstPageFallback: firstPageFallback,
+			})
 		}
 	}
 
 	for _, page := range comicInfo.Pages {
 		if isComicCoverPageType(page.Type) && page.Image >= 0 && page.Image < len(entries) {
-			add(entries[page.Image])
+			add(entries[page.Image], false)
 		}
 	}
 
 	for _, entry := range namedExternalComicCoverCandidates(entries) {
-		add(entry)
+		add(entry, false)
 	}
 
-	for _, entry := range entries {
-		add(entry)
+	for index, entry := range entries {
+		add(entry, index == 0)
 	}
 
 	return candidates
@@ -1036,6 +1072,61 @@ func namedExternalComicCoverCandidates(entries []comicArchiveEntry) []comicArchi
 func isComicCoverPageType(value string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	return normalized == "frontcover" || normalized == "front cover" || normalized == "cover"
+}
+
+func cropComicSpreadFallbackCover(data []byte, side string) []byte {
+	if strings.TrimSpace(side) == "" {
+		return data
+	}
+	side = coverprefs.NormalizeComicSpreadFallback(side, false)
+	if side == coverprefs.ComicSpreadFallbackDisabled {
+		return data
+	}
+
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return data
+	}
+	if float64(cfg.Width)/float64(cfg.Height) < comicSpreadFallbackAspectThreshold {
+		return data
+	}
+
+	img, format, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return data
+	}
+
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if width < 2 || height < 1 {
+		return data
+	}
+
+	halfWidth := width / 2
+	rect := image.Rect(bounds.Min.X, bounds.Min.Y, bounds.Min.X+halfWidth, bounds.Max.Y)
+	if side == coverprefs.ComicSpreadFallbackRight {
+		rect = image.Rect(bounds.Max.X-halfWidth, bounds.Min.Y, bounds.Max.X, bounds.Max.Y)
+	}
+
+	cropped := image.NewNRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
+	draw.Draw(cropped, cropped.Bounds(), img, rect.Min, draw.Src)
+
+	var out bytes.Buffer
+	switch strings.ToLower(format) {
+	case "jpeg", "jpg":
+		err = jpeg.Encode(&out, cropped, &jpeg.Options{Quality: 92})
+	case "png":
+		err = png.Encode(&out, cropped)
+	case "gif":
+		err = gif.Encode(&out, cropped, nil)
+	default:
+		return data
+	}
+	if err != nil || out.Len() == 0 {
+		return data
+	}
+	return out.Bytes()
 }
 
 func archiveCoverNamePriority(name string) int {

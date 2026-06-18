@@ -4,7 +4,7 @@
 	import { cubicOut } from 'svelte/easing';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import { showFormatOnCover, getFormatColor } from '$lib/stores';
-	import { getBookReaderHref } from '$lib/utils/book-formats';
+	import { getBookReaderHref, isAudioFormat } from '$lib/utils/book-formats';
 
  	let stats = $state({
  		books: 0,
@@ -228,10 +228,15 @@
 	}
 
 	function getReaderUrl(book: any): string {
-		if (book.format === 'pdf') return getBookReaderHref(book.id, book.format, '/');
-		if (['cbz', 'cbr', 'cb7', 'cbt'].includes(book.format)) return `/reader/cbx/${book.id}`;
-		if (['mp3', 'm4a', 'm4b', 'flac', 'ogg', 'wav'].includes(book.format)) return `/reader/audio/${book.id}`;
-		return `/reader/epub/${book.id}`;
+		return getBookReaderHref(book.id, book.format, '/');
+	}
+
+	function getReaderActionLabel(book: any, continuing = false): string {
+		const title = book.title || 'book';
+		if (isAudioFormat(book.format)) {
+			return continuing ? `Continue listening to ${title}` : `Play audio for ${title}`;
+		}
+		return continuing ? `Continue reading ${title}` : `Read ${title}`;
 	}
 
 	function isTouchLike(): boolean {
@@ -332,6 +337,7 @@
 										<BookCoverFrame
 											src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
 											alt={book.title}
+											format={book.format}
 											mode="cover"
 											frameClass="aspect-[2/3]"
 											imageClass="group-hover:scale-105 transition-transform"
@@ -361,7 +367,7 @@
 												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11v5m0-8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
 											</svg>
 										</a>
-										<a href={readerUrl} class="cover-action-button bottom-action" aria-label="Continue reading {book.title || 'book'}" onclick={(event) => event.stopPropagation()}>
+										<a href={readerUrl} class="cover-action-button bottom-action" aria-label={getReaderActionLabel(book, true)} onclick={(event) => event.stopPropagation()}>
 											<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 												<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
 											</svg>
@@ -413,6 +419,7 @@
 								<BookCoverFrame
 									src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
 									alt={book.title}
+									format={book.format}
 									mode="cover"
 									frameClass="aspect-[2/3]"
 									imageClass="group-hover:scale-105 transition-transform"
@@ -434,7 +441,7 @@
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11v5m0-8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
 										</svg>
 									</a>
-									<a href={readerUrl} class="cover-action-button bottom-action" aria-label="Read {book.title || 'book'}" onclick={(event) => event.stopPropagation()}>
+									<a href={readerUrl} class="cover-action-button bottom-action" aria-label={getReaderActionLabel(book)} onclick={(event) => event.stopPropagation()}>
 										<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 											<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
 										</svg>
@@ -494,6 +501,7 @@
 								<BookCoverFrame
 									src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
 									alt={book.title}
+									format={book.format}
 									mode="cover"
 									frameClass="aspect-[2/3]"
 									imageClass="group-hover:scale-105 transition-transform"
@@ -515,7 +523,7 @@
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11v5m0-8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
 										</svg>
 									</a>
-									<a href={readerUrl} class="cover-action-button bottom-action" aria-label="Read {book.title || 'book'}" onclick={(event) => event.stopPropagation()}>
+									<a href={readerUrl} class="cover-action-button bottom-action" aria-label={getReaderActionLabel(book)} onclick={(event) => event.stopPropagation()}>
 										<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 											<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
 										</svg>

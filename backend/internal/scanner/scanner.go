@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"cryptorum/internal/coverprefs"
 	"cryptorum/internal/covers"
 	"cryptorum/internal/metadata"
 )
@@ -191,6 +192,36 @@ type fileInventoryItem struct {
 	ModTimeUnix int64
 }
 
+func (s *Scanner) extractMetadata(bookID, libraryID int64, path string) (*metadata.BookMetadata, error) {
+	return metadata.ExtractWithOptions(path, metadata.ExtractOptions{
+		ComicSpreadFallbackSide: s.resolveComicSpreadFallback(bookID, libraryID),
+	})
+}
+
+func (s *Scanner) resolveComicSpreadFallback(bookID, libraryID int64) string {
+	settings := covers.LoadSettings(s.db)
+	bookValue := coverprefs.ComicSpreadFallbackInherit
+	libraryValue := coverprefs.ComicSpreadFallbackInherit
+
+	if bookID > 0 {
+		_ = s.db.QueryRow(`
+			SELECT COALESCE(bm.comic_spread_fallback, ?), COALESCE(l.comic_spread_fallback, ?)
+			FROM book b
+			JOIN library l ON b.library_id = l.id
+			LEFT JOIN book_metadata bm ON b.id = bm.book_id
+			WHERE b.id = ?
+		`, coverprefs.ComicSpreadFallbackInherit, coverprefs.ComicSpreadFallbackInherit, bookID).Scan(&bookValue, &libraryValue)
+	} else if libraryID > 0 {
+		_ = s.db.QueryRow(`
+			SELECT COALESCE(comic_spread_fallback, ?)
+			FROM library
+			WHERE id = ?
+		`, coverprefs.ComicSpreadFallbackInherit, libraryID).Scan(&libraryValue)
+	}
+
+	return coverprefs.ResolveComicSpreadFallback(bookValue, libraryValue, settings.ComicSpreadFallback)
+}
+
 type existingFileRecord struct {
 	ID           int64
 	BookID       int64
@@ -320,7 +351,7 @@ func (s *Scanner) markMissingFiles(libraryID int64, seenPaths map[string]struct{
 // Returns the number of books updated.
 func (s *Scanner) RefreshMissingMetadata(limit int) (int, error) {
 	rows, err := s.db.Query(`
-		SELECT b.id, bf.path, COALESCE(l.owner_user_id, 1)
+		SELECT b.id, b.library_id, bf.path, COALESCE(l.owner_user_id, 1)
 		FROM book b
 		JOIN book_file bf ON b.id = bf.book_id
 		JOIN library l ON b.library_id = l.id
@@ -334,14 +365,15 @@ func (s *Scanner) RefreshMissingMetadata(limit int) (int, error) {
 	defer rows.Close()
 
 	type entry struct {
-		bookID   int64
-		filePath string
-		ownerID  int64
+		bookID    int64
+		libraryID int64
+		filePath  string
+		ownerID   int64
 	}
 	var entries []entry
 	for rows.Next() {
 		var e entry
-		if err := rows.Scan(&e.bookID, &e.filePath, &e.ownerID); err != nil {
+		if err := rows.Scan(&e.bookID, &e.libraryID, &e.filePath, &e.ownerID); err != nil {
 			continue
 		}
 		entries = append(entries, e)
@@ -350,7 +382,7 @@ func (s *Scanner) RefreshMissingMetadata(limit int) (int, error) {
 
 	count := 0
 	for _, e := range entries {
-		meta, err := metadata.Extract(e.filePath)
+		meta, err := s.extractMetadata(e.bookID, e.libraryID, e.filePath)
 		if err != nil {
 			slog.Debug("Using filename fallback for missing metadata refresh", "path", e.filePath, "error", err)
 		}
@@ -535,7 +567,7 @@ func (s *Scanner) processFileWithInfo(
 	}
 
 	// Extract and save metadata immediately
-	meta, err := metadata.Extract(file.Path)
+	meta, err := s.extractMetadata(bookID, libraryID, file.Path)
 	if err != nil {
 		slog.Warn("Failed to extract metadata", "path", file.Path, "error", err)
 	}
@@ -677,12 +709,15 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 func (s *Scanner) repairWeakExtractedMetadata(bookID int64, path string, ownerUserID int64) error {
 	var title, authorsRaw, publisher, pubDate, coverPath string
 	var pageCount int
+	var libraryID int64
 	err := s.db.QueryRow(`
 		SELECT COALESCE(title, ''), COALESCE(authors, '[]'), COALESCE(publisher, ''),
-		       COALESCE(pub_date, ''), COALESCE(page_count, 0), COALESCE(cover_path, '')
-		FROM book_metadata
-		WHERE book_id = ?
-	`, bookID).Scan(&title, &authorsRaw, &publisher, &pubDate, &pageCount, &coverPath)
+		       COALESCE(pub_date, ''), COALESCE(page_count, 0), COALESCE(cover_path, ''),
+		       b.library_id
+		FROM book b
+		LEFT JOIN book_metadata bm ON b.id = bm.book_id
+		WHERE b.id = ?
+	`, bookID).Scan(&title, &authorsRaw, &publisher, &pubDate, &pageCount, &coverPath, &libraryID)
 	if err != nil {
 		return err
 	}
@@ -695,7 +730,7 @@ func (s *Scanner) repairWeakExtractedMetadata(bookID int64, path string, ownerUs
 		return nil
 	}
 
-	extracted, err := metadata.Extract(path)
+	extracted, err := s.extractMetadata(bookID, libraryID, path)
 	if err != nil || extracted == nil || extracted.Source == "filename" {
 		return err
 	}

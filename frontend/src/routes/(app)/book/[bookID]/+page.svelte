@@ -47,6 +47,12 @@
 
 	let editForm = $state<any>({});
 	let authorsList = $state<string[]>([]);
+	const comicSpreadFallbackOptions = [
+		{ value: 'inherit', label: 'Inherit' },
+		{ value: 'right', label: 'Right side' },
+		{ value: 'left', label: 'Left side' },
+		{ value: 'disabled', label: 'Disabled' }
+	];
 
 	let statusOptions = [
 		{ value: 'unread', label: 'Unread' },
@@ -308,6 +314,7 @@
 	const readableFormats = $derived(getReadableFormats());
 	const primaryReadFormat = $derived(getPrimaryReadFormat());
 	const primarySpeedReadFormat = $derived(getPrimarySpeedReadFormat());
+	const isAudioItem = $derived(getReaderRouteKind(primaryReadFormat || getPreferredBookFormat(files) || book?.format) === 'audio');
 
 	function formatSize(bytes: number): string {
 		if (bytes < 1024) return bytes + ' B';
@@ -318,6 +325,19 @@
 	function getFileName(path: string): string {
 		if (!path) return 'file';
 		return path.split(/[/\\]/).pop() || path;
+	}
+
+	function getPrimaryReadActionLabel(): string {
+		const hasProgress = !!book?.opened && (book.percent || 0) > 0;
+		if (isAudioItem) {
+			return hasProgress ? 'Continue Listening' : 'Play Audio';
+		}
+		return hasProgress ? 'Continue Reading' : 'Read Now';
+	}
+
+	function getUnavailableReadActionLabel(): string {
+		if (loading) return 'Checking reader...';
+		return isAudioItem ? 'Audio unavailable' : 'Read Now unavailable';
 	}
 
 	function getPrimaryFilePath(): string {
@@ -449,7 +469,8 @@
 			isbn: book.isbn || '',
 			asin: book.asin || '',
 			language: book.language || '',
-			page_count: book.page_count || 0
+			page_count: book.page_count || 0,
+			comic_spread_fallback: book.comic_spread_fallback || 'inherit'
 		};
 		authorsList = parseAuthors(book.authors || '[]');
 		editing = true;
@@ -518,7 +539,11 @@
 		regeneratingCover = true;
 		try {
 			const res = await fetch(`/api/books/${book.id}/cover/regenerate`, {
-				method: 'POST'
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					comic_spread_fallback: editForm.comic_spread_fallback || book.comic_spread_fallback || 'inherit'
+				})
 			});
 			if (res.ok) {
 				await fetchBook();
@@ -553,26 +578,27 @@
 				tagsArray = editForm.tags;
 			}
 
- 			console.log('Sending PUT to /api/books/' + book.id);
- 			const res = await fetch(`/api/books/${book.id}`, {
- 				method: 'PUT',
- 				headers: { 'Content-Type': 'application/json' },
- 				body: JSON.stringify({
- 					title: editForm.title,
- 					authors: authorsArray,
- 					series: editForm.series,
- 					series_number: editForm.series_number === '' ? 0 : parseFloat(editForm.series_number),
- 					publisher: editForm.publisher,
- 					pub_date: editForm.pub_date,
- 					description: editForm.description,
- 					rating: editForm.rating,
- 					status: editForm.status,
- 					genres: genresArray,
- 					tags: tagsArray,
- 					isbn: editForm.isbn,
+			console.log('Sending PUT to /api/books/' + book.id);
+			const res = await fetch(`/api/books/${book.id}`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					title: editForm.title,
+					authors: authorsArray,
+					series: editForm.series,
+					series_number: editForm.series_number === '' ? 0 : parseFloat(editForm.series_number),
+					publisher: editForm.publisher,
+					pub_date: editForm.pub_date,
+					description: editForm.description,
+					rating: editForm.rating,
+					status: editForm.status,
+					genres: genresArray,
+					tags: tagsArray,
+					isbn: editForm.isbn,
 					asin: editForm.asin,
- 					language: editForm.language,
- 					page_count: editForm.page_count
+					language: editForm.language,
+					page_count: editForm.page_count,
+					comic_spread_fallback: editForm.comic_spread_fallback
 				})
 			});
 
@@ -694,35 +720,46 @@
 				<div class="flex items-center justify-between mb-4">
 					<h3 class="text-lg font-medium text-[var(--color-surface-text)]">Edit Metadata</h3>
 					<div class="flex flex-wrap items-center gap-2">
-							<button
-								onclick={regenerateCover}
-								type="button"
-								disabled={regeneratingCover}
-								class="group inline-flex items-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-surface-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+						<label class="flex items-center gap-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm text-[var(--color-surface-text)]">
+							<span class="whitespace-nowrap text-[var(--color-surface-text-muted)]">Wide comic fallback</span>
+							<select
+								bind:value={editForm.comic_spread_fallback}
+								class="rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-2 py-1 text-sm text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 							>
-								{#if regeneratingCover}
-									<svg class="animate-spin -ml-0.5 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-										<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-									</svg>
-									Regenerating...
-								{:else}
-									<svg class="mr-2 h-4 w-4 transition-transform duration-200 ease-out group-hover:rotate-45 group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-									</svg>
-									Regenerate Cover
-								{/if}
-							</button>
-							<button
-								onclick={() => showMetadataLookup = true}
-								type="button"
-								class="group inline-flex items-center rounded-lg bg-[var(--color-primary-500)] px-3 py-1.5 text-sm text-white transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
-							>
-								<svg class="mr-2 h-4 w-4 transition-transform duration-200 ease-out group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+								{#each comicSpreadFallbackOptions as option}
+									<option value={option.value}>{option.label}</option>
+								{/each}
+							</select>
+						</label>
+						<button
+							onclick={regenerateCover}
+							type="button"
+							disabled={regeneratingCover}
+							class="group inline-flex items-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-surface-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+						>
+							{#if regeneratingCover}
+								<svg class="animate-spin -ml-0.5 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
+									<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+									<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
 								</svg>
-								Lookup Metadata
-							</button>
+								Regenerating...
+							{:else}
+								<svg class="mr-2 h-4 w-4 transition-transform duration-200 ease-out group-hover:rotate-45 group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+								</svg>
+								Regenerate Cover
+							{/if}
+						</button>
+						<button
+							onclick={() => showMetadataLookup = true}
+							type="button"
+							class="group inline-flex items-center rounded-lg bg-[var(--color-primary-500)] px-3 py-1.5 text-sm text-white transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+						>
+							<svg class="mr-2 h-4 w-4 transition-transform duration-200 ease-out group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+							</svg>
+							Lookup Metadata
+						</button>
 					</div>
 				</div>
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -901,6 +938,7 @@
 							<BookCoverFrame
 								src={book.cover_path ? getCoverThumbUrl(book.id, 'large', book.cover_updated_on) : null}
 								alt={book.title}
+								format={book.format}
 								mode="contain"
 								frameClass="aspect-[2/3] w-full"
 								imageClass="transition-transform duration-200 ease-out group-hover:scale-[1.02]"
@@ -910,7 +948,7 @@
 
 					<div class="mt-4">
 						<div class="flex items-center justify-between mb-2">
-							<span class="text-sm text-[var(--color-surface-text-muted)]">Progress</span>
+							<span class="text-sm text-[var(--color-surface-text-muted)]">{isAudioItem ? 'Listening Progress' : 'Progress'}</span>
 							<span class="text-sm font-medium text-[var(--color-surface-text)]">{Math.round(book.percent || 0)}%</span>
 						</div>
 						<div class="w-full h-2 bg-[var(--color-surface-700)] rounded-full overflow-hidden">
@@ -920,6 +958,7 @@
 							></div>
 						</div>
 					</div>
+					{#if primarySpeedReadFormat}
 					<div class="mt-3">
 						<div class="flex items-center justify-between mb-2">
 							<span class="text-sm text-[var(--color-surface-text-muted)]">Speed Reader</span>
@@ -932,6 +971,7 @@
 							></div>
 						</div>
 					</div>
+					{/if}
 
 					<div class="mt-3 mb-4 md:mb-0 flex flex-col gap-2">
 						<div class="relative">
@@ -941,7 +981,7 @@
 										href={getBookReaderHref(book.id, primaryReadFormat, `/book/${book.id}`)}
 										class="flex min-w-0 flex-1 items-center justify-between gap-3 bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-colors duration-200 ease-out hover:bg-[var(--color-primary-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
 									>
-										<span class="truncate">{book.opened && book.percent > 0 ? 'Continue Reading' : 'Read Now'}</span>
+										<span class="truncate">{getPrimaryReadActionLabel()}</span>
 										<span class="text-[10px] uppercase tracking-[0.14em] text-white/80">{getFormatDisplayLabel(primaryReadFormat)}</span>
 									</a>
 								{:else}
@@ -950,7 +990,7 @@
 										disabled
 										class="flex min-w-0 flex-1 items-center justify-between gap-3 bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text-muted)] sm:px-4"
 									>
-										<span class="truncate">{loading ? 'Checking reader...' : 'Read Now unavailable'}</span>
+										<span class="truncate">{getUnavailableReadActionLabel()}</span>
 										<span class="text-[10px] uppercase tracking-[0.14em]">{filesError ? 'retry' : 'no reader'}</span>
 									</button>
 								{/if}
@@ -1243,7 +1283,7 @@
 							onclick={() => handleTabChange('sessions')}
 							class="flex-shrink-0 border-b-2 -mb-px px-3 py-2 text-sm font-medium transition-all duration-200 ease-out sm:px-4 {activeTab === 'sessions' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:-translate-y-px hover:border-[var(--color-surface-border)] hover:text-[var(--color-surface-text)]'}"
 						>
-							Reading Sessions
+							{isAudioItem ? 'Listening Sessions' : 'Reading Sessions'}
 						</button>
 						<button
 							onclick={() => handleTabChange('files')}
@@ -1261,7 +1301,7 @@
 							</div>
 						{:else if sessions.length === 0}
 							<div class="text-center py-8 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">
-								<p class="text-[var(--color-surface-text-muted)]">No reading sessions yet</p>
+								<p class="text-[var(--color-surface-text-muted)]">{isAudioItem ? 'No listening sessions yet' : 'No reading sessions yet'}</p>
 							</div>
 						{:else}
 							<div class="max-h-[min(32rem,55dvh)] space-y-3 overflow-y-auto overscroll-contain p-1 pr-2 [scrollbar-gutter:stable]">
@@ -1393,6 +1433,7 @@
 											<BookCoverFrame
 												src={similar.cover_path ? getCoverThumbUrl(similar.id, 'medium', similar.cover_updated_on) : null}
 												alt={similar.title}
+												format={similar.format}
 												mode="contain"
 												frameClass="aspect-[2/3] w-full mb-2"
 												imageClass="transition-all duration-200 ease-out group-hover:scale-[1.02] group-hover:opacity-80"
@@ -1531,6 +1572,7 @@
 					<BookCoverFrame
 						src={book.cover_path ? `/api/covers/${book.id}` : null}
 						alt={book.title}
+						format={book.format}
 						mode="contain"
 						frameClass="aspect-[2/3] w-full"
 						imageClass="object-contain p-2"

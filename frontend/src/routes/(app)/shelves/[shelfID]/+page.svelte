@@ -4,7 +4,7 @@
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
-	import { showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { appActivity, showFormatOnCover, getFormatColor } from '$lib/stores';
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 
 	let shelf = $state<any>(null);
@@ -160,6 +160,12 @@
 		if (selectedBooks.size === 0 || metadataLookupQueueing) return;
 		showMetadataMenu = false;
 		metadataLookupQueueing = true;
+		const selectedCount = selectedBooks.size;
+		const pendingJob = appActivity.startPendingJob({
+			job_type: 'metadata_lookup',
+			title: `Bulk metadata lookup (${selectedCount} books)`,
+			total_items: selectedCount
+		});
 		try {
 			const res = await fetch('/api/jobs/metadata-lookup', {
 				method: 'POST',
@@ -170,9 +176,12 @@
 				throw new Error(await res.text());
 			}
 			metadataLookupJob = await res.json();
+			appActivity.confirmPendingJob(pendingJob, metadataLookupJob);
+			await appActivity.refresh();
 			showBulkMetadataReview = true;
 		} catch (error) {
 			console.error('Failed to queue metadata lookup:', error);
+			appActivity.failPendingJob(pendingJob, 'Unable to queue metadata lookup.');
 		} finally {
 			metadataLookupQueueing = false;
 		}
@@ -264,6 +273,7 @@
 								<BookCoverFrame
 									src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
 									alt={book.title}
+									format={book.format}
 									mode="cover"
 									frameClass="aspect-[2/3]"
 									imageClass="group-hover:scale-105 transition-transform"

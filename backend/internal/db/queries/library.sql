@@ -5,10 +5,10 @@ SELECT * FROM library WHERE id = ?;
 SELECT * FROM library ORDER BY name;
 
 -- name: CreateLibrary :exec
-INSERT INTO library (name, icon) VALUES (?, ?);
+INSERT INTO library (name, icon, comic_spread_fallback) VALUES (?, ?, ?);
 
 -- name: UpdateLibrary :exec
-UPDATE library SET name = ?, icon = ? WHERE id = ?;
+UPDATE library SET name = ?, icon = ?, comic_spread_fallback = ? WHERE id = ?;
 
 -- name: DeleteLibrary :exec
 DELETE FROM library WHERE id = ?;

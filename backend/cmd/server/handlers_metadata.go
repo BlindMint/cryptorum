@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"cryptorum/internal/coverprefs"
 	"cryptorum/internal/covers"
 	"cryptorum/internal/metadata"
 )
@@ -1479,6 +1480,23 @@ func RegenerateBookCoverHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var req struct {
+		ComicSpreadFallback *string `json:"comic_spread_fallback"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			errorResponse(w, http.StatusBadRequest, "Invalid request body")
+			return
+		}
+	}
+	if req.ComicSpreadFallback != nil {
+		if err := updateBookComicSpreadFallback(bookIDInt, current.ID, *req.ComicSpreadFallback); err != nil {
+			slog.Error("Failed to save comic spread fallback override", "bookID", bookIDInt, "error", err)
+			errorResponse(w, http.StatusInternalServerError, "Failed to save cover preference")
+			return
+		}
+	}
+
 	var filePath string
 	if err := appDB.QueryRow(`SELECT path FROM book_file WHERE book_id = ? LIMIT 1`, bookIDInt).Scan(&filePath); err != nil {
 		errorResponse(w, http.StatusNotFound, "Book file not found")
@@ -1487,7 +1505,9 @@ func RegenerateBookCoverHandler(w http.ResponseWriter, r *http.Request) {
 
 	filePath = translateHostPathToContainerPath(filePath)
 
-	meta, err := metadata.Extract(filePath)
+	meta, err := metadata.ExtractWithOptions(filePath, metadata.ExtractOptions{
+		ComicSpreadFallbackSide: resolveBookComicSpreadFallback(bookIDInt),
+	})
 	if err != nil || meta == nil || len(meta.CoverData) == 0 {
 		errorResponse(w, http.StatusNotFound, "No cover could be extracted from the source file")
 		return
@@ -1530,6 +1550,31 @@ func RegenerateBookCoverHandler(w http.ResponseWriter, r *http.Request) {
 		"book_id": bookIDInt,
 	})
 	jsonResponse(w, http.StatusOK, map[string]string{"status": "regenerated"})
+}
+
+func updateBookComicSpreadFallback(bookID, ownerUserID int64, value string) error {
+	normalized := coverprefs.NormalizeComicSpreadFallback(value, true)
+	_, err := appDB.Exec(`
+		INSERT INTO book_metadata (book_id, comic_spread_fallback, authors, genres, locked_fields, owner_user_id)
+		VALUES (?, ?, '[]', '[]', '[]', ?)
+		ON CONFLICT(book_id) DO UPDATE SET
+			comic_spread_fallback = excluded.comic_spread_fallback
+	`, bookID, normalized, ownerUserID)
+	return err
+}
+
+func resolveBookComicSpreadFallback(bookID int64) string {
+	settings := covers.LoadSettings(appDB.DB)
+	bookValue := coverprefs.ComicSpreadFallbackInherit
+	libraryValue := coverprefs.ComicSpreadFallbackInherit
+	_ = appDB.QueryRow(`
+		SELECT COALESCE(bm.comic_spread_fallback, ?), COALESCE(l.comic_spread_fallback, ?)
+		FROM book b
+		JOIN library l ON b.library_id = l.id
+		LEFT JOIN book_metadata bm ON b.id = bm.book_id
+		WHERE b.id = ?
+	`, coverprefs.ComicSpreadFallbackInherit, coverprefs.ComicSpreadFallbackInherit, bookID).Scan(&bookValue, &libraryValue)
+	return coverprefs.ResolveComicSpreadFallback(bookValue, libraryValue, settings.ComicSpreadFallback)
 }
 
 // LockMetadataFieldHandler locks a metadata field
