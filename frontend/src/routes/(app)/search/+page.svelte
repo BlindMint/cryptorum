@@ -13,6 +13,7 @@
 	const sortOptions = [
 		{ value: 'title', label: 'Title' },
 		{ value: 'authors', label: 'Author' },
+		{ value: 'series', label: 'Series' },
 		{ value: 'added_at', label: 'Date Added' },
 		{ value: 'last_read', label: 'Last Read' }
 	];

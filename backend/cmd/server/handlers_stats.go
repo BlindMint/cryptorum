@@ -307,17 +307,24 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		// Parse authors JSON and count individually
 		var authors []string
 		json.Unmarshal([]byte(authorsJson), &authors)
+		seenInRow := make(map[string]bool)
 		for _, author := range authors {
+			key := normalizedAuthorMatchKey(author)
+			if key == "" || seenInRow[key] {
+				continue
+			}
+			seenInRow[key] = true
+			displayName := canonicalAuthorOptionName(author)
 			found := false
 			for i, existing := range stats.AuthorDistribution {
-				if existing.Name == author {
+				if normalizedAuthorMatchKey(existing.Name) == key {
 					stats.AuthorDistribution[i].Count += cnt
 					found = true
 					break
 				}
 			}
 			if !found {
-				stats.AuthorDistribution = append(stats.AuthorDistribution, AuthorCount{Name: author, Count: cnt})
+				stats.AuthorDistribution = append(stats.AuthorDistribution, AuthorCount{Name: displayName, Count: cnt})
 			}
 		}
 	}
@@ -585,6 +592,12 @@ func countDistinctStatsJSONValues(column, ownerClause string, ownerArgs []interf
 		}
 		for _, item := range items {
 			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if column == "authors" {
+				item = normalizedAuthorMatchKey(item)
+			}
 			if item != "" {
 				values[item] = true
 			}
