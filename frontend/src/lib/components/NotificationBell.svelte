@@ -32,11 +32,13 @@
 	let open = $state(false);
 	let notifications = $derived($appActivity.notifications as NotificationItem[]);
 	let activeJobs = $derived($appActivity.activeJobs as JobItem[]);
+	const runningJobStatuses = ['starting', 'queued', 'running', 'cancelling'];
+	let runningJobCount = $derived(activeJobs.filter((job) => runningJobStatuses.includes(job.status)).length);
 	let unreadNotificationCount = $derived(
 		notifications.filter((item) => item.source !== 'job' && !item.read_at).length + activeJobs.length
 	);
 	let hasUnreadNotifications = $derived(unreadNotificationCount > 0);
-	let hasActiveJobs = $derived(activeJobs.length > 0);
+	let hasActiveJobs = $derived(runningJobCount > 0);
 	let buttonRef = $state<HTMLButtonElement | null>(null);
 	let panelRef = $state<HTMLDivElement | null>(null);
 	let {
@@ -122,7 +124,7 @@
 		<button
 			bind:this={buttonRef}
 			onclick={() => open = !open}
-			class={`relative rounded-lg text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors ${$notificationVisualIndicator && hasUnreadNotifications ? 'bg-[var(--color-primary-500)]/10 shadow-[0_0_18px_rgba(249,115,22,0.25)]' : ''} ${mobileMenu ? 'flex w-full items-center justify-between gap-3 px-0 py-0' : 'p-2'}`}
+			class={`relative rounded-lg text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] ${hasActiveJobs ? '' : 'hover:bg-[var(--color-surface-overlay)]'} ${mobileMenu ? 'flex w-full items-center justify-between gap-3 px-0 py-0' : 'inline-flex h-10 w-10 items-center justify-center p-0'}`}
 			title="Notifications"
 			aria-label="Notifications"
 		>
@@ -200,10 +202,12 @@
 				{#if activeJobs.length > 0}
 					<div class="border-b border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/50 px-4 py-3">
 						<div class="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-primary-300)]">
-							<svg class="h-3.5 w-3.5 animate-scan-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-							</svg>
-							Active Jobs
+							{#if hasActiveJobs}
+								<svg class="h-3.5 w-3.5 animate-scan-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+								</svg>
+							{/if}
+							{hasActiveJobs ? 'Active Jobs' : 'Recent Jobs'}
 						</div>
 						<div class="space-y-2">
 							{#each activeJobs as job}
@@ -250,18 +254,18 @@
 <style>
 	.notification-icon-frame {
 		position: relative;
-		display: inline-flex;
-		width: 1.5rem;
-		height: 1.5rem;
+		display: grid;
+		width: 1.75rem;
+		height: 1.75rem;
 		flex-shrink: 0;
-		align-items: center;
-		justify-content: center;
+		place-items: center;
 		color: inherit;
 	}
 
 	.notification-bell-icon {
-		position: relative;
+		grid-area: 1 / 1;
 		z-index: 1;
+		transform-origin: center;
 		transition:
 			color 180ms ease,
 			transform 180ms ease;
@@ -273,8 +277,9 @@
 	}
 
 	.notification-activity-ring {
-		position: absolute;
-		inset: -3px;
+		grid-area: 1 / 1;
+		width: 1.75rem;
+		height: 1.75rem;
 		border: 2px solid color-mix(in srgb, var(--color-surface-border, rgba(55, 65, 81, 0.6)) 70%, transparent);
 		border-top-color: var(--color-primary-500, #f97316);
 		border-radius: 999px;

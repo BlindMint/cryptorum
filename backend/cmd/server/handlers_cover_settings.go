@@ -17,6 +17,7 @@ type bookCoverSettingsResponse struct {
 	HorizontalCropping   bool    `json:"horizontal_cropping"`
 	AspectRatioThreshold float64 `json:"aspect_ratio_threshold"`
 	SmartCropping        bool    `json:"smart_cropping"`
+	ComicSpreadFallback  string  `json:"comic_spread_fallback"`
 }
 
 func loadBookCoverSettingsResponse() bookCoverSettingsResponse {
@@ -27,6 +28,7 @@ func loadBookCoverSettingsResponse() bookCoverSettingsResponse {
 		HorizontalCropping:   s.HorizontalCropping,
 		AspectRatioThreshold: s.AspectRatioThreshold,
 		SmartCropping:        s.SmartCropping,
+		ComicSpreadFallback:  s.ComicSpreadFallback,
 	}
 }
 
@@ -49,6 +51,7 @@ func updateBookCoverSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		HorizontalCropping:   req.HorizontalCropping,
 		AspectRatioThreshold: req.AspectRatioThreshold,
 		SmartCropping:        req.SmartCropping,
+		ComicSpreadFallback:  req.ComicSpreadFallback,
 	}
 
 	if settings.AspectRatioThreshold <= 0 {
@@ -66,6 +69,7 @@ func updateBookCoverSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		"horizontal_cropping": settings.HorizontalCropping,
 		"aspect_threshold":    settings.AspectRatioThreshold,
 		"smart_cropping":      settings.SmartCropping,
+		"comic_spread":        settings.ComicSpreadFallback,
 	})
 	jsonResponse(w, http.StatusOK, loadBookCoverSettingsResponse())
 }
@@ -118,6 +122,7 @@ func regenerateBookCoversHandler(w http.ResponseWriter, r *http.Request) {
 		HorizontalCropping:   settings.HorizontalCropping,
 		AspectRatioThreshold: settings.AspectRatioThreshold,
 		SmartCropping:        settings.SmartCropping,
+		ComicSpreadFallback:  settings.ComicSpreadFallback,
 	}); err != nil {
 		slog.Error("Failed to persist book cover settings before regeneration", "error", err)
 		errorResponse(w, http.StatusInternalServerError, "Failed to save book cover settings")

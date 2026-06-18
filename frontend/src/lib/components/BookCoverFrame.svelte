@@ -1,14 +1,17 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import BookCoverPlaceholder from '$lib/components/BookCoverPlaceholder.svelte';
+	import { getBookMediaKind, type BookMediaKind } from '$lib/utils/book-formats';
 
 	interface Props {
 		src?: string | null;
 		alt?: string;
+		format?: string | null;
 		mode?: 'cover' | 'contain';
 		frameClass?: string;
 		imageClass?: string;
 		placeholderSize?: 'sm' | 'md' | 'lg';
+		placeholderKind?: BookMediaKind;
 		loading?: 'eager' | 'lazy';
 		decoding?: 'sync' | 'async' | 'auto';
 		retryCount?: number;
@@ -18,10 +21,12 @@
 	let {
 		src = null,
 		alt = '',
+		format = null,
 		mode = 'cover',
 		frameClass = '',
 		imageClass = '',
 		placeholderSize = 'lg',
+		placeholderKind,
 		loading = 'lazy',
 		decoding = 'async',
 		retryCount = 0,
@@ -29,6 +34,7 @@
 	}: Props = $props();
 
 	let fitClass = $derived(mode === 'contain' ? 'object-contain' : 'object-cover');
+	let resolvedPlaceholderKind = $derived(placeholderKind ?? getBookMediaKind(format));
 	let retryAttempt = $state(0);
 	let imageFailed = $state(false);
 	let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -80,6 +86,6 @@
 	{#if imageSrc}
 		<img src={imageSrc} alt={alt} {loading} {decoding} class={`w-full h-full ${fitClass} ${imageClass}`} onerror={handleImageError} />
 	{:else}
-		<BookCoverPlaceholder size={placeholderSize} />
+		<BookCoverPlaceholder size={placeholderSize} kind={resolvedPlaceholderKind} />
 	{/if}
 </div>

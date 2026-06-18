@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { appActivity } from '$lib/stores';
 
 	type MetadataCandidate = {
 		provider: string;
@@ -148,6 +149,7 @@
 
 		applying = true;
 		applyMessage = '';
+		let pendingJob: string | null = null;
 		try {
 			const payload = validItems.map((item) => ({
 				book_id: item.book_id,
@@ -161,13 +163,32 @@
 			const body = payload.length === 1
 				? { book_id: payload[0].book_id, metadata: payload[0].metadata }
 				: { items: payload, include_cover: includeCover };
+			if (payload.length > 1) {
+				pendingJob = appActivity.startPendingJob({
+					job_type: 'metadata_apply',
+					title: `Apply metadata (${payload.length} books)`,
+					total_items: payload.length
+				});
+			}
 
 			const res = await fetch(endpoint, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(body)
 			});
-			if (!res.ok) throw new Error(await res.text());
+			if (!res.ok) {
+				if (pendingJob) appActivity.failPendingJob(pendingJob, 'Unable to queue metadata update.');
+				throw new Error(await res.text());
+			}
+			if (pendingJob) {
+				const queuedJob = await res.json();
+				if (queuedJob?.id) {
+					appActivity.confirmPendingJob(pendingJob, queuedJob);
+				} else {
+					appActivity.confirmPendingJob(pendingJob);
+				}
+				await appActivity.refresh();
+			}
 
 			const next = new Set(selected);
 			for (const item of validItems) next.delete(item.book_id);
@@ -177,6 +198,7 @@
 			await onApplied?.();
 		} catch (error) {
 			console.error('Failed to apply metadata:', error);
+			if (pendingJob) appActivity.failPendingJob(pendingJob, 'Unable to queue metadata update.');
 			applyMessage = 'Unable to update metadata.';
 		} finally {
 			applying = false;

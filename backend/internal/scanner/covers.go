@@ -7,14 +7,18 @@ import (
 	"path/filepath"
 	"time"
 
+	"cryptorum/internal/coverprefs"
 	"cryptorum/internal/covers"
 	"cryptorum/internal/metadata"
 )
 
 type coverCandidate struct {
-	bookID            int64
-	filePath          string
-	existingCoverPath string
+	bookID                int64
+	libraryID             int64
+	filePath              string
+	existingCoverPath     string
+	comicSpreadFallback   string
+	librarySpreadFallback string
 }
 
 // CoverProgressFunc reports cover regeneration progress.
@@ -38,7 +42,13 @@ func (s *Scanner) RegenerateCoversForLibrary(libraryID int64, missingOnly bool, 
 	total := len(candidates)
 
 	for i, candidate := range candidates {
-		meta, err := metadata.Extract(candidate.filePath)
+		meta, err := metadata.ExtractWithOptions(candidate.filePath, metadata.ExtractOptions{
+			ComicSpreadFallbackSide: coverprefs.ResolveComicSpreadFallback(
+				candidate.comicSpreadFallback,
+				candidate.librarySpreadFallback,
+				settings.ComicSpreadFallback,
+			),
+		})
 		if err != nil || meta == nil || len(meta.CoverData) == 0 {
 			failed++
 			if progress != nil {
@@ -99,8 +109,11 @@ func (s *Scanner) CountCoverCandidatesForLibrary(libraryID int64, missingOnly bo
 
 func (s *Scanner) coverCandidates(libraryID int64, missingOnly bool) ([]coverCandidate, error) {
 	query := `
-		SELECT b.id, bf.path, COALESCE(bm.cover_path, '')
+		SELECT b.id, b.library_id, bf.path, COALESCE(bm.cover_path, ''),
+		       COALESCE(bm.comic_spread_fallback, 'inherit'),
+		       COALESCE(l.comic_spread_fallback, 'inherit')
 		FROM book b
+		JOIN library l ON b.library_id = l.id
 		JOIN book_file bf ON b.id = bf.book_id
 		LEFT JOIN book_metadata bm ON b.id = bm.book_id
 	`
@@ -120,7 +133,14 @@ func (s *Scanner) coverCandidates(libraryID int64, missingOnly bool) ([]coverCan
 
 	for rows.Next() {
 		var candidate coverCandidate
-		if err := rows.Scan(&candidate.bookID, &candidate.filePath, &candidate.existingCoverPath); err != nil {
+		if err := rows.Scan(
+			&candidate.bookID,
+			&candidate.libraryID,
+			&candidate.filePath,
+			&candidate.existingCoverPath,
+			&candidate.comicSpreadFallback,
+			&candidate.librarySpreadFallback,
+		); err != nil {
 			continue
 		}
 

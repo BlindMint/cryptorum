@@ -2,6 +2,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { readerSettings, epubThemes, fontFamilies, fontWeightOptions, cbxFitModes, cbxScrollModes, skipIntervalOptions, sleepTimerOptions, waveformStyles, type ReaderSettings } from '$lib/stores/readerSettings';
 	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, updateCustomTheme, removeCustomTheme, resetPrimaryToDefault, resetSurfaceToDefault, generateId, updateGlowEnabled, updateGlowAutoMode, updateGlowColor, updateGlowIntensity, updateBgImageEnabled, updateBgImageTransparency, updateBgImageDisplay, updateSelectedBgImage, addBackgroundImage, removeBackgroundImage, DEFAULT_THEME_PRIMARY, DEFAULT_THEME_SURFACE } from '$lib/stores/theme';
+	import { appActivity } from '$lib/stores';
 	import type { BackgroundImageDisplay } from '$lib/stores/theme';
 import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 import AdminPanel from './AdminPanel.svelte';
@@ -37,12 +38,22 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	let activeLibraryScanJobs = $state<any[]>([]);
 	let activeTab = $state<'general' | 'metadata' | 'reader' | 'appearance' | 'jobs' | 'admin'>('general');
 	let settingsSaved = $state(false);
+	const globalComicSpreadFallbackOptions = [
+		{ value: 'right', label: 'Right side' },
+		{ value: 'left', label: 'Left side' },
+		{ value: 'disabled', label: 'Disabled' }
+	];
+	const inheritedComicSpreadFallbackOptions = [
+		{ value: 'inherit', label: 'Inherit' },
+		...globalComicSpreadFallbackOptions
+	];
 	let bookCoverSettings = $state({
 		preserve_full_cover: true,
 		vertical_cropping: true,
 		horizontal_cropping: true,
 		aspect_ratio_threshold: 2.5,
-		smart_cropping: true
+		smart_cropping: true,
+		comic_spread_fallback: 'right'
 	});
 	let coverSettingsSaved = $state(false);
 	let coverSettingsSaving = $state(false);
@@ -62,6 +73,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		name: '',
 		icon: '',
 		exclude_from_suggestions: false,
+		comic_spread_fallback: 'inherit',
 		paths: ['']
 	});
 	let originalLibraryPaths = $state<string[]>([]);
@@ -316,10 +328,11 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
   		editingLibrary = library;
   		if (library) {
 			originalLibraryPaths = normalizeLibraryPaths(library.paths || []);
-  			libraryForm = {
-  				name: library.name,
-  				icon: library.icon || '',
+			libraryForm = {
+				name: library.name,
+				icon: library.icon || '',
 				exclude_from_suggestions: !!library.exclude_from_suggestions,
+				comic_spread_fallback: library.comic_spread_fallback || 'inherit',
 				paths: (library.paths || []).filter((p: string) => p.trim())
   			};
   		} else {
@@ -328,6 +341,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
   				name: '',
   				icon: '',
 				exclude_from_suggestions: false,
+				comic_spread_fallback: 'inherit',
   				paths: ['']
   			};
   		}
@@ -433,6 +447,11 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	async function regenerateBookCovers(mode: 'all' | 'missing') {
 		coverRegenerating = true;
 		coverActionMessage = '';
+		const pendingJob = appActivity.startPendingJob({
+			job_type: 'cover_regenerate',
+			title: mode === 'all' ? 'Regenerate book covers' : 'Regenerate missing book covers',
+			payload: { mode }
+		});
 		try {
 			const response = await fetch('/api/settings/book-covers/regenerate', {
 				method: 'POST',
@@ -440,12 +459,22 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 				body: JSON.stringify({ mode, settings: bookCoverSettings })
 			});
 			if (response.ok) {
+				const job = await response.json().catch(() => null);
+				if (job?.id) {
+					appActivity.confirmPendingJob(pendingJob, job);
+				} else {
+					appActivity.confirmPendingJob(pendingJob);
+				}
+				await appActivity.refresh();
 				coverActionMessage = mode === 'all'
 					? 'Cover regeneration job queued for all books.'
 					: 'Cover regeneration job queued for books missing covers.';
+			} else {
+				appActivity.failPendingJob(pendingJob, 'Unable to queue cover regeneration.');
 			}
 		} catch (e) {
 			console.error('Failed to start cover regeneration:', e);
+			appActivity.failPendingJob(pendingJob, 'Unable to queue cover regeneration.');
 		} finally {
 			coverRegenerating = false;
 			setTimeout(() => coverActionMessage = '', 4000);
@@ -527,6 +556,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 			name: libraryForm.name.trim(),
 			icon: libraryForm.icon.trim(),
 			exclude_from_suggestions: libraryForm.exclude_from_suggestions,
+			comic_spread_fallback: libraryForm.comic_spread_fallback,
 			paths: filteredPaths
 		};
 
@@ -602,7 +632,8 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 				vertical_cropping: data.book_covers?.vertical_cropping ?? true,
 				horizontal_cropping: data.book_covers?.horizontal_cropping ?? true,
 				aspect_ratio_threshold: data.book_covers?.aspect_ratio_threshold ?? 2.5,
-				smart_cropping: data.book_covers?.smart_cropping ?? true
+				smart_cropping: data.book_covers?.smart_cropping ?? true,
+				comic_spread_fallback: data.book_covers?.comic_spread_fallback ?? 'right'
 			};
 			return data;
 		} catch (e) {
@@ -668,18 +699,33 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	}
 
 	async function scanLibrary(library: any) {
+		const pendingJob = appActivity.startPendingJob({
+			job_type: 'library_scan',
+			title: `Scan library: ${library.name}`,
+			payload: { library_id: library.id, library_name: library.name }
+		});
 		try {
 			const response = await fetch(`/api/libraries/${library.id}/scan`, { method: 'POST' });
 			if (response.ok) {
+				const result = await response.json().catch(() => null);
+				if (result?.job_id) {
+					appActivity.confirmPendingJob(pendingJob, result.job_id);
+				} else {
+					appActivity.confirmPendingJob(pendingJob);
+				}
 				if ((window as any).refreshSidebar) {
 					(window as any).refreshSidebar();
 				}
+				await appActivity.refresh();
 				await Promise.all([loadSettings(), loadActiveLibraryScanJobs()]);
 				scanning = true;
 				startScanPolling();
+			} else {
+				appActivity.failPendingJob(pendingJob, 'Unable to queue library scan.');
 			}
 		} catch (e) {
 			console.error('Failed to scan library:', e);
+			appActivity.failPendingJob(pendingJob, 'Unable to queue library scan.');
 		}
 	}
 
@@ -719,9 +765,24 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 			return;
 		}
 		scanning = true;
+		const pendingJob = appActivity.startPendingJob({
+			job_type: 'library_scan',
+			title: 'Scan libraries'
+		});
 		try {
 			const response = await fetch('/api/scan', { method: 'POST' });
 			const result = response.ok ? await response.json().catch(() => null) : null;
+			if (response.ok) {
+				const jobIds = [...(result?.queued_jobs ?? []), ...(result?.existing_jobs ?? [])];
+				if (jobIds.length > 0) {
+					appActivity.confirmPendingJob(pendingJob, jobIds);
+				} else {
+					appActivity.removePendingJob(pendingJob);
+				}
+				await appActivity.refresh();
+			} else {
+				appActivity.failPendingJob(pendingJob, 'Unable to queue library scan.');
+			}
 			if ((window as any).refreshSidebar) {
 				(window as any).refreshSidebar();
 			}
@@ -740,6 +801,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 			}
 		} catch (e) {
 			console.error('Scan failed:', e);
+			appActivity.failPendingJob(pendingJob, 'Unable to queue library scan.');
 			scanning = false;
 		}
 	}
@@ -2146,6 +2208,21 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 								class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 							>
 						</div>
+						<div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+							<div>
+								<label for="comic-spread-fallback-global" class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Wide Comic Fallback Cover</label>
+								<select
+									id="comic-spread-fallback-global"
+									value={bookCoverSettings.comic_spread_fallback}
+									onchange={(e) => updateBookCoverSetting('comic_spread_fallback', e.currentTarget.value)}
+									class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-sm text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+								>
+									{#each globalComicSpreadFallbackOptions as option}
+										<option value={option.value}>{option.label}</option>
+									{/each}
+								</select>
+							</div>
+						</div>
 						{#if !bookCoverSettings.preserve_full_cover}
 							<div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
 								<div class="flex items-center justify-between rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
@@ -2598,6 +2675,21 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 							class="mt-1 h-4 w-4 shrink-0 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 						/>
 					</label>
+				</div>
+
+				<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
+					<label for="settings-library-comic-spread-fallback" class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
+						Wide Comic Fallback Cover
+					</label>
+					<select
+						id="settings-library-comic-spread-fallback"
+						bind:value={libraryForm.comic_spread_fallback}
+						class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-sm text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+					>
+						{#each inheritedComicSpreadFallbackOptions as option}
+							<option value={option.value}>{option.label}</option>
+						{/each}
+					</select>
 				</div>
 
 				<div>
