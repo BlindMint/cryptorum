@@ -111,6 +111,94 @@ function createNotificationVisualIndicatorStore() {
 
 export const notificationVisualIndicator = createNotificationVisualIndicatorStore();
 
+export type NotificationEventPreferences = {
+	appNotifications: boolean;
+	completedJobs: boolean;
+	authEvents: boolean;
+	appEvents: boolean;
+};
+
+const defaultNotificationEventPreferences: NotificationEventPreferences = {
+	appNotifications: true,
+	completedJobs: true,
+	authEvents: false,
+	appEvents: false
+};
+
+function createNotificationEventPreferencesStore() {
+	const { subscribe, set, update } = writable<NotificationEventPreferences>(defaultNotificationEventPreferences);
+
+	function persist(value: NotificationEventPreferences) {
+		if (browser) {
+			localStorage.setItem('notificationEventPreferences', JSON.stringify(value));
+		}
+	}
+
+	return {
+		subscribe,
+		set: (value: NotificationEventPreferences) => {
+			persist(value);
+			set(value);
+		},
+		setKey: (key: keyof NotificationEventPreferences, value: boolean) => {
+			update((current) => {
+				const next = { ...current, [key]: value };
+				persist(next);
+				return next;
+			});
+		},
+		init: () => {
+			if (!browser) return;
+			const stored = localStorage.getItem('notificationEventPreferences');
+			if (!stored) return;
+			try {
+				set({ ...defaultNotificationEventPreferences, ...JSON.parse(stored) });
+			} catch {
+				set(defaultNotificationEventPreferences);
+			}
+		}
+	};
+}
+
+export const notificationEventPreferences = createNotificationEventPreferencesStore();
+
+let latestNotificationEventPreferences = defaultNotificationEventPreferences;
+notificationEventPreferences.subscribe((value) => {
+	latestNotificationEventPreferences = value;
+});
+
+function createReviewedMetadataLookupJobsStore() {
+	const { subscribe, set, update } = writable<Set<number>>(new Set());
+
+	return {
+		subscribe,
+		init: () => {
+			if (!browser) return;
+			try {
+				const stored = JSON.parse(sessionStorage.getItem('reviewedMetadataLookupJobs') || '[]');
+				if (Array.isArray(stored)) {
+					set(new Set(stored.filter((id) => typeof id === 'number')));
+				}
+			} catch {
+				set(new Set());
+			}
+		},
+		mark: (jobId: number) => {
+			if (!jobId || jobId < 0) return;
+			update((current) => {
+				const next = new Set(current);
+				next.add(jobId);
+				if (browser) {
+					sessionStorage.setItem('reviewedMetadataLookupJobs', JSON.stringify(Array.from(next)));
+				}
+				return next;
+			});
+		}
+	};
+}
+
+export const reviewedMetadataLookupJobs = createReviewedMetadataLookupJobsStore();
+
 export type ActivityJob = {
 	id: number;
 	job_type: string;
@@ -207,6 +295,21 @@ function createAppActivityStore() {
 		}));
 	}
 
+	function shouldShowNotification(item: ActivityNotification): boolean {
+		const prefs = latestNotificationEventPreferences;
+		if (item.source === 'job') {
+			return !!prefs.completedJobs &&
+				item.job?.status === 'completed' &&
+				(item.job.job_type === 'metadata_lookup' || item.job.job_type === 'bulk_metadata_update');
+		}
+		if (item.source === 'log') {
+			const kind = String(item.kind || '').toLowerCase();
+			if (kind.includes('auth')) return !!prefs.authEvents;
+			return !!prefs.appEvents;
+		}
+		return !!prefs.appNotifications;
+	}
+
 	function pendingExpiry(status: string) {
 		switch (status) {
 			case 'failed':
@@ -248,7 +351,7 @@ function createAppActivityStore() {
 				if (notificationsRes.ok) {
 					const data = await notificationsRes.json();
 					const items: ActivityNotification[] = data.items ?? [];
-					notifications = items.filter((item) => item.source !== 'job');
+					notifications = items.filter(shouldShowNotification);
 				}
 				if (jobsRes.ok) {
 					activeJobs = mergePendingJobs(await jobsRes.json());

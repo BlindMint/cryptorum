@@ -13,6 +13,7 @@
 		exclude_from_suggestions?: boolean;
 		comic_spread_fallback?: string;
 		is_importing?: boolean;
+		sort_order?: number;
 		paths?: string[];
 	}
 
@@ -33,6 +34,12 @@
 	let activeResizePointerId: number | null = null;
 	let activeLibraryMenu = $state<Library | null>(null);
 	let libraryMenuPosition = $state({ top: 0, left: 0 });
+	let librarySortMode = $state<'name' | 'count' | 'length'>('name');
+	let librarySortDir = $state<'asc' | 'desc'>('asc');
+	let draggedLibraryId = $state<number | null>(null);
+	let libraryDropTargetId = $state<number | null>(null);
+	let libraryDropPosition = $state<'before' | 'after'>('before');
+	let showLibrarySortMenu = $state(false);
 
 	// Library modal state
 	let showLibraryModal = $state(false);
@@ -205,6 +212,7 @@
 
 	function closeLibraryMenu() {
 		activeLibraryMenu = null;
+		showLibrarySortMenu = false;
 	}
 
 	function closeMobileNavigation() {
@@ -459,6 +467,89 @@
 		}
 	}
 
+	async function persistLibraryOrder(nextLibraries: Library[]) {
+		libraries = nextLibraries;
+		try {
+			await fetch('/api/libraries/order', {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ library_ids: nextLibraries.map((library) => library.id) })
+			});
+		} catch (e) {
+			console.error('Failed to save library order:', e);
+			await loadData();
+		}
+	}
+
+	function applyLibrarySort(mode = librarySortMode, direction = librarySortDir) {
+		librarySortMode = mode;
+		librarySortDir = direction;
+		const multiplier = direction === 'asc' ? 1 : -1;
+		const sorted = [...libraries].sort((a, b) => {
+			let comparison = 0;
+			if (mode === 'count') comparison = (a.book_count || 0) - (b.book_count || 0);
+			else if (mode === 'length') comparison = a.name.length - b.name.length;
+			else comparison = a.name.localeCompare(b.name);
+			if (comparison === 0) comparison = a.name.localeCompare(b.name);
+			return comparison * multiplier;
+		});
+		void persistLibraryOrder(sorted);
+	}
+
+	function toggleLibrarySortDirection() {
+		applyLibrarySort(librarySortMode, librarySortDir === 'asc' ? 'desc' : 'asc');
+	}
+
+	function librarySortLabel() {
+		switch (librarySortMode) {
+			case 'count':
+				return 'Count';
+			case 'length':
+				return 'Length';
+			default:
+				return 'Sort';
+		}
+	}
+
+	function handleLibraryDragStart(event: DragEvent, library: Library) {
+		draggedLibraryId = library.id;
+		libraryDropTargetId = null;
+		event.dataTransfer?.setData('text/plain', String(library.id));
+		if (event.currentTarget instanceof Element) {
+			event.dataTransfer?.setDragImage(event.currentTarget, 12, 12);
+		}
+	}
+
+	function handleLibraryDragOver(event: DragEvent, targetLibrary: Library) {
+		if (!draggedLibraryId || draggedLibraryId === targetLibrary.id) return;
+		event.preventDefault();
+		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		libraryDropTargetId = targetLibrary.id;
+		libraryDropPosition = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+	}
+
+	function clearLibraryDragState() {
+		draggedLibraryId = null;
+		libraryDropTargetId = null;
+	}
+
+	function handleLibraryDrop(event: DragEvent, targetLibrary: Library) {
+		event.preventDefault();
+		const sourceId = draggedLibraryId ?? Number(event.dataTransfer?.getData('text/plain'));
+		const dropPosition = libraryDropPosition;
+		clearLibraryDragState();
+		if (!sourceId || sourceId === targetLibrary.id) return;
+		const current = [...libraries];
+		const sourceIndex = current.findIndex((library) => library.id === sourceId);
+		const targetIndex = current.findIndex((library) => library.id === targetLibrary.id);
+		if (sourceIndex === -1 || targetIndex === -1) return;
+		const [moved] = current.splice(sourceIndex, 1);
+		const adjustedTargetIndex = current.findIndex((library) => library.id === targetLibrary.id);
+		const insertIndex = dropPosition === 'after' ? adjustedTargetIndex + 1 : adjustedTargetIndex;
+		current.splice(insertIndex, 0, moved);
+		void persistLibraryOrder(current);
+	}
+
 </script>
 
 
@@ -468,7 +559,7 @@
 	class="
 		fixed lg:static top-[4.75rem] lg:top-0 bottom-0 left-0 z-40
 		w-64 bg-[var(--color-surface-overlay)] shadow-[1px_0_0_rgba(255,255,255,0.03)]
-		transform transition-transform duration-200 ease-in-out overflow-hidden
+		transform overflow-hidden transition-[transform,width,min-width,box-shadow] duration-150 ease-out
 		lg:translate-x-0
 		{$desktopSidebarCollapsed ? 'lg:w-0 lg:min-w-0 lg:shadow-none' : 'lg:w-[var(--sidebar-width)] lg:min-w-[240px]'}
 		{$mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
@@ -476,7 +567,7 @@
 	"
 	style={`--sidebar-width: ${sidebarWidth}px;`}
 >
-	<div class={`flex h-full flex-col min-h-0 ${$desktopSidebarCollapsed ? 'lg:invisible lg:pointer-events-none' : ''}`}>
+	<div class={`flex h-full min-w-[240px] flex-col min-h-0 transition-opacity duration-100 ease-out ${$desktopSidebarCollapsed ? 'lg:pointer-events-none lg:opacity-0' : 'lg:opacity-100'}`}>
 	<div class="flex-shrink-0 p-4 pb-3 space-y-1">
 		<a
 			href="/"
@@ -534,21 +625,79 @@
 					</svg>
 					<span>Libraries</span>
 				</div>
-				<button
-					onclick={openLibraryModal}
-					class="p-1 rounded text-[var(--color-surface-text-muted)] hover:text-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)] transition-colors"
-					title="Add Library"
-				>
-					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-					</svg>
-				</button>
+				<div class="flex items-center gap-1">
+					<div class="relative">
+						<button
+							type="button"
+							onclick={(event) => { event.stopPropagation(); showLibrarySortMenu = !showLibrarySortMenu; }}
+							class="h-7 rounded border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-2 text-xs text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-600)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary-500)]"
+							aria-haspopup="menu"
+							aria-expanded={showLibrarySortMenu}
+							aria-label="Sort libraries"
+							title="Sort libraries"
+						>
+							{librarySortLabel()}
+						</button>
+						{#if showLibrarySortMenu}
+							<div class="absolute right-0 top-full z-[85] mt-1 w-28 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-1 shadow-xl" role="menu">
+								<button
+									type="button"
+									class="block w-full px-3 py-2 text-left text-xs text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)] {librarySortMode === 'name' ? 'text-[var(--color-primary-300)]' : ''}"
+									onclick={(event) => { event.stopPropagation(); showLibrarySortMenu = false; applyLibrarySort('name'); }}
+								>
+									Name
+								</button>
+								<button
+									type="button"
+									class="block w-full px-3 py-2 text-left text-xs text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)] {librarySortMode === 'count' ? 'text-[var(--color-primary-300)]' : ''}"
+									onclick={(event) => { event.stopPropagation(); showLibrarySortMenu = false; applyLibrarySort('count'); }}
+								>
+									Count
+								</button>
+								<button
+									type="button"
+									class="block w-full px-3 py-2 text-left text-xs text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)] {librarySortMode === 'length' ? 'text-[var(--color-primary-300)]' : ''}"
+									onclick={(event) => { event.stopPropagation(); showLibrarySortMenu = false; applyLibrarySort('length'); }}
+								>
+									Length
+								</button>
+							</div>
+						{/if}
+					</div>
+					<button
+						type="button"
+						onclick={(event) => { event.stopPropagation(); toggleLibrarySortDirection(); }}
+						class="flex h-7 w-7 items-center justify-center rounded text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-500)]"
+						title="Toggle sort direction"
+						aria-label="Toggle library sort direction"
+					>
+						{librarySortDir === 'asc' ? '↑' : '↓'}
+					</button>
+					<button
+						onclick={openLibraryModal}
+						class="p-1 rounded text-[var(--color-surface-text-muted)] hover:text-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)] transition-colors"
+						title="Add Library"
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+						</svg>
+					</button>
+				</div>
 			</div>
 
 			{#each libraries as library}
 				<div
-					class="group/library-row flex items-center rounded-lg transition-all duration-200 {isActive('/library?library=' + library.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
+					role="listitem"
+					draggable="true"
+					ondragstart={(event) => handleLibraryDragStart(event, library)}
+					ondragend={clearLibraryDragState}
+					ondragover={(event) => handleLibraryDragOver(event, library)}
+					ondrop={(event) => handleLibraryDrop(event, library)}
+					class="group/library-row relative flex items-center rounded-lg transition-all duration-200 {draggedLibraryId === library.id ? 'opacity-50' : ''} {isActive('/library?library=' + library.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
 				>
+					{#if libraryDropTargetId === library.id && draggedLibraryId !== library.id}
+						<div class="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded-full bg-[var(--color-primary-400)] shadow-[0_0_10px_var(--color-primary-500)] {libraryDropPosition === 'before' ? '-top-1' : '-bottom-1'}"></div>
+					{/if}
 					<a
 						href="/library?library={library.id}"
 						onclick={closeMobileNavigation}
@@ -559,8 +708,16 @@
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
 								</svg>
 							{:else}
-								<svg class="w-5 h-5 text-[var(--color-primary-500)] flex-shrink-0 transition-transform duration-200 {isActive('/library?library=' + library.id) ? '' : 'group-hover/library-row:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<svg class="w-5 h-5 text-[var(--color-primary-500)] flex-shrink-0 transition-transform duration-200 group-hover/library-row:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+								</svg>
+								<svg class="hidden h-5 w-5 flex-shrink-0 cursor-grab text-[var(--color-surface-text-muted)] group-hover/library-row:block" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<circle cx="9" cy="7" r="1.5"></circle>
+									<circle cx="15" cy="7" r="1.5"></circle>
+									<circle cx="9" cy="12" r="1.5"></circle>
+									<circle cx="15" cy="12" r="1.5"></circle>
+									<circle cx="9" cy="17" r="1.5"></circle>
+									<circle cx="15" cy="17" r="1.5"></circle>
 								</svg>
 							{/if}
 							<span class="truncate flex-1 min-w-0">{library.name}</span>
@@ -813,7 +970,7 @@
 						class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-sm text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 					>
 						{#each inheritedComicSpreadFallbackOptions as option}
-							<option value={option.value}>{option.label}</option>
+							<option value={option.value} class="bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)]">{option.label}</option>
 						{/each}
 					</select>
 				</div>

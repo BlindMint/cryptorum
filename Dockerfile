@@ -25,6 +25,8 @@ RUN apt-get update && \
     libarchive-tools \
     ffmpeg \
     fonts-liberation \
+    libegl1 \
+    libopengl0 \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 COPY calibre-cache/ /tmp/calibre-cache/
