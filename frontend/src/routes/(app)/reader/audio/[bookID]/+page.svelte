@@ -628,19 +628,19 @@
 				<div class="flex border-b border-slate-700 flex-shrink-0">
 					<button
 						onclick={() => activeSettingsTab = 'playback'}
-						class="flex-1 px-4 py-3 text-sm font-medium transition-colors {activeSettingsTab === 'playback' ? 'text-amber-500 border-b-2 border-amber-500' : 'text-slate-400 hover:text-white'}"
+						class="audio-settings-tab flex-1 px-4 py-3 text-sm font-medium transition-colors {activeSettingsTab === 'playback' ? 'active text-amber-500' : 'text-slate-400 hover:text-white'}"
 					>
 						Playback
 					</button>
 					<button
 						onclick={() => activeSettingsTab = 'display'}
-						class="flex-1 px-4 py-3 text-sm font-medium transition-colors {activeSettingsTab === 'display' ? 'text-amber-500 border-b-2 border-amber-500' : 'text-slate-400 hover:text-white'}"
+						class="audio-settings-tab flex-1 px-4 py-3 text-sm font-medium transition-colors {activeSettingsTab === 'display' ? 'active text-amber-500' : 'text-slate-400 hover:text-white'}"
 					>
 						Display
 					</button>
 					<button
 						onclick={() => activeSettingsTab = 'accessibility'}
-						class="flex-1 px-4 py-3 text-sm font-medium transition-colors {activeSettingsTab === 'accessibility' ? 'text-amber-500 border-b-2 border-amber-500' : 'text-slate-400 hover:text-white'}"
+						class="audio-settings-tab flex-1 px-4 py-3 text-sm font-medium transition-colors {activeSettingsTab === 'accessibility' ? 'active text-amber-500' : 'text-slate-400 hover:text-white'}"
 					>
 						Accessibility
 					</button>
@@ -809,3 +809,28 @@
 		{/if}
 	</div>
 </div>
+
+<style>
+	.audio-settings-tab {
+		position: relative;
+	}
+
+	.audio-settings-tab::after {
+		content: '';
+		position: absolute;
+		left: 1rem;
+		right: 1rem;
+		bottom: 0;
+		height: 2px;
+		border-radius: 999px;
+		background: #f59e0b;
+		opacity: 0;
+		transform: scaleX(0.35);
+		transition: opacity 140ms ease-out, transform 160ms ease-out;
+	}
+
+	.audio-settings-tab.active::after {
+		opacity: 1;
+		transform: scaleX(1);
+	}
+</style>

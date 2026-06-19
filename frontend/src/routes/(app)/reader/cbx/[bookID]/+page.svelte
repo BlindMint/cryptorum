@@ -1556,6 +1556,7 @@
 	}
 
 	.settings-tab {
+		position: relative;
 		flex: 1;
 		padding: 12px 8px;
 		border: none;
@@ -1564,13 +1565,31 @@
 		font-size: 12px;
 		font-weight: 500;
 		cursor: pointer;
-		transition: all 0.15s;
+		transition: color 0.15s ease-out;
+	}
+
+	.settings-tab::after {
+		content: '';
+		position: absolute;
+		left: 12px;
+		right: 12px;
+		bottom: 0;
+		height: 2px;
+		border-radius: 999px;
+		background: var(--color-primary-500, #22c55e);
+		opacity: 0;
+		transform: scaleX(0.35);
+		transition: opacity 140ms ease-out, transform 160ms ease-out;
 	}
 
 	.settings-tab:hover { color: var(--color-surface-text, #e2e8f0); }
 	.settings-tab.active {
 		color: var(--color-primary-500, #22c55e);
-		box-shadow: inset 0 -2px 0 var(--color-primary-500, #22c55e);
+	}
+
+	.settings-tab.active::after {
+		opacity: 1;
+		transform: scaleX(1);
 	}
 
 	.settings-content {

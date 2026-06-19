@@ -2,7 +2,8 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import JobListItem from './JobListItem.svelte';
-	import { appActivity, notificationVisualIndicator } from '$lib/stores';
+	import BulkMetadataReviewModal from './BulkMetadataReviewModal.svelte';
+	import { appActivity, notificationVisualIndicator, reviewedMetadataLookupJobs } from '$lib/stores';
 
 	type NotificationItem = {
 		id: number;
@@ -30,10 +31,20 @@
 	};
 
 	let open = $state(false);
+	let reviewJob = $state<JobItem | null>(null);
 	let notifications = $derived($appActivity.notifications as NotificationItem[]);
 	let activeJobs = $derived($appActivity.activeJobs as JobItem[]);
 	const runningJobStatuses = ['starting', 'queued', 'running', 'cancelling'];
 	let runningJobCount = $derived(activeJobs.filter((job) => runningJobStatuses.includes(job.status)).length);
+	let hasRecentReviewableMetadataJob = $derived(
+		notifications.some((item) =>
+			item.source === 'job' &&
+			item.job?.job_type === 'metadata_lookup' &&
+			item.job.status === 'completed' &&
+			!$reviewedMetadataLookupJobs.has(item.job.id) &&
+			Date.now() / 1000 - item.created_at < 900
+		)
+	);
 	let unreadNotificationCount = $derived(
 		notifications.filter((item) => item.source !== 'job' && !item.read_at).length + activeJobs.length
 	);
@@ -84,7 +95,17 @@
 		onClose?.();
 	}
 
+	function openMetadataReview(job: JobItem) {
+		reviewedMetadataLookupJobs.mark(job.id);
+		reviewJob = job;
+		closePanel();
+	}
+
 	function handleOpen(item: NotificationItem) {
+		if (item.job?.job_type === 'metadata_lookup') {
+			openMetadataReview(item.job);
+			return;
+		}
 		if (!item.read_at) {
 			markNotificationRead(item.id);
 		}
@@ -107,6 +128,7 @@
 			open = true;
 		}
 		notificationVisualIndicator.init();
+		reviewedMetadataLookupJobs.init();
 		appActivity.init();
 		if (!panelOnly) {
 			document.addEventListener('click', handleDocumentClick);
@@ -130,7 +152,7 @@
 		>
 			{#if mobileMenu}
 				<span class="flex items-center gap-3">
-					<span class="notification-icon-frame" class:active={hasActiveJobs}>
+					<span class="notification-icon-frame" class:active={hasActiveJobs} class:reviewable={hasRecentReviewableMetadataJob && !hasActiveJobs}>
 						<span class="notification-activity-ring" aria-hidden="true"></span>
 						<svg class="notification-bell-icon h-5 w-5 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
@@ -145,7 +167,7 @@
 					<span class="min-w-5 h-5 px-1 rounded-full bg-[var(--color-primary-500)] text-white text-[10px] font-semibold flex items-center justify-center">{unreadNotificationCount}</span>
 				{/if}
 			{:else}
-				<span class="notification-icon-frame" class:active={hasActiveJobs}>
+				<span class="notification-icon-frame" class:active={hasActiveJobs} class:reviewable={hasRecentReviewableMetadataJob && !hasActiveJobs}>
 					<span class="notification-activity-ring" aria-hidden="true"></span>
 					<svg class="notification-bell-icon w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
@@ -182,7 +204,7 @@
 								Dismiss all
 							</button>
 						{/if}
-						<a href="/settings?tab=jobs" class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Jobs</a>
+						<a href="/settings?tab=activity" class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Activity</a>
 					</div>
 				</div>
 			{:else}
@@ -194,7 +216,7 @@
 								Dismiss all
 							</button>
 						{/if}
-						<a href="/settings?tab=jobs" class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Jobs</a>
+						<a href="/settings?tab=activity" class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Activity</a>
 					</div>
 				</div>
 			{/if}
@@ -211,7 +233,17 @@
 						</div>
 						<div class="space-y-2">
 							{#each activeJobs as job}
-								<JobListItem {job} compact />
+								{#if job.job_type === 'metadata_lookup'}
+									<button
+										type="button"
+										class="block w-full rounded-lg text-left transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
+										onclick={() => openMetadataReview(job)}
+									>
+										<JobListItem {job} compact />
+									</button>
+								{:else}
+									<JobListItem {job} compact />
+								{/if}
 							{/each}
 						</div>
 					</div>
@@ -251,6 +283,15 @@
 	{/if}
 </div>
 
+{#if reviewJob}
+	<BulkMetadataReviewModal
+		jobId={reviewJob.id}
+		initialJob={reviewJob}
+		onClose={() => reviewJob = null}
+		onApplied={async () => appActivity.refresh()}
+	/>
+{/if}
+
 <style>
 	.notification-icon-frame {
 		position: relative;
@@ -276,6 +317,10 @@
 		transform: scale(0.9);
 	}
 
+	.notification-icon-frame.reviewable .notification-bell-icon {
+		color: var(--color-primary-300);
+	}
+
 	.notification-activity-ring {
 		grid-area: 1 / 1;
 		width: 1.75rem;
@@ -297,6 +342,13 @@
 		animation: notification-activity-spin 1s linear infinite;
 	}
 
+	.notification-icon-frame.reviewable .notification-activity-ring {
+		opacity: 1;
+		border-color: color-mix(in srgb, var(--color-primary-500, #f97316) 45%, transparent);
+		transform: scale(1);
+		animation: notification-review-pulse 1.8s ease-in-out infinite;
+	}
+
 	@keyframes notification-activity-spin {
 		from {
 			transform: scale(1) rotate(0deg);
@@ -304,6 +356,19 @@
 
 		to {
 			transform: scale(1) rotate(360deg);
+		}
+	}
+
+	@keyframes notification-review-pulse {
+		0%,
+		100% {
+			opacity: 0.55;
+			transform: scale(0.92);
+		}
+
+		50% {
+			opacity: 1;
+			transform: scale(1.05);
 		}
 	}
 
@@ -316,6 +381,10 @@
 		.notification-icon-frame.active .notification-activity-ring {
 			animation: none;
 			border-color: color-mix(in srgb, var(--color-primary-500, #f97316) 70%, transparent);
+		}
+
+		.notification-icon-frame.reviewable .notification-activity-ring {
+			animation: none;
 		}
 	}
 </style>

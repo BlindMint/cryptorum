@@ -24,6 +24,8 @@ type SearchResult struct {
 	Series              string  `json:"series,omitempty"`
 	SeriesNumber        float64 `json:"series_number,omitempty"`
 	SeriesNumberDisplay string  `json:"series_number_display,omitempty"`
+	Format              string  `json:"format,omitempty"`
+	FilePath            string  `json:"file_path,omitempty"`
 	CoverPath           string  `json:"cover_path"`
 	Status              string  `json:"status"`
 	Percent             float64 `json:"percent"`
@@ -50,10 +52,28 @@ type BookSearchFilters struct {
 	Genre      []string
 	Tags       []string
 	Status     []string
+	Format     []string
 	FilterMode string
 	Sort       string
 	SortDir    string
 }
+
+const activeFileSearchTextSQL = `COALESCE((
+	SELECT group_concat(
+		COALESCE(bf.format, '') || ' ' ||
+		CASE
+			WHEN lp.path IS NOT NULL AND bf.path = lp.path THEN ''
+			WHEN lp.path IS NOT NULL AND bf.path LIKE lp.path || '/%' THEN substr(bf.path, length(lp.path) + 2)
+			ELSE bf.path
+		END,
+		' '
+	)
+	FROM book_file bf
+	LEFT JOIN library_path lp
+		ON lp.library_id = b.library_id
+		AND (bf.path = lp.path OR bf.path LIKE lp.path || '/%')
+	WHERE bf.book_id = b.id AND bf.missing_at IS NULL
+), '')`
 
 func searchBooks(query string, libraryID string, current *AppUser, filters BookSearchFilters) ([]SearchResult, error) {
 	queryTokens := searchTokens(query)
@@ -143,6 +163,8 @@ func queryFTSBookCandidates(ftsQuery string, libraryID string, current *AppUser,
 		       COALESCE(bm.series, '') as series,
 		       COALESCE(bm.series_number, 0) as series_number,
 		       COALESCE(bm.series_number_display, '') as series_number_display,
+		       COALESCE((SELECT bf.format FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL ORDER BY bf.format ASC LIMIT 1), '') as format,
+		       `+activeFileSearchTextSQL+` as file_path,
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(rp.status, 'unread') as status,
 		       COALESCE(rp.percent, 0) as percent,
@@ -175,6 +197,8 @@ func queryFTSBookCandidates(ftsQuery string, libraryID string, current *AppUser,
 			&candidate.result.Series,
 			&candidate.result.SeriesNumber,
 			&candidate.result.SeriesNumberDisplay,
+			&candidate.result.Format,
+			&candidate.result.FilePath,
 			&candidate.result.CoverPath,
 			&candidate.result.Status,
 			&candidate.result.Percent,
@@ -214,7 +238,8 @@ func queryTokenLikeBookCandidates(
 		COALESCE(bm.series_number_display, '') || ' ' ||
 		CASE WHEN COALESCE(bm.series_number, 0) != 0 THEN CAST(bm.series_number AS TEXT) ELSE '' END || ' ' ||
 		COALESCE(bm.isbn, '') || ' ' ||
-		COALESCE(bm.asin, '')
+		COALESCE(bm.asin, '') || ' ' ||
+		` + activeFileSearchTextSQL + `
 	)`
 	tokenConditions := make([]string, 0, len(queryTokens))
 	args := append(append([]interface{}{}, ownerArgs...), libraryArgs...)
@@ -233,6 +258,8 @@ func queryTokenLikeBookCandidates(
 		       COALESCE(bm.series, '') as series,
 		       COALESCE(bm.series_number, 0) as series_number,
 		       COALESCE(bm.series_number_display, '') as series_number_display,
+		       COALESCE((SELECT bf.format FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL ORDER BY bf.format ASC LIMIT 1), '') as format,
+		       `+activeFileSearchTextSQL+` as file_path,
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(rp.status, 'unread') as status,
 		       COALESCE(rp.percent, 0) as percent,
@@ -265,6 +292,8 @@ func queryTokenLikeBookCandidates(
 			&candidate.result.Series,
 			&candidate.result.SeriesNumber,
 			&candidate.result.SeriesNumberDisplay,
+			&candidate.result.Format,
+			&candidate.result.FilePath,
 			&candidate.result.CoverPath,
 			&candidate.result.Status,
 			&candidate.result.Percent,
@@ -300,6 +329,8 @@ func queryFallbackBookCandidates(libraryID string, current *AppUser, filters Boo
 		       COALESCE(bm.series, '') as series,
 		       COALESCE(bm.series_number, 0) as series_number,
 		       COALESCE(bm.series_number_display, '') as series_number_display,
+		       COALESCE((SELECT bf.format FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL ORDER BY bf.format ASC LIMIT 1), '') as format,
+		       `+activeFileSearchTextSQL+` as file_path,
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(rp.status, 'unread') as status,
 		       COALESCE(rp.percent, 0) as percent,
@@ -330,6 +361,8 @@ func queryFallbackBookCandidates(libraryID string, current *AppUser, filters Boo
 			&candidate.result.Series,
 			&candidate.result.SeriesNumber,
 			&candidate.result.SeriesNumberDisplay,
+			&candidate.result.Format,
+			&candidate.result.FilePath,
 			&candidate.result.CoverPath,
 			&candidate.result.Status,
 			&candidate.result.Percent,
@@ -367,6 +400,12 @@ func buildBookSearchFilterClause(filters BookSearchFilters) (string, []interface
 	}
 	for _, value := range filters.Tags {
 		addHierarchicalJSONFilterCondition(addFilterCondition, "bm.tags", value)
+	}
+	for _, value := range filters.Format {
+		format := strings.ToLower(strings.TrimSpace(value))
+		if format != "" {
+			addFilterCondition("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", format)
+		}
 	}
 
 	if len(filterConditions) == 0 {
@@ -506,14 +545,16 @@ func scoreBookSearchCandidate(queryTokens []string, candidate bookSearchCandidat
 	authorsScore, authorsCoverage := scoreSearchField(queryTokens, authorsSearchText(candidate.result.Authors))
 	seriesScore, seriesCoverage := scoreSearchField(queryTokens, seriesText)
 	descriptionScore, descriptionCoverage := scoreSearchField(queryTokens, candidate.result.Description)
+	fileScore, fileCoverage := scoreSearchField(queryTokens, candidate.result.Format+" "+candidate.result.FilePath)
 
-	score := titleScore*5.0 + authorsScore*3.0 + seriesScore*2.0 + descriptionScore*0.5
-	bestCoverage := math.Max(titleCoverage, math.Max(authorsCoverage, math.Max(seriesCoverage, descriptionCoverage)))
+	score := titleScore*5.0 + authorsScore*3.0 + seriesScore*2.0 + descriptionScore*0.5 + fileScore*1.25
+	bestCoverage := math.Max(titleCoverage, math.Max(authorsCoverage, math.Max(seriesCoverage, math.Max(descriptionCoverage, fileCoverage))))
 	totalCoverage := combinedSearchCoverage(queryTokens, []string{
 		candidate.result.Title,
 		authorsSearchText(candidate.result.Authors),
 		seriesText,
 		candidate.result.Description,
+		candidate.result.Format + " " + candidate.result.FilePath,
 	})
 
 	score += totalCoverage * 2.0

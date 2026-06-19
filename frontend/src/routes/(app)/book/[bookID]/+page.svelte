@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import AutocompleteInput from '$lib/components/AutocompleteInput.svelte';
@@ -7,6 +7,25 @@
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
 	import { showFormatOnCover, getFormatColor } from '$lib/stores';
 	import { getCoverThumbUrl } from '$lib/utils/covers';
+	import {
+		getInlineMetadataEditUrl,
+		getMetadataEditSession,
+		getMetadataEditUrl,
+		type MetadataEditSelectionSession
+	} from '$lib/utils/metadata-edit-session';
+	import {
+		buildMetadataPayload,
+		comicSpreadFallbackOptions,
+		createMetadataEditForm,
+		formatSeriesNumber,
+		metadataStatusOptions,
+		normalizeAuthorName,
+		parseAuthors,
+		parseJsonArray,
+		ratingStars,
+		ratingToStars,
+		type MetadataEditForm
+	} from '$lib/utils/metadata-edit';
 	import {
 		getBookReaderHref,
 		getFormatDisplayLabel,
@@ -23,6 +42,8 @@
 	let editing = $state(false);
 	let saving = $state(false);
 	let activeTab = $state<'similar' | 'sessions' | 'files'>('similar');
+	let bookTabContainer: HTMLDivElement | null = $state(null);
+	let bookTabIndicatorStyle = $state('opacity: 0; transform: translateX(0); width: 0;');
 	let sessions = $state<any[]>([]);
 	let sessionsLoading = $state(false);
 	let similarBooks = $state<any[]>([]);
@@ -44,21 +65,20 @@
 	let selectedConvertFormat = $state<'epub' | 'fb2' | 'txt' | 'rtf'>('epub');
 	let statusSaving = $state(false);
 	let statusError = $state('');
+	let hoveredRating = $state(0);
+	let coverFileInput: HTMLInputElement | null = $state(null);
+	let coverUploading = $state(false);
 
-	let editForm = $state<any>({});
+	let editForm = $state<MetadataEditForm>(createMetadataEditForm(null));
 	let authorsList = $state<string[]>([]);
-	const comicSpreadFallbackOptions = [
-		{ value: 'inherit', label: 'Inherit' },
-		{ value: 'right', label: 'Right side' },
-		{ value: 'left', label: 'Left side' },
-		{ value: 'disabled', label: 'Disabled' }
-	];
+	let statusOptions = metadataStatusOptions;
+	let selectionSession = $state<MetadataEditSelectionSession | null>(null);
 
-	let statusOptions = [
-		{ value: 'unread', label: 'Unread' },
-		{ value: 'reading', label: 'Currently Reading' },
-		{ value: 'finished', label: 'Already Read' }
-	];
+	type CoverMutationResponse = {
+		cover_path?: string;
+		cover_source?: string;
+		cover_updated_on?: number;
+	};
 
 	$effect(() => {
 		const unsub = showFormatOnCover.subscribe((value: boolean) => formatOnCover = value);
@@ -67,11 +87,23 @@
 
 	onMount(() => {
 		showFormatOnCover.init();
+		void updateBookTabIndicator();
+		window.addEventListener('resize', updateBookTabIndicator);
+		return () => window.removeEventListener('resize', updateBookTabIndicator);
 	});
+
+	function loadSelectionSession() {
+		selectionSession = getMetadataEditSession($page.url.searchParams.get('selection'));
+	}
+
+	function shouldOpenInlineMetadataEdit(): boolean {
+		return $page.url.searchParams.get('edit') === 'metadata';
+	}
 
 	$effect(() => {
 		const bookId = $page.params.bookID;
 		if (bookId) {
+			loadSelectionSession();
 			book = null;
 			sessions = [];
 			similarBooks = [];
@@ -111,7 +143,12 @@
 				await goto('/login');
 				return;
 			}
-			if (bookRes?.ok) book = await bookRes.json();
+			if (bookRes?.ok) {
+				book = await bookRes.json();
+				if (shouldOpenInlineMetadataEdit()) {
+					startEditing();
+				}
+			}
 			if (filesRes?.ok) {
 				files = await filesRes.json();
 				filesError = '';
@@ -191,51 +228,6 @@
 		} catch (e) {
 			console.error('Failed to fetch shelves:', e);
 		}
-	}
-
-	function parseAuthors(authorsJson: string): string[] {
-		try {
-			const arr = JSON.parse(authorsJson);
-			return Array.isArray(arr) ? arr : [authorsJson];
-		} catch {
-			return [authorsJson];
-		}
-	}
-
-	function parseJsonArray(jsonStr: string): string[] {
-		if (!jsonStr || jsonStr === '[]' || jsonStr === '') return [];
-		try {
-			const arr = JSON.parse(jsonStr);
-			return Array.isArray(arr) ? arr : [];
-		} catch {
-			return [];
-		}
-	}
-
-	function formatSeriesNumber(item: any): string {
-		if (item?.series_number_display) return item.series_number_display;
-		const value = Number(item?.series_number || 0);
-		if (!value) return '';
-		return Number.isInteger(value) ? String(value) : String(value);
-	}
-
-	function normalizeAuthorName(name: string): string {
-		if (!name) return name;
-
-		// Remove extra whitespace and normalize
-		name = name.trim().replace(/\s+/g, ' ');
-
-		// Check if it's "Last, First" format
-		const commaIndex = name.indexOf(',');
-		if (commaIndex > 0) {
-			const lastName = name.substring(0, commaIndex).trim();
-			const firstName = name.substring(commaIndex + 1).trim();
-			// Reorder to "First Last"
-			return `${firstName} ${lastName}`;
-		}
-
-		// Handle formats like "James A. Smith" - keep as is
-		return name;
 	}
 
 	function matchAuthorNames(name1: string, name2: string): boolean {
@@ -462,30 +454,21 @@
 	}
 
 	function startEditing() {
-		editForm = {
-			title: book.title || '',
-			series: book.series || '',
-			series_number: formatSeriesNumber(book),
-			publisher: book.publisher || '',
-			pub_date: book.pub_date || '',
-			description: book.description || '',
-			rating: Math.round(book.rating || 0),
-			status: book.status || 'unread',
-			genres: parseJsonArray(book.genres || '[]').join(', '),
-			tags: parseJsonArray(book.tags || '[]').join(', '),
-			isbn: book.isbn || '',
-			asin: book.asin || '',
-			language: book.language || '',
-			page_count: book.page_count || 0,
-			comic_spread_fallback: book.comic_spread_fallback || 'inherit'
-		};
+		editForm = createMetadataEditForm(book);
 		authorsList = parseAuthors(book.authors || '[]');
 		editing = true;
 	}
 
 	function cancelEditing() {
 		editing = false;
-		editForm = {};
+		editForm = createMetadataEditForm(book);
+		authorsList = parseAuthors(book?.authors || '[]');
+		saveError = null;
+	}
+
+	function openAdvancedMetadata() {
+		if (!book?.id) return;
+		goto(getMetadataEditUrl(book.id, selectionSession, getSelectionIndex()));
 	}
 
 	async function refreshAfterMetadataApply() {
@@ -494,6 +477,66 @@
 			startEditing();
 		}
 		showMetadataLookup = false;
+	}
+
+	function getSelectionIndex(): number {
+		const queryIndex = Number($page.url.searchParams.get('index') || 0);
+		if (Number.isFinite(queryIndex) && queryIndex >= 0) return queryIndex;
+		if (!selectionSession || !book?.id) return 0;
+		return Math.max(0, selectionSession.bookIds.indexOf(book.id));
+	}
+
+	function hasSelectionNavigation(): boolean {
+		return !!selectionSession && selectionSession.bookIds.length > 1 && (!book?.id || selectionSession.bookIds.includes(book.id));
+	}
+
+	function getPositionLabel(): string {
+		if (!hasSelectionNavigation() || !selectionSession) return '';
+		return `${Math.min(getSelectionIndex() + 1, selectionSession.bookIds.length)} of ${selectionSession.bookIds.length}`;
+	}
+
+	function getCurrentMetadataPayload() {
+		return buildMetadataPayload(editForm, authorsList);
+	}
+
+	function getSavedMetadataPayload() {
+		return buildMetadataPayload(createMetadataEditForm(book), parseAuthors(book?.authors || '[]'));
+	}
+
+	function hasUnsavedMetadataChanges(): boolean {
+		if (!editing || !book) return false;
+		return JSON.stringify(getCurrentMetadataPayload()) !== JSON.stringify(getSavedMetadataPayload());
+	}
+
+	function confirmDiscardUnsavedChanges(): boolean {
+		if (!hasUnsavedMetadataChanges()) return true;
+		return confirm('Discard unsaved metadata changes?');
+	}
+
+	function backToSelection() {
+		if (!confirmDiscardUnsavedChanges()) return;
+		if (selectionSession?.sourcePath) {
+			goto(selectionSession.sourcePath);
+			return;
+		}
+		goBackToLibraryFallback();
+	}
+
+	function goBackToLibraryFallback() {
+		if (book?.library_id) {
+			goto(`/library?library=${book.library_id}`);
+		} else {
+			goto('/library');
+		}
+	}
+
+	function goToSelectionOffset(offset: number) {
+		if (!hasSelectionNavigation() || !selectionSession || !book?.id) return;
+		if (!confirmDiscardUnsavedChanges()) return;
+		const nextIndex = getSelectionIndex() + offset;
+		if (nextIndex < 0 || nextIndex >= selectionSession.bookIds.length) return;
+		const nextBookId = selectionSession.bookIds[nextIndex];
+		goto(getInlineMetadataEditUrl(nextBookId, selectionSession, nextIndex));
 	}
 
 	function openCoverModal() {
@@ -541,6 +584,16 @@
 		}
 	}
 
+	function applyCoverMutation(update: CoverMutationResponse) {
+		if (!book) return;
+		book = {
+			...book,
+			cover_path: update.cover_path ?? book.cover_path,
+			cover_source: update.cover_source ?? book.cover_source,
+			cover_updated_on: update.cover_updated_on ?? book.cover_updated_on ?? Math.floor(Date.now() / 1000)
+		};
+	}
+
 	async function regenerateCover() {
 		if (!book?.id || regeneratingCover) return;
 		regeneratingCover = true;
@@ -553,7 +606,7 @@
 				})
 			});
 			if (res.ok) {
-				await fetchBook();
+				applyCoverMutation(await res.json());
 			} else {
 				console.error('Failed to regenerate cover:', await res.text());
 			}
@@ -564,68 +617,96 @@
 		}
 	}
 
-	async function saveMetadata() {
+	function openCoverPicker() {
+		coverFileInput?.click();
+	}
+
+	async function uploadCustomCover(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file || !book?.id || coverUploading) return;
+		coverUploading = true;
+		try {
+			const formData = new FormData();
+			formData.append('cover', file);
+			const res = await fetch(`/api/books/${book.id}/cover/custom`, {
+				method: 'POST',
+				body: formData
+			});
+			if (res.ok) {
+				applyCoverMutation(await res.json());
+			} else {
+				saveError = await res.text();
+			}
+		} catch (e) {
+			console.error('Failed to upload cover:', e);
+			saveError = 'Failed to upload cover.';
+		} finally {
+			coverUploading = false;
+			input.value = '';
+		}
+	}
+
+	async function resetCustomCover() {
+		if (!book?.id || coverUploading) return;
+		if (!confirm('Remove the custom cover and restore the imported or generated cover?')) return;
+		coverUploading = true;
+		try {
+			const res = await fetch(`/api/books/${book.id}/cover/custom`, { method: 'DELETE' });
+			if (res.ok) {
+				applyCoverMutation(await res.json());
+			} else {
+				saveError = await res.text();
+			}
+		} catch (e) {
+			console.error('Failed to reset cover:', e);
+			saveError = 'Failed to reset cover.';
+		} finally {
+			coverUploading = false;
+		}
+	}
+
+	async function saveMetadata(stayEditing = false): Promise<boolean> {
+		if (!book?.id || saving) return false;
 		saveError = null;
 		saving = true;
-		console.log('saveMetadata called, book.id:', book?.id);
 		try {
-			let authorsArray: string[] = authorsList.map((a: string) => normalizeAuthorName(a.trim())).filter((a: string) => a);
-
-			let genresArray: string[] = [];
-			if (typeof editForm.genres === 'string') {
-				genresArray = editForm.genres.split(',').map((g: string) => g.trim()).filter((g: string) => g);
-			} else if (Array.isArray(editForm.genres)) {
-				genresArray = editForm.genres;
-			}
-
-			let tagsArray: string[] = [];
-			if (typeof editForm.tags === 'string') {
-				tagsArray = editForm.tags.split(',').map((t: string) => t.trim()).filter((t: string) => t);
-			} else if (Array.isArray(editForm.tags)) {
-				tagsArray = editForm.tags;
-			}
-
-			console.log('Sending PUT to /api/books/' + book.id);
 			const res = await fetch(`/api/books/${book.id}`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					title: editForm.title,
-					authors: authorsArray,
-					series: editForm.series,
-					series_number: String(editForm.series_number || '').trim(),
-					publisher: editForm.publisher,
-					pub_date: editForm.pub_date,
-					description: editForm.description,
-					rating: editForm.rating,
-					status: editForm.status,
-					genres: genresArray,
-					tags: tagsArray,
-					isbn: editForm.isbn,
-					asin: editForm.asin,
-					language: editForm.language,
-					page_count: editForm.page_count,
-					comic_spread_fallback: editForm.comic_spread_fallback
-				})
+				body: JSON.stringify(buildMetadataPayload(editForm, authorsList))
 			});
 
-			console.log('Response status:', res.status);
 			if (res.ok) {
-				const data = await res.json();
-				console.log('Save successful:', data);
-				editing = false;
-				editForm = {};
 				await fetchBook();
+				editing = stayEditing;
+				if (stayEditing) {
+					editForm = createMetadataEditForm(book);
+					authorsList = parseAuthors(book?.authors || '[]');
+				}
+				return true;
 			} else {
 				const errorText = await res.text();
 				console.error('Failed to save metadata:', res.status, errorText);
 				saveError = `Failed to save: ${res.status} ${errorText}`;
+				return false;
 			}
 		} catch (e) {
 			console.error('Failed to save metadata:', e);
 			saveError = `Error: ${e}`;
+			return false;
 		} finally {
 			saving = false;
+		}
+	}
+
+	async function applyMetadataEdits(): Promise<boolean> {
+		return saveMetadata(true);
+	}
+
+	async function saveAndNext() {
+		if (await saveMetadata(true)) {
+			goToSelectionOffset(1);
 		}
 	}
 
@@ -658,6 +739,10 @@
 
 	function goBackToPreviousContext(event: MouseEvent) {
 		event.preventDefault();
+		if (editing) {
+			cancelEditing();
+			return;
+		}
 		const currentRoute = `${$page.url.pathname}${$page.url.search}`;
 		if (typeof window !== 'undefined') {
 			try {
@@ -691,257 +776,111 @@
 		}
 	}
 
+	async function updateBookTabIndicator() {
+		await tick();
+		const container = bookTabContainer;
+		const activeButton = container?.querySelector('[data-tab-active="true"]') as HTMLElement | null;
+		if (!container || !activeButton) {
+			bookTabIndicatorStyle = 'opacity: 0; transform: translateX(0); width: 0;';
+			return;
+		}
+		const containerRect = container.getBoundingClientRect();
+		const activeRect = activeButton.getBoundingClientRect();
+		bookTabIndicatorStyle = `opacity: 1; width: ${activeRect.width}px; transform: translateX(${activeRect.left - containerRect.left + container.scrollLeft}px);`;
+	}
+
+	$effect(() => {
+		activeTab;
+		void updateBookTabIndicator();
+	});
+
 	function setRating(value: number) {
-		editForm.rating = value;
+		editForm.rating = editForm.rating === value ? 0 : value;
 	}
 
 	function getStarFill(rating: number, starIndex: number): boolean {
 		return starIndex <= rating;
 	}
+
+	function isEditingRatingFilled(star: number): boolean {
+		const activeRating = hoveredRating || editForm.rating;
+		return star <= activeRating;
+	}
+
+	function isBookRatingFilled(star: number): boolean {
+		return star <= ratingToStars(book?.rating);
+	}
+
+	function addAuthor() {
+		authorsList = [...authorsList, ''];
+	}
+
+	function removeAuthor(index: number) {
+		authorsList = authorsList.filter((_, i) => i !== index);
+	}
 </script>
 
 	<div class="space-y-6">
-		{#if editing}
-			<button onclick={cancelEditing} class="group inline-flex items-center text-[var(--color-surface-text-muted)] transition-colors duration-200 ease-out hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
-				<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-surface-text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-				</svg>
-				Back to Book Details
-			</button>
-		{:else}
-			<a href="/library" onclick={goBackToPreviousContext} class="group inline-flex items-center text-[var(--color-surface-text-muted)] transition-colors duration-200 ease-out hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
-				<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-surface-text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-				</svg>
-				Back to Library
-			</a>
-	{/if}
+		<a href="/library" onclick={goBackToPreviousContext} class="group inline-flex items-center text-[var(--color-surface-text-muted)] transition-colors duration-200 ease-out hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
+			<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-surface-text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+			</svg>
+			{editing ? 'Back to Book Details' : 'Back to Library'}
+		</a>
 
 	{#if loading}
 		<div class="flex justify-center py-12">
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
 		</div>
 	{:else if book}
-		{#if editing}
-			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-6">
-				<div class="flex items-center justify-between mb-4">
-					<h3 class="text-lg font-medium text-[var(--color-surface-text)]">Edit Metadata</h3>
-					<div class="flex flex-wrap items-center gap-2">
-						<label class="flex items-center gap-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm text-[var(--color-surface-text)]">
-							<span class="whitespace-nowrap text-[var(--color-surface-text-muted)]">Wide comic fallback</span>
-							<select
-								bind:value={editForm.comic_spread_fallback}
-								class="rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-2 py-1 text-sm text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-							>
-								{#each comicSpreadFallbackOptions as option}
-									<option value={option.value}>{option.label}</option>
-								{/each}
-							</select>
-						</label>
-						<button
-							onclick={regenerateCover}
-							type="button"
-							disabled={regeneratingCover}
-							class="group inline-flex items-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-surface-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
-						>
-							{#if regeneratingCover}
-								<svg class="animate-spin -ml-0.5 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-									<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-									<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-								</svg>
-								Regenerating...
-							{:else}
-								<svg class="mr-2 h-4 w-4 transition-transform duration-200 ease-out group-hover:rotate-45 group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-								</svg>
-								Regenerate Cover
-							{/if}
-						</button>
-						<button
-							onclick={() => showMetadataLookup = true}
-							type="button"
-							class="group inline-flex items-center rounded-lg bg-[var(--color-primary-500)] px-3 py-1.5 text-sm text-white transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
-						>
-							<svg class="mr-2 h-4 w-4 transition-transform duration-200 ease-out group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-							</svg>
-							Lookup Metadata
-						</button>
-					</div>
-				</div>
-				{#if getPrimaryFilePath()}
-					<div class="mb-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)]/50 p-3">
-						<div class="mb-1 text-sm text-[var(--color-surface-text-muted)]">Path</div>
-						<div class="break-all font-mono text-xs text-[var(--color-surface-text)]">{getPrimaryFilePath()}</div>
-					</div>
-				{/if}
-				<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-					<div>
-						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-title">Title</label>
-						<input id="book-title" type="text" bind:value={editForm.title} class="w-full bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
-					</div>
-					<div>
-						<div class="block text-sm text-[var(--color-surface-text-muted)] mb-2">Authors</div>
-						<div class="space-y-2">
-							{#each authorsList as author, i}
-								<div class="flex items-center space-x-2">
-									<div class="min-w-0 flex-1">
-										<AutocompleteInput
-											id={`book-author-${i}`}
-											bind:value={authorsList[i]}
-											placeholder="Author name"
-											field="authors"
-											multiple={false}
-											onchange={(v) => authorsList[i] = v}
-										/>
-									</div>
+		<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 sm:p-6">
+				<div class="flex items-start justify-between gap-4">
+					<div class="min-w-0 flex-1">
+						{#if editing}
+							<input
+								id="book-title"
+								type="text"
+								bind:value={editForm.title}
+								placeholder="Untitled book"
+								class="w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-2.5 py-1.5 text-2xl font-bold text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)] xl:text-3xl"
+							/>
+							<div class="mt-1 max-w-xl space-y-2">
+								{#each authorsList as author, i}
+									<div class="flex max-w-xl items-center gap-2">
+										<div class="min-w-0 flex-1">
+											<AutocompleteInput
+												id={`book-author-${i}`}
+												bind:value={authorsList[i]}
+												placeholder="Author name"
+												field="authors"
+												multiple={false}
+												onchange={(value) => authorsList[i] = value}
+											/>
+										</div>
 										<button
-											onclick={() => authorsList.splice(i, 1)}
-											class="group rounded-md p-2 text-red-400 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40"
+											type="button"
+											onclick={() => removeAuthor(i)}
+											class="rounded-md p-2 text-red-400 transition-all duration-200 ease-out hover:-translate-y-px hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40"
 											title="Remove author"
+											aria-label="Remove author"
 										>
-											<svg class="h-4 w-4 transition-transform duration-200 ease-out group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+											<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
 											</svg>
 										</button>
 									</div>
 								{/each}
 								<button
-									onclick={() => authorsList.push('')}
-									class="group inline-flex items-center rounded-lg border border-dashed border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-primary-400)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-primary-300)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+									type="button"
+									onclick={addAuthor}
+									class="inline-flex items-center rounded-md px-1.5 py-0.5 text-sm text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:bg-[var(--color-primary-500)]/12 hover:text-[var(--color-primary-200)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
 								>
-									<svg class="mr-2 h-4 w-4 transition-transform duration-200 ease-out group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-									</svg>
 									Add Author
 								</button>
-						</div>
-					</div>
-					<div>
-						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-publisher">Publisher</label>
-						<AutocompleteInput
-							id="book-publisher"
-							bind:value={editForm.publisher}
-							field="publishers"
-							multiple={false}
-							onchange={(v) => editForm.publisher = v}
-						/>
-					</div>
-					<div>
-						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-pub-date">Published Date</label>
-						<input id="book-pub-date" type="text" bind:value={editForm.pub_date} placeholder="YYYY-MM-DD" class="w-full bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
-					</div>
-					<div>
-						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-language">Language</label>
-						<AutocompleteInput
-							id="book-language"
-							bind:value={editForm.language}
-							field="languages"
-							multiple={false}
-							onchange={(v) => editForm.language = v}
-						/>
-					</div>
-					<div>
-						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-isbn">ISBN</label>
-						<input id="book-isbn" type="text" bind:value={editForm.isbn} class="w-full bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
-					</div>
-					<div>
-						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-asin">ASIN</label>
-						<input id="book-asin" type="text" bind:value={editForm.asin} class="w-full bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
-					</div>
-					<div>
-						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-pages">Pages</label>
-						<input id="book-pages" type="number" bind:value={editForm.page_count} min="0" class="w-full bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
-					</div>
-					<div>
-						<div class="block text-sm text-[var(--color-surface-text-muted)] mb-2">Status</div>
-						<div class="flex gap-2">
-							{#each statusOptions as option}
-									<button
-										type="button"
-										onclick={() => editForm.status = option.value}
-										class="flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all duration-200 ease-out {editForm.status === option.value ? 'bg-[var(--color-primary-500)] border-[var(--color-primary-500)] text-white shadow-sm' : 'bg-[var(--color-surface-700)] border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:-translate-y-0.5 hover:bg-[var(--color-surface-600)] hover:shadow-sm'}"
-									>
-										{option.label}
-									</button>
-								{/each}
-						</div>
-					</div>
-					<div class="md:col-span-2">
-						<div class="block text-sm text-[var(--color-surface-text-muted)] mb-1">Rating</div>
-						<div class="flex items-center gap-1">
-							{#each [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as star}
-									<button
-										type="button"
-										onclick={() => setRating(star)}
-										class="text-2xl transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] {star <= editForm.rating ? 'text-yellow-400' : 'text-[var(--color-surface-600)]'} hover:-translate-y-0.5 hover:scale-110 hover:text-yellow-400"
-									>
-										★
-									</button>
-								{/each}
-							<span class="ml-2 text-sm text-[var(--color-surface-text-muted)]">({editForm.rating}/10)</span>
-						</div>
-					</div>
-					<div class="md:col-span-2">
-						<div class="block text-sm text-[var(--color-surface-text-muted)] mb-1">Series</div>
-						<div class="flex gap-2">
-							<div class="min-w-0 flex-1">
-								<AutocompleteInput
-									id="book-series"
-									bind:value={editForm.series}
-									placeholder="Series name"
-									field="series"
-									multiple={false}
-									onchange={(v) => editForm.series = v}
-								/>
-							</div>
-							<input id="book-series-number" type="text" bind:value={editForm.series_number} placeholder="#" class="w-24 bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
-						</div>
-					</div>
-					<div class="md:col-span-2">
-						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-genres">Genres</label>
-						<AutocompleteInput
-							id="book-genres"
-							bind:value={editForm.genres}
-							placeholder="Fiction, Science Fiction.Space Opera, History"
-							field="genres"
-							onchange={(v) => editForm.genres = v}
-						/>
-						<p class="text-xs text-[var(--color-surface-text-muted)] mt-1">Comma-separated. Use "Parent.Child" for hierarchies.</p>
-					</div>
-					<div class="md:col-span-2">
-						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-tags">Tags</label>
-						<AutocompleteInput
-							id="book-tags"
-							bind:value={editForm.tags}
-							placeholder="Favorite, Classics, Must Read"
-							field="tags"
-							onchange={(v) => editForm.tags = v}
-						/>
-						<p class="text-xs text-[var(--color-surface-text-muted)] mt-1">Comma-separated. Use "Parent.Child" for hierarchies.</p>
-					</div>
- 					<div class="md:col-span-2">
-						<label class="block text-sm text-[var(--color-surface-text-muted)] mb-1" for="book-description">Description</label>
-						<textarea id="book-description" bind:value={editForm.description} rows="4" class="w-full bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] rounded px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)] resize-y"></textarea>
-					</div>
-				</div>
-					<div class="flex justify-end gap-3 mt-6">
-						<button onclick={cancelEditing} disabled={saving} class="rounded-lg bg-[var(--color-surface-700)] px-4 py-2 font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none">Cancel</button>
-						<button onclick={saveMetadata} disabled={saving} class="rounded-lg bg-[var(--color-primary-500)] px-4 py-2 font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none">
-							{saving ? 'Saving...' : 'Save Changes'}
-						</button>
-					</div>
-				{#if saveError}
-					<div class="mt-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-400 text-sm">
-						{saveError}
-					</div>
-				{/if}
-			</div>
-		{:else}
-				<div class="flex items-start justify-between gap-4">
-					<div class="flex-1 min-w-0">
-						<h1 class="text-2xl xl:text-3xl font-bold text-[var(--color-surface-text)] break-words">{book.title || 'Untitled'}</h1>
-								<div class="flex flex-wrap items-center gap-x-2 gap-y-1 mt-3">
+								</div>
+							{:else}
+							<h1 class="break-words text-2xl font-bold text-[var(--color-surface-text)] xl:text-3xl">{book.title || 'Untitled'}</h1>
+							<div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
 								{#each parseAuthors(book.authors || '[]') as author, i}
 									{#if i > 0}<span class="text-[var(--color-surface-text-muted)]">,</span>{/if}
 									<button
@@ -951,21 +890,110 @@
 										{author}
 									</button>
 								{/each}
-						</div>
+							</div>
+						{/if}
 					</div>
-						<button
-							onclick={startEditing}
-							class="group flex-shrink-0 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] p-2 text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:bg-[var(--color-surface-600)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
-							title="Edit Metadata"
-						>
-							<svg class="h-5 w-5 transition-colors duration-200 ease-out group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
-							</svg>
-						</button>
+						<div class="flex flex-shrink-0 flex-col items-end gap-2">
+							{#if hasSelectionNavigation()}
+								<div class="flex items-center gap-2">
+									<button
+										type="button"
+										onclick={backToSelection}
+										class="text-xs font-medium text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)]"
+									>
+										Back to Selection
+									</button>
+									<button
+										type="button"
+										onclick={() => goToSelectionOffset(-1)}
+										disabled={getSelectionIndex() <= 0 || saving}
+										class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-xs font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+									>
+										Prev
+									</button>
+									<span class="min-w-12 text-center text-xs font-medium uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">{getPositionLabel()}</span>
+									<button
+										type="button"
+										onclick={() => goToSelectionOffset(1)}
+										disabled={!selectionSession || getSelectionIndex() >= selectionSession.bookIds.length - 1 || saving}
+										class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-xs font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+									>
+										Next
+									</button>
+								</div>
+							{/if}
+							<div class="flex flex-wrap justify-end gap-2">
+							{#if editing}
+								<button
+									onclick={cancelEditing}
+									disabled={saving}
+									class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50"
+								>
+									Cancel
+								</button>
+								<button
+									onclick={applyMetadataEdits}
+									disabled={saving}
+									class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50"
+								>
+									{saving ? 'Saving...' : 'Apply'}
+								</button>
+								<button
+									onclick={() => saveMetadata(false)}
+									disabled={saving}
+									class="rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50"
+								>
+									{saving ? 'Saving...' : 'Save'}
+								</button>
+								{#if hasSelectionNavigation()}
+									<button
+										onclick={saveAndNext}
+										disabled={!selectionSession || saving || getSelectionIndex() >= selectionSession.bookIds.length - 1}
+										class="rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50"
+									>
+										{saving ? 'Saving...' : 'Save & Next'}
+									</button>
+								{/if}
+							{:else}
+								<button
+									onclick={startEditing}
+									class="group rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] p-2 text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:bg-[var(--color-surface-600)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+									title="Edit Metadata"
+									aria-label="Edit metadata"
+								>
+									<svg class="h-5 w-5 transition-colors duration-200 ease-out group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+									</svg>
+								</button>
+							{/if}
+							<button
+								onclick={openAdvancedMetadata}
+								class="group rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] p-2 text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:bg-[var(--color-surface-600)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+								title="Advanced Metadata"
+								aria-label="Advanced metadata"
+							>
+								<svg class="h-5 w-5 transition-colors duration-200 ease-out group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.607 2.296.07 2.572-1.065z"></path>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+								</svg>
+							</button>
+							</div>
+							{#if editing}
+									<button
+										type="button"
+										onclick={() => showMetadataLookup = true}
+										class="rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+									>
+									Lookup Metadata
+								</button>
+							{/if}
+						</div>
 			</div>
 
-				<div class="flex flex-col md:flex-row gap-6 md:items-start">
+				<div class="mt-7 flex flex-col gap-6 md:flex-row md:items-start md:gap-8">
 					<div class="w-full max-w-[13rem] mx-auto md:mx-0 flex-shrink-0 flex flex-col">
+						<input bind:this={coverFileInput} type="file" accept="image/*" class="hidden" onchange={uploadCustomCover} />
+						<div class="relative">
 							<button
 								type="button"
 								onclick={openCoverModal}
@@ -983,10 +1011,67 @@
 								loading="eager"
 							/>
 						</button>
+						{#if editing}
+							<div class="absolute bottom-2 right-2 z-20 flex gap-1.5">
+								{#if book.cover_source === 'custom'}
+									<button
+										type="button"
+										onclick={resetCustomCover}
+										disabled={coverUploading}
+										class="rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-900)]/90 px-2 py-1 text-xs font-medium text-[var(--color-surface-text)] shadow-lg backdrop-blur transition-colors hover:bg-[var(--color-surface-800)] disabled:opacity-50"
+									>
+										Reset
+									</button>
+								{/if}
+								<button
+									type="button"
+									onclick={openCoverPicker}
+									disabled={coverUploading}
+									class="rounded-full bg-[var(--color-primary-500)] px-2 py-1 text-xs font-medium text-white shadow-lg transition-colors hover:bg-[var(--color-primary-600)] disabled:opacity-50"
+								>
+									{coverUploading ? 'Saving...' : 'Edit'}
+								</button>
+							</div>
+							{/if}
+							</div>
 
-					<div class="mt-4">
-						<div class="flex items-center justify-between mb-2">
-							<span class="text-sm text-[var(--color-surface-text-muted)]">{isAudioItem ? 'Listening Progress' : 'Progress'}</span>
+						{#if editing}
+							<div class="mt-4 space-y-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)]/40 p-3">
+								<label class="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]" for="inline-comic-fallback">Wide comic fallback</label>
+								<select
+									id="inline-comic-fallback"
+									bind:value={editForm.comic_spread_fallback}
+									class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+								>
+									{#each comicSpreadFallbackOptions as option}
+										<option value={option.value} class="bg-[var(--color-surface-base)] text-[var(--color-surface-text)]">{option.label}</option>
+									{/each}
+								</select>
+								<button
+									type="button"
+									onclick={regenerateCover}
+									disabled={regeneratingCover}
+									class="group inline-flex w-full items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50"
+								>
+									{#if regeneratingCover}
+										<svg class="mr-2 h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+											<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+											<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+										</svg>
+										Regenerating...
+									{:else}
+										<svg class="mr-2 h-4 w-4 transition-transform duration-200 ease-out group-hover:-rotate-45 group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+										</svg>
+										Regenerate Cover
+									{/if}
+								</button>
+							</div>
+						{/if}
+
+						<div class="mt-4">
+							<div class="flex items-center justify-between mb-2">
+								<span class="text-sm text-[var(--color-surface-text-muted)]">{isAudioItem ? 'Listening Progress' : 'Progress'}</span>
 							<span class="text-sm font-medium text-[var(--color-surface-text)]">{Math.round(book.percent || 0)}%</span>
 						</div>
 						<div class="w-full h-2 bg-[var(--color-surface-700)] rounded-full overflow-hidden">
@@ -1015,13 +1100,24 @@
 						<div class="relative">
 							<div class="flex w-full overflow-hidden rounded-lg">
 								{#if primaryReadFormat}
-									<a
-										href={getBookReaderHref(book.id, primaryReadFormat, `/book/${book.id}`)}
-										class="flex min-w-0 flex-1 items-center justify-between gap-3 bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-colors duration-200 ease-out hover:bg-[var(--color-primary-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
-									>
-										<span class="truncate">{getPrimaryReadActionLabel()}</span>
-										<span class="text-[10px] uppercase tracking-[0.14em] text-white/80">{getFormatDisplayLabel(primaryReadFormat)}</span>
-									</a>
+									{#if editing}
+										<button
+											type="button"
+											disabled
+											class="flex min-w-0 flex-1 cursor-not-allowed items-center justify-between gap-3 bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text-muted)] opacity-70 sm:px-4"
+										>
+											<span class="truncate">{getPrimaryReadActionLabel()}</span>
+											<span class="text-[10px] uppercase tracking-[0.14em]">{getFormatDisplayLabel(primaryReadFormat)}</span>
+										</button>
+									{:else}
+										<a
+											href={getBookReaderHref(book.id, primaryReadFormat, `/book/${book.id}`)}
+											class="flex min-w-0 flex-1 items-center justify-between gap-3 bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-colors duration-200 ease-out hover:bg-[var(--color-primary-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
+										>
+											<span class="truncate">{getPrimaryReadActionLabel()}</span>
+											<span class="text-[10px] uppercase tracking-[0.14em] text-white/80">{getFormatDisplayLabel(primaryReadFormat)}</span>
+										</a>
+									{/if}
 								{:else}
 									<button
 										type="button"
@@ -1036,7 +1132,8 @@
 									<button
 										type="button"
 										onclick={() => formatMenuOpen = !formatMenuOpen}
-										class="inline-flex items-center justify-center border-l border-white/20 bg-[var(--color-primary-500)] px-3 text-white transition-colors duration-200 ease-out hover:bg-[var(--color-primary-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+										disabled={editing}
+										class="inline-flex items-center justify-center border-l border-white/20 bg-[var(--color-primary-500)] px-3 text-white transition-colors duration-200 ease-out hover:bg-[var(--color-primary-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:cursor-not-allowed disabled:bg-[var(--color-surface-700)] disabled:text-[var(--color-surface-text-muted)]"
 										aria-label="Choose reader format"
 										aria-expanded={formatMenuOpen}
 									>
@@ -1051,7 +1148,7 @@
 									Retry reader check
 								</button>
 							{/if}
-							{#if formatMenuOpen && readableFormats.length > 1}
+							{#if formatMenuOpen && readableFormats.length > 1 && !editing}
 								<div class="absolute right-0 top-full z-20 mt-2 w-56 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-800)] shadow-lg">
 									{#each readableFormats.filter((format) => format !== primaryReadFormat) as format}
 										<a
@@ -1069,15 +1166,28 @@
 							{/if}
 						</div>
 							{#if primarySpeedReadFormat}
-									<a
-										href={getSpeedReaderHref(book.id, primarySpeedReadFormat)}
-										class="group flex w-full items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
-									>
-										<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-primary-300)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-										</svg>
-										Speed Read
-									</a>
+									{#if editing}
+										<button
+											type="button"
+											disabled
+											class="flex w-full cursor-not-allowed items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text-muted)] opacity-70 sm:px-4"
+										>
+											<svg class="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+											</svg>
+											Speed Read
+										</button>
+									{:else}
+										<a
+											href={getSpeedReaderHref(book.id, primarySpeedReadFormat)}
+											class="group flex w-full items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
+										>
+											<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-primary-300)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+											</svg>
+											Speed Read
+										</a>
+									{/if}
 								{/if}
 								<button
 									type="button"
@@ -1090,7 +1200,7 @@
 									Add to Shelf
 								</button>
 						</div>
-				</div>
+					</div>
 
 				<div class="flex-1 min-w-0">
 					<div class="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
@@ -1100,9 +1210,9 @@
 								{#each statusOptions as option}
 									<button
 										type="button"
-										onclick={() => updateBookStatus(option.value)}
-										disabled={statusSaving}
-										class="rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors duration-200 ease-out {statusChipClass(option.value)} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:cursor-wait disabled:opacity-70"
+										onclick={() => editing ? editForm.status = option.value : updateBookStatus(option.value)}
+										disabled={!editing && statusSaving}
+										class="rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors duration-200 ease-out {editing ? (editForm.status === option.value ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/30 text-white' : 'border-[var(--color-surface-border)] bg-[var(--color-surface-700)]/50 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]') : statusChipClass(option.value)} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:cursor-wait disabled:opacity-70"
 									>
 										{option.label}
 									</button>
@@ -1141,8 +1251,16 @@
 						</div>
 						<div class="flex items-start gap-2">
 							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Publisher</dt>
-							<dd class="text-sm text-[var(--color-surface-text)]">
-								{#if book.publisher}
+							<dd class="min-w-0 flex-1 text-sm text-[var(--color-surface-text)]">
+								{#if editing}
+									<AutocompleteInput
+										id="book-publisher"
+										bind:value={editForm.publisher}
+										field="publishers"
+										multiple={false}
+										onchange={(value) => editForm.publisher = value}
+									/>
+								{:else if book.publisher}
 									<button
 										onclick={() => navigateWithFilter('publisher', book.publisher)}
 											class="text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline"
@@ -1156,8 +1274,10 @@
 						</div>
 						<div class="flex items-start gap-2">
 							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Published</dt>
-							<dd class="text-sm text-[var(--color-surface-text)]">
-								{#if book.pub_date}
+							<dd class="min-w-0 flex-1 text-sm text-[var(--color-surface-text)]">
+								{#if editing}
+									<input id="book-pub-date" type="text" bind:value={editForm.pub_date} placeholder="YYYY-MM-DD" class="w-full rounded border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
+								{:else if book.pub_date}
 									<button
 										onclick={() => navigateWithFilter('pub_date', book.pub_date)}
 											class="text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline"
@@ -1171,8 +1291,16 @@
 						</div>
 						<div class="flex items-start gap-2">
 							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Language</dt>
-							<dd class="text-sm text-[var(--color-surface-text)]">
-								{#if book.language}
+							<dd class="min-w-0 flex-1 text-sm text-[var(--color-surface-text)]">
+								{#if editing}
+									<AutocompleteInput
+										id="book-language"
+										bind:value={editForm.language}
+										field="languages"
+										multiple={false}
+										onchange={(value) => editForm.language = value}
+									/>
+								{:else if book.language}
 									<button
 										onclick={() => navigateWithFilter('language', book.language)}
 											class="text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline"
@@ -1186,24 +1314,55 @@
 						</div>
 						<div class="flex items-start gap-2">
 							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Pages</dt>
-							<dd class="text-sm text-[var(--color-surface-text)]">{book.page_count || '-'}</dd>
+							<dd class="min-w-0 flex-1 text-sm text-[var(--color-surface-text)]">
+								{#if editing}
+									<input id="book-pages" type="number" bind:value={editForm.page_count} min="0" class="w-full rounded border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
+								{:else}
+									{book.page_count || '-'}
+								{/if}
+							</dd>
 						</div>
 						<div class="flex items-start gap-2">
 							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">ISBN</dt>
-							<dd class="text-sm text-[var(--color-surface-text)] font-mono">{book.isbn || '-'}</dd>
+							<dd class="min-w-0 flex-1 text-sm text-[var(--color-surface-text)]">
+								{#if editing}
+									<input id="book-isbn" type="text" bind:value={editForm.isbn} class="w-full rounded border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 font-mono text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
+								{:else}
+									<span class="font-mono">{book.isbn || '-'}</span>
+								{/if}
+							</dd>
 						</div>
 						<div class="flex items-start gap-2">
 							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">ASIN</dt>
-							<dd class="text-sm text-[var(--color-surface-text)] font-mono">{book.asin || '-'}</dd>
+							<dd class="min-w-0 flex-1 text-sm text-[var(--color-surface-text)]">
+								{#if editing}
+									<input id="book-asin" type="text" bind:value={editForm.asin} class="w-full rounded border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 font-mono text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
+								{:else}
+									<span class="font-mono">{book.asin || '-'}</span>
+								{/if}
+							</dd>
 						</div>
 						<div class="flex items-start gap-2">
 							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Rating</dt>
-							<dd class="text-sm text-[var(--color-surface-text)] flex items-center gap-0.5">
-								{#if book.rating}
-									{#each [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as star}
-										<span class="{star <= book.rating ? 'text-yellow-400' : 'text-[var(--color-surface-600)]'}">★</span>
+							<dd class="inline-flex max-w-full items-center gap-0.5 whitespace-nowrap text-sm text-[var(--color-surface-text)]" onmouseleave={() => hoveredRating = 0}>
+								{#if editing}
+									{#each ratingStars as star}
+										<button
+											type="button"
+											onmouseenter={() => hoveredRating = star}
+											onfocus={() => hoveredRating = star}
+											onblur={() => hoveredRating = 0}
+											onclick={() => setRating(star)}
+											class="text-lg transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] {isEditingRatingFilled(star) ? 'text-yellow-400' : 'text-[var(--color-surface-600)]'} hover:-translate-y-px hover:scale-110"
+											aria-label={editForm.rating === star ? 'Clear rating' : `Set rating to ${star} star${star === 1 ? '' : 's'}`}
+										>
+											&#9733;
+										</button>
 									{/each}
-									<span class="ml-1 text-[var(--color-surface-text-muted)]">({Math.round(book.rating)}/10)</span>
+								{:else if book.rating}
+									{#each ratingStars as star}
+										<span class="{isBookRatingFilled(star) ? 'text-yellow-400' : 'text-[var(--color-surface-600)]'}">★</span>
+									{/each}
 								{:else}
 									<span class="text-[var(--color-surface-text-muted)]">-</span>
 								{/if}
@@ -1217,97 +1376,154 @@
 								</dd>
 							</div>
 						{/if}
-								{#if book.series}
+								{#if editing || book.series}
 									<div class="flex items-start gap-2 sm:col-span-2">
 										<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Series</dt>
-										<dd class="text-sm text-[var(--color-surface-text)]">
-											<button
-												onclick={() => navigateWithFilter('series', book.series)}
-												class="text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline"
-											>
-												{book.series}
-											</button>
-									{#if formatSeriesNumber(book)}
-										<span class="text-[var(--color-surface-text-muted)]"> #{formatSeriesNumber(book)}</span>
-									{/if}
+										<dd class="min-w-0 flex-1 text-sm text-[var(--color-surface-text)]">
+											{#if editing}
+												<div class="flex gap-2">
+													<div class="min-w-0 flex-1">
+														<AutocompleteInput
+															id="book-series"
+															bind:value={editForm.series}
+															placeholder="Series name"
+															field="series"
+															multiple={false}
+															onchange={(value) => editForm.series = value}
+														/>
+													</div>
+													<input id="book-series-number" type="text" bind:value={editForm.series_number} placeholder="#" class="w-24 rounded border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
+												</div>
+											{:else}
+												<button
+													onclick={() => navigateWithFilter('series', book.series)}
+													class="text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline"
+												>
+													{book.series}
+												</button>
+												{#if formatSeriesNumber(book)}
+													<span class="text-[var(--color-surface-text-muted)]"> #{formatSeriesNumber(book)}</span>
+												{/if}
+											{/if}
 								</dd>
 							</div>
 						{/if}
 					</div>
 
-					{#if (book.genres && book.genres !== '[]') || (book.tags && book.tags !== '[]')}
+					{#if editing || (book.genres && book.genres !== '[]') || (book.tags && book.tags !== '[]')}
 						<div class="mt-6 space-y-4">
-							{#if book.genres && book.genres !== '[]'}
+							{#if editing || (book.genres && book.genres !== '[]')}
 								<div class="flex items-start gap-2">
 									<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Genres</dt>
-									<dd class="flex flex-wrap gap-2 min-w-0">
-										{#each parseJsonArray(book.genres) as genre}
-											{@const parts = parseHierarchicalGenre(genre)}
-											<div class="relative group">
-													<div class="inline-flex items-center rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1 text-sm text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)]">
-														{#each parts as part, i}
-															<button
-																onclick={() => navigateWithFilter('genre', part.fullPath)}
-																class="transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline {isHierarchyPartActive(hoveredGenrePath, part.fullPath) ? 'text-[var(--color-primary-300)]' : 'text-[var(--color-primary-400)]'}"
-																onmouseenter={() => hoveredGenrePath = part.fullPath}
-																onmouseleave={() => hoveredGenrePath = null}
-															>{part.text}</button>{#if i < parts.length - 1}<span class="{isHierarchyPartActive(hoveredGenrePath, parts[i + 1].fullPath) ? 'text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)]'}">.</span>{/if}
-														{/each}
+									<dd class="min-w-0 flex-1">
+										{#if editing}
+											<AutocompleteInput
+												id="book-genres"
+												bind:value={editForm.genres}
+												placeholder="Fiction, Science Fiction.Space Opera, History"
+												field="genres"
+												onchange={(value) => editForm.genres = value}
+											/>
+											<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Comma-separated. Use "Parent.Child" for hierarchies.</p>
+										{:else}
+											<div class="flex flex-wrap gap-2">
+												{#each parseJsonArray(book.genres) as genre}
+													{@const parts = parseHierarchicalGenre(genre)}
+													<div class="relative group">
+															<div class="inline-flex items-center rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1 text-sm text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)] {isHoveredPathInHierarchy(hoveredGenrePath, genre) ? 'underline decoration-[var(--color-primary-300)] underline-offset-2' : ''}">
+																{#each parts as part, i}
+																	<button
+																		onclick={() => navigateWithFilter('genre', part.fullPath)}
+																		class="transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline {isHierarchyPartActive(hoveredGenrePath, part.fullPath) ? 'text-[var(--color-primary-300)]' : 'text-[var(--color-primary-400)]'}"
+																		onmouseenter={() => hoveredGenrePath = part.fullPath}
+																		onmouseleave={() => hoveredGenrePath = null}
+																	>{part.text}</button>{#if i < parts.length - 1}<span class="{isHierarchyPartActive(hoveredGenrePath, parts[i + 1].fullPath) ? 'text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)]'}">.</span>{/if}
+																{/each}
+														</div>
+														{#if isHoveredPathInHierarchy(hoveredGenrePath, genre)}
+															<div class="absolute bottom-full left-0 mb-1 px-2 py-1 bg-[var(--color-surface-800)] text-[var(--color-surface-text)] text-xs rounded shadow-lg whitespace-nowrap z-10">
+																Click to filter by: <span class="text-[var(--color-primary-400)]">{hoveredGenrePath}</span>
+															</div>
+														{/if}
 												</div>
-												{#if isHoveredPathInHierarchy(hoveredGenrePath, genre)}
-													<div class="absolute bottom-full left-0 mb-1 px-2 py-1 bg-[var(--color-surface-800)] text-[var(--color-surface-text)] text-xs rounded shadow-lg whitespace-nowrap z-10">
-														Click to filter by: <span class="text-[var(--color-primary-400)]">{hoveredGenrePath}</span>
-													</div>
-												{/if}
+												{/each}
 											</div>
-										{/each}
+										{/if}
 									</dd>
 								</div>
 							{/if}
 
-							{#if book.tags && book.tags !== '[]'}
+							{#if editing || (book.tags && book.tags !== '[]')}
 								<div class="flex items-start gap-2">
 									<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Tags</dt>
-									<dd class="flex flex-wrap gap-2 min-w-0">
-										{#each parseJsonArray(book.tags) as tag}
-											{@const parts = parseHierarchicalGenre(tag)}
-											<div class="relative group">
-													<div class="inline-flex items-center rounded-full border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/20 px-3 py-1 text-sm text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:border-[var(--color-primary-500)]/60 hover:bg-[var(--color-primary-500)]/30">
-														{#each parts as part, i}
-															<button
-																onclick={() => navigateWithFilter('tags', part.fullPath)}
-																class="transition-colors duration-200 ease-out hover:text-[var(--color-primary-200)] hover:underline focus-visible:outline-none focus-visible:underline {isHierarchyPartActive(hoveredTagPath, part.fullPath) ? 'text-[var(--color-primary-200)]' : 'text-[var(--color-primary-400)]'}"
-																onmouseenter={() => hoveredTagPath = part.fullPath}
-																onmouseleave={() => hoveredTagPath = null}
-															>{part.text}</button>{#if i < parts.length - 1}<span class="{isHierarchyPartActive(hoveredTagPath, parts[i + 1].fullPath) ? 'text-[var(--color-primary-200)]' : 'text-[var(--color-primary-500)]'}">.</span>{/if}
-														{/each}
+									<dd class="min-w-0 flex-1">
+										{#if editing}
+											<AutocompleteInput
+												id="book-tags"
+												bind:value={editForm.tags}
+												placeholder="Favorite, Classics, Must Read"
+												field="tags"
+												onchange={(value) => editForm.tags = value}
+											/>
+											<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Comma-separated. Use "Parent.Child" for hierarchies.</p>
+										{:else}
+											<div class="flex flex-wrap gap-2">
+												{#each parseJsonArray(book.tags) as tag}
+													{@const parts = parseHierarchicalGenre(tag)}
+													<div class="relative group">
+															<div class="inline-flex items-center rounded-full border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/20 px-3 py-1 text-sm text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:border-[var(--color-primary-500)]/60 hover:bg-[var(--color-primary-500)]/30 {isHoveredPathInHierarchy(hoveredTagPath, tag) ? 'underline decoration-[var(--color-primary-200)] underline-offset-2' : ''}">
+																{#each parts as part, i}
+																	<button
+																		onclick={() => navigateWithFilter('tags', part.fullPath)}
+																		class="transition-colors duration-200 ease-out hover:text-[var(--color-primary-200)] hover:underline focus-visible:outline-none focus-visible:underline {isHierarchyPartActive(hoveredTagPath, part.fullPath) ? 'text-[var(--color-primary-200)]' : 'text-[var(--color-primary-400)]'}"
+																		onmouseenter={() => hoveredTagPath = part.fullPath}
+																		onmouseleave={() => hoveredTagPath = null}
+																	>{part.text}</button>{#if i < parts.length - 1}<span class="{isHierarchyPartActive(hoveredTagPath, parts[i + 1].fullPath) ? 'text-[var(--color-primary-200)]' : 'text-[var(--color-primary-500)]'}">.</span>{/if}
+																{/each}
+														</div>
+														{#if isHoveredPathInHierarchy(hoveredTagPath, tag)}
+															<div class="absolute bottom-full left-0 mb-1 px-2 py-1 bg-[var(--color-surface-800)] text-[var(--color-surface-text)] text-xs rounded shadow-lg whitespace-nowrap z-10">
+																Click to filter by: <span class="text-[var(--color-primary-400)]">{hoveredTagPath}</span>
+															</div>
+														{/if}
 												</div>
-												{#if isHoveredPathInHierarchy(hoveredTagPath, tag)}
-													<div class="absolute bottom-full left-0 mb-1 px-2 py-1 bg-[var(--color-surface-800)] text-[var(--color-surface-text)] text-xs rounded shadow-lg whitespace-nowrap z-10">
-														Click to filter by: <span class="text-[var(--color-primary-400)]">{hoveredTagPath}</span>
-													</div>
-												{/if}
+												{/each}
 											</div>
-										{/each}
+										{/if}
 									</dd>
 								</div>
 							{/if}
 						</div>
 					{/if}
 
-					{#if book.description}
+					{#if editing || book.description}
 						<div class="mt-6">
-							<p class="text-sm text-[var(--color-surface-text)] whitespace-pre-wrap line-clamp-3">{book.description}</p>
+							{#if editing}
+								<div class="flex items-start gap-2">
+									<label class="w-24 flex-shrink-0 text-sm text-[var(--color-surface-text-muted)]" for="book-description">Description</label>
+									<textarea id="book-description" bind:value={editForm.description} rows="4" class="min-w-0 flex-1 resize-y rounded border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"></textarea>
+								</div>
+							{:else}
+								<p class="text-sm text-[var(--color-surface-text)] whitespace-pre-wrap line-clamp-3">{book.description}</p>
+							{/if}
+						</div>
+					{/if}
+					{#if editing && saveError}
+						<div class="mt-4 rounded-lg border border-red-500/50 bg-red-500/20 p-3 text-sm text-red-400">
+							{saveError}
 						</div>
 					{/if}
 				</div>
 			</div>
+		</section>
 
-			<div class="border-t border-[var(--color-surface-border)] pt-6">
-					<div class="flex justify-center gap-2 overflow-x-auto sm:gap-6">
+			<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 sm:p-6">
+					<div bind:this={bookTabContainer} class="relative flex justify-center gap-2 overflow-x-auto sm:gap-6" onscroll={updateBookTabIndicator}>
+						<div class="book-tab-indicator" style={bookTabIndicatorStyle}></div>
 						<button
 							onclick={() => handleTabChange('similar')}
-							class="flex flex-shrink-0 items-center gap-2 -mb-px border-b-2 px-3 py-2 text-sm font-medium transition-all duration-200 ease-out sm:px-4 {activeTab === 'similar' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:-translate-y-px hover:border-[var(--color-surface-border)] hover:text-[var(--color-surface-text)]'}"
+							data-tab-active={activeTab === 'similar'}
+							class="flex flex-shrink-0 items-center gap-2 px-3 py-2 text-sm font-medium transition-all duration-200 ease-out sm:px-4 {activeTab === 'similar' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:-translate-y-px hover:text-[var(--color-surface-text)]'}"
 						>
 							Similar Books
 						{#if activeTab === 'similar' && similarLoading}
@@ -1319,19 +1535,21 @@
 						</button>
 						<button
 							onclick={() => handleTabChange('sessions')}
-							class="flex-shrink-0 border-b-2 -mb-px px-3 py-2 text-sm font-medium transition-all duration-200 ease-out sm:px-4 {activeTab === 'sessions' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:-translate-y-px hover:border-[var(--color-surface-border)] hover:text-[var(--color-surface-text)]'}"
+							data-tab-active={activeTab === 'sessions'}
+							class="flex-shrink-0 px-3 py-2 text-sm font-medium transition-all duration-200 ease-out sm:px-4 {activeTab === 'sessions' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:-translate-y-px hover:text-[var(--color-surface-text)]'}"
 						>
 							{isAudioItem ? 'Listening Sessions' : 'Reading Sessions'}
 						</button>
 						<button
 							onclick={() => handleTabChange('files')}
-							class="flex-shrink-0 border-b-2 -mb-px px-3 py-2 text-sm font-medium transition-all duration-200 ease-out sm:px-4 {activeTab === 'files' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:-translate-y-px hover:border-[var(--color-surface-border)] hover:text-[var(--color-surface-text)]'}"
+							data-tab-active={activeTab === 'files'}
+							class="flex-shrink-0 px-3 py-2 text-sm font-medium transition-all duration-200 ease-out sm:px-4 {activeTab === 'files' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:-translate-y-px hover:text-[var(--color-surface-text)]'}"
 						>
 							Files
 						</button>
 				</div>
 
-				<div class="mt-4">
+					<div class="mt-4">
 					{#if activeTab === 'sessions'}
 						{#if sessionsLoading}
 							<div class="flex justify-center py-8">
@@ -1460,13 +1678,13 @@
 								</svg>
 								<span>Finding similar books...</span>
 							</div>
-						{:else if similarBooks.length === 0}
-							<div class="text-center py-8 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">
-								<p class="text-[var(--color-surface-text-muted)]">No similar books found</p>
-							</div>
-						{:else}
-							<div class="grid grid-cols-2 gap-4 sm:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] sm:justify-items-center">
-										{#each similarBooks as similar}
+							{:else if similarBooks.length === 0}
+								<div class="text-center py-8 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">
+									<p class="text-[var(--color-surface-text-muted)]">No similar books found</p>
+								</div>
+							{:else}
+								<div class="grid grid-cols-2 gap-4 sm:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] sm:justify-items-center">
+									{#each similarBooks as similar}
 										<a href="/book/{similar.id}" class="group relative block w-full min-w-0 rounded-xl p-2 transition-all duration-200 ease-out hover:-translate-y-1 hover:bg-[var(--color-surface-overlay)] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:max-w-[12rem]">
 											<BookCoverFrame
 												src={similar.cover_path ? getCoverThumbUrl(similar.id, 'medium', similar.cover_updated_on) : null}
@@ -1490,17 +1708,16 @@
 											<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{parseAuthors(similar.authors).join(', ')}</p>
 										</a>
 									{/each}
-							</div>
-						{/if}
-					{:else}
+								</div>
+							{/if}
+						{:else}
 						<div class="text-center py-8 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">
 							<p class="text-[var(--color-surface-text-muted)]">Similar books coming soon</p>
 						</div>
 					{/if}
-				</div>
-			</div>
-		{/if}
-	{:else}
+					</div>
+				</section>
+		{:else}
 		<div class="text-center py-16 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">
 			<p class="text-[var(--color-surface-text-muted)]">Book not found</p>
 		</div>
@@ -1511,7 +1728,10 @@
 	<MetadataLookupModal
 		bookIds={[book.id]}
 		title="Lookup Metadata"
+		confirmBeforeApply={true}
+		hasUnsavedChanges={hasUnsavedMetadataChanges()}
 		onClose={() => showMetadataLookup = false}
+		onApplyCurrentEdits={applyMetadataEdits}
 		onApplied={refreshAfterMetadataApply}
 	/>
 {/if}
@@ -1620,5 +1840,18 @@
 		</div>
 	</div>
 {/if}
+
+<style>
+	.book-tab-indicator {
+		position: absolute;
+		bottom: 0;
+		left: 0;
+		height: 2px;
+		border-radius: 999px;
+		background: var(--color-primary-500);
+		pointer-events: none;
+		transition: transform 160ms ease-out, width 160ms ease-out, opacity 120ms ease-out;
+	}
+</style>
 
 <svelte:window onkeydown={handleCoverModalKeydown} />

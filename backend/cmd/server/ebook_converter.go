@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"os"
@@ -150,7 +151,10 @@ func ensureProcessedTextBook(bookID, filePath, format string) (*ConversionResult
 	paths := getTextBookCachePaths(bookID, format)
 
 	if isProcessedTextBookCacheValid(paths, filePath) {
-		return loadProcessedTextBook(paths)
+		result, err := loadProcessedTextBook(paths)
+		if err == nil && hasUsableProcessedContent(result) {
+			return result, nil
+		}
 	}
 
 	return processTextBookWithCalibre(bookID, filePath, format, paths)
@@ -226,6 +230,10 @@ func processTextBookWithCalibre(bookID, filePath, format string, paths textBookC
 	}
 
 	if err := convertWithCalibre(filePath, paths.NormalizedEPUB); err != nil {
+		result, fallbackErr := buildPlainTextFallbackResult(filePath, paths, BookMetadata{})
+		if fallbackErr == nil {
+			return writeProcessedTextBookCache(result, paths)
+		}
 		return nil, err
 	}
 
@@ -238,6 +246,27 @@ func processTextBookWithCalibre(bookID, filePath, format string, paths textBookC
 		return nil, err
 	}
 
+	if !hasUsableProcessedContent(result) {
+		if fallbackResult, fallbackErr := buildPlainTextFallbackResult(filePath, paths, result.Metadata); fallbackErr == nil {
+			result = fallbackResult
+		}
+	}
+
+	return writeProcessedTextBookCache(result, paths)
+}
+
+func writeProcessedTextBookCache(result *ConversionResult, paths textBookCachePaths) (*ConversionResult, error) {
+	if !hasUsableProcessedContent(result) {
+		return nil, fmt.Errorf("converted book did not contain readable text")
+	}
+	if result.CSSPath == "" {
+		result.CSSPath = paths.CSSCachePath
+	}
+	if _, err := os.Stat(result.CSSPath); err != nil {
+		if writeErr := os.WriteFile(result.CSSPath, []byte("/* No preserved styles available */"), 0644); writeErr != nil {
+			return nil, fmt.Errorf("failed to write CSS cache: %w", writeErr)
+		}
+	}
 	if err := os.WriteFile(paths.HTMLCachePath, []byte(result.HTMLContent), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write HTML cache: %w", err)
 	}
@@ -252,6 +281,83 @@ func processTextBookWithCalibre(bookID, filePath, format string, paths textBookC
 	}
 
 	return result, nil
+}
+
+func hasUsableProcessedContent(result *ConversionResult) bool {
+	return result != nil &&
+		strings.TrimSpace(result.HTMLContent) != "" &&
+		strings.TrimSpace(result.PlainText) != ""
+}
+
+func buildPlainTextFallbackResult(filePath string, paths textBookCachePaths, metadata BookMetadata) (*ConversionResult, error) {
+	rawText, err := convertBookToPlainText(filePath)
+	if err != nil {
+		return nil, err
+	}
+	plainText := normalizeSpeedReaderText(rawText)
+	if strings.TrimSpace(plainText) == "" {
+		return nil, fmt.Errorf("plain text fallback produced no readable text")
+	}
+
+	return &ConversionResult{
+		HTMLContent: plainTextToHTML(rawText),
+		PlainText:   plainText,
+		TOC:         []TocItem{},
+		CSSPath:     paths.CSSCachePath,
+		EPUBPath:    paths.NormalizedEPUB,
+		Metadata:    metadata,
+	}, nil
+}
+
+func convertBookToPlainText(filePath string) (string, error) {
+	calibrePath, err := exec.LookPath("ebook-convert")
+	if err != nil {
+		return "", fmt.Errorf("ebook-convert not found. Please ensure Calibre is installed")
+	}
+
+	tempDir, err := os.MkdirTemp("", "cryptorum-ebook-text-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tempDir)
+
+	outputPath := filepath.Join(tempDir, "book.txt")
+	cmd := exec.Command(calibrePath, filePath, outputPath)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("ebook-convert text fallback failed: %s", strings.TrimSpace(stderr.String()))
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func plainTextToHTML(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+
+	paragraphs := strings.Split(text, "\n\n")
+	if len(paragraphs) == 1 {
+		paragraphs = []string{text}
+	}
+
+	var sb strings.Builder
+	for _, paragraph := range paragraphs {
+		paragraph = strings.TrimSpace(paragraph)
+		if paragraph == "" {
+			continue
+		}
+		sb.WriteString("<p>")
+		sb.WriteString(html.EscapeString(paragraph))
+		sb.WriteString("</p>\n")
+	}
+	return sb.String()
 }
 
 func convertWithCalibre(filePath, outputEPUB string) error {
@@ -342,6 +448,9 @@ func buildConversionResultFromExploded(bookID string, paths textBookCachePaths) 
 	htmlContent, plainText, err := aggregateSpineContent(paths.ExplodedDir, opfPath, pkg, bookID)
 	if err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(htmlContent) == "" || strings.TrimSpace(plainText) == "" {
+		htmlContent, plainText = aggregateAllHTMLContent(paths.ExplodedDir, bookID)
 	}
 
 	toc, err := buildTOC(paths.ExplodedDir, opfPath, pkg, htmlContent)
@@ -450,6 +559,44 @@ func aggregateSpineContent(explodedDir, opfPath string, pkg *OPFDocument, bookID
 	}
 
 	return combinedHTML.String(), strings.Join(strings.Fields(plainText.String()), " "), nil
+}
+
+func aggregateAllHTMLContent(explodedDir, bookID string) (string, string) {
+	var files []string
+	if err := filepath.WalkDir(explodedDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		if isHTMLLikePath(strings.ToLower(path)) {
+			files = append(files, path)
+		}
+		return nil
+	}); err != nil {
+		return "", ""
+	}
+
+	sort.Strings(files)
+	var combinedHTML strings.Builder
+	var plainText strings.Builder
+
+	for _, sectionPath := range files {
+		data, err := os.ReadFile(sectionPath)
+		if err != nil {
+			continue
+		}
+		bodyContent := extractBodyContent(string(data))
+		sectionDirRel, err := filepath.Rel(explodedDir, filepath.Dir(sectionPath))
+		if err != nil {
+			sectionDirRel = ""
+		}
+		rewrittenBody := rewriteHTMLResourcePaths(bodyContent, bookID, filepath.ToSlash(sectionDirRel))
+		combinedHTML.WriteString(rewrittenBody)
+		combinedHTML.WriteString("\n")
+		plainText.WriteString(stripHTMLTags(rewrittenBody))
+		plainText.WriteString(" ")
+	}
+
+	return combinedHTML.String(), strings.Join(strings.Fields(plainText.String()), " ")
 }
 
 func buildTOC(explodedDir, opfPath string, pkg *OPFDocument, htmlContent string) ([]TocItem, error) {

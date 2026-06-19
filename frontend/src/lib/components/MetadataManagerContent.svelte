@@ -110,7 +110,7 @@
 			{#each tabs as tab}
 				<button
 					onclick={() => activeTab = tab.id}
-					class="metadata-tab-button flex items-center space-x-2 py-4 px-4 border-b-2 font-medium text-sm transition-colors {activeTab === tab.id ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:border-[var(--color-surface-border)]'}"
+					class="metadata-tab-button flex items-center space-x-2 py-4 px-4 font-medium text-sm transition-colors {activeTab === tab.id ? 'active text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 				>
 					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={getIconPath(tab.icon)}></path>
@@ -207,7 +207,27 @@
 	}
 
 	.metadata-tab-button {
+		position: relative;
 		flex: 0 0 auto;
 		white-space: nowrap;
+	}
+
+	.metadata-tab-button::after {
+		content: '';
+		position: absolute;
+		left: 1rem;
+		right: 1rem;
+		bottom: 0;
+		height: 2px;
+		border-radius: 999px;
+		background: var(--color-primary-500);
+		opacity: 0;
+		transform: scaleX(0.35);
+		transition: opacity 140ms ease-out, transform 160ms ease-out;
+	}
+
+	.metadata-tab-button.active::after {
+		opacity: 1;
+		transform: scaleX(1);
 	}
 </style>

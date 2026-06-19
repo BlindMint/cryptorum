@@ -182,6 +182,20 @@
 		return error instanceof DOMException && error.name === 'AbortError';
 	}
 
+	async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
+		const text = (await response.text().catch(() => '')).trim();
+		if (!text) return fallback;
+		try {
+			const parsed = JSON.parse(text);
+			if (typeof parsed?.error === 'string' && parsed.error.trim()) {
+				return parsed.error.trim();
+			}
+		} catch {
+			// Fall through to the raw response body.
+		}
+		return text;
+	}
+
 	onMount(async () => {
 		const bookId = $page.params.bookID;
 		try {
@@ -251,6 +265,10 @@
 			const res = await fetch(`/api/books/${book.id}/continuous?format=${encodeURIComponent(bookFormat)}`);
 			if (res.ok) {
 				const content = await res.text();
+				if (!content.trim()) {
+					error = 'The converted reader content was empty.';
+					return false;
+				}
 				continuousContent = content;
 				cacheBook(book.id, content, bookFormat);
 				processingMessage = 'Applying styles...';
@@ -260,9 +278,12 @@
 				await restoreContinuousProgress();
 				preloadPaginatedReader();
 				return true;
+			} else {
+				error = await responseErrorMessage(res, 'Failed to load reader content.');
 			}
 		} catch (e) {
 			console.error('Failed to preload content:', e);
+			error = 'Failed to load reader content.';
 		} finally {
 			initialProcessing = false;
 		}
@@ -666,7 +687,7 @@
 
 	async function loadOriginalStyles() {
 		try {
-			const response = await fetch(`/api/books/${book.id}/continuous/styles`);
+			const response = await fetch(`/api/books/${book.id}/continuous/styles?format=${encodeURIComponent(bookFormat)}`);
 			if (response.ok) {
 				const css = await response.text();
 				const originalStyleEl = document.getElementById('original-styles');
@@ -1528,19 +1549,27 @@
 		if (!book) return;
 		continuousLoading = true;
 		try {
-			const res = await fetch(`/api/books/${book.id}/continuous`);
+			const res = await fetch(`/api/books/${book.id}/continuous?format=${encodeURIComponent(bookFormat)}`);
 			if (res.ok) {
-				continuousContent = await res.text();
-				cacheBook(book.id, continuousContent);
+				const content = await res.text();
+				if (!content.trim()) {
+					error = 'The converted reader content was empty.';
+					return;
+				}
+				continuousContent = content;
+				cacheBook(book.id, continuousContent, bookFormat);
 				loadContinuousToc();
 			} else {
-				console.error('Failed to load continuous content');
+				error = await responseErrorMessage(res, 'Failed to load continuous content.');
 			}
 			await tick();
-			applyContinuousContentStyles();
-			await restoreContinuousProgress();
+			if (continuousContent) {
+				applyContinuousContentStyles();
+				await restoreContinuousProgress();
+			}
 		} catch (e) {
 			console.error('Failed to load continuous content:', e);
+			error = 'Failed to load continuous content.';
 		} finally {
 			continuousLoading = false;
 		}
@@ -1748,7 +1777,7 @@
 	});
 
 	$effect(() => {
-		if (readerReady || initialProcessing) return;
+		if (readerReady || initialProcessing || error) return;
 		if (bookLoaded && book && !loading) {
 			tick().then(async () => {
 				initialProcessing = true;
@@ -2097,6 +2126,8 @@
 						<div class="loading-spinner"></div>
 						<p>Loading reader content...</p>
 					</div>
+				{:else if error}
+					<p class="error-text">{error}</p>
 				{:else}
 					<p class="error-text">No content loaded. Please try refreshing.</p>
 				{/if}
@@ -2968,6 +2999,7 @@
 	}
 
 	.settings-tab {
+		position: relative;
 		flex: 1;
 		padding: 12px 8px;
 		border: none;
@@ -2976,13 +3008,31 @@
 		font-size: 12px;
 		font-weight: 500;
 		cursor: pointer;
-		transition: all 0.15s;
+		transition: color 0.15s ease-out;
+	}
+
+	.settings-tab::after {
+		content: '';
+		position: absolute;
+		left: 12px;
+		right: 12px;
+		bottom: 0;
+		height: 2px;
+		border-radius: 999px;
+		background: var(--color-primary-500, #22c55e);
+		opacity: 0;
+		transform: scaleX(0.35);
+		transition: opacity 140ms ease-out, transform 160ms ease-out;
 	}
 
 	.settings-tab:hover { color: var(--color-surface-text, #e2e8f0); }
 	.settings-tab.active {
 		color: var(--color-primary-500, #22c55e);
-		box-shadow: inset 0 -2px 0 var(--color-primary-500, #22c55e);
+	}
+
+	.settings-tab.active::after {
+		opacity: 1;
+		transform: scaleX(1);
 	}
 
 	.settings-content {

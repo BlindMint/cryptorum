@@ -97,17 +97,27 @@ func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []stri
 
 	imported := 0
 	scanStartedAt := time.Now().Unix()
+	seenPaths := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		seenPaths[file.Path] = struct{}{}
+	}
 
 	existing, err := s.loadLibraryFileInventory(libraryID)
 	if err != nil {
 		return 0, err
 	}
 
+	missing, err := s.markMissingFiles(libraryID, seenPaths, scanStartedAt)
+	if err != nil {
+		slog.Warn("Failed to pre-mark missing files", "libraryID", libraryID, "error", err)
+	} else {
+		progress.MissingFiles = missing
+	}
+
 	progress.Phase = "processing"
 	if onProgress != nil {
 		onProgress(progress)
 	}
-	seenPaths := make(map[string]struct{}, len(files))
 	for _, file := range files {
 		if shouldCancel != nil && shouldCancel() {
 			progress.Phase = "cancelled"
@@ -116,7 +126,6 @@ func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []stri
 			}
 			return imported, ErrScanCancelled
 		}
-		seenPaths[file.Path] = struct{}{}
 		if record, ok := existing[file.Path]; ok &&
 			record.Size == file.Size &&
 			record.LastModified == file.ModTimeUnix &&
@@ -171,12 +180,6 @@ func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []stri
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	missing, err := s.markMissingFiles(libraryID, seenPaths, scanStartedAt)
-	if err != nil {
-		slog.Warn("Failed to mark missing files", "libraryID", libraryID, "error", err)
-	} else {
-		progress.MissingFiles = missing
-	}
 	progress.Phase = "complete"
 	if onProgress != nil {
 		onProgress(progress)

@@ -53,7 +53,9 @@ type bulkFilterRequest struct {
 	Series     filterList `json:"series"`
 	Genre      filterList `json:"genre"`
 	Tags       filterList `json:"tags"`
+	Format     filterList `json:"format"`
 	Status     filterList `json:"status"`
+	Query      string     `json:"q"`
 	FilterMode string     `json:"filter_mode"`
 }
 
@@ -131,8 +133,31 @@ func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []inter
 	for _, value := range cleanFilterValues(req.Tags, true) {
 		addHierarchicalJSONFilterCondition(addFilterCondition, "bm.tags", value)
 	}
+	for _, value := range req.Format {
+		format := strings.ToLower(strings.TrimSpace(value))
+		if format != "" {
+			addFilterCondition("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", format)
+		}
+	}
 	for _, value := range req.Status {
 		addFilterCondition("COALESCE(rp.status, 'unread') = ?", value)
+	}
+	if strings.TrimSpace(req.Query) != "" {
+		searchText := `LOWER(
+			COALESCE(bm.title, '') || ' ' ||
+			COALESCE(bm.authors, '') || ' ' ||
+			REPLACE(REPLACE(COALESCE(bm.authors, ''), '.', ''), ' ', '') || ' ' ||
+			COALESCE(bm.description, '') || ' ' ||
+			COALESCE(bm.series, '') || ' ' ||
+			COALESCE(bm.series_number_display, '') || ' ' ||
+			CASE WHEN COALESCE(bm.series_number, 0) != 0 THEN CAST(bm.series_number AS TEXT) ELSE '' END || ' ' ||
+			COALESCE(bm.isbn, '') || ' ' ||
+			COALESCE(bm.asin, '') || ' ' ||
+			` + activeFileSearchTextSQL + `
+		)`
+		for _, token := range searchTokens(req.Query) {
+			addFilterCondition(searchText+" LIKE ?", "%"+token+"%")
+		}
 	}
 
 	filterMode := strings.ToUpper(req.FilterMode)
@@ -187,6 +212,7 @@ func initRoutes(r *chi.Mux) {
 			r.Get("/discover", getDiscoverBooksHandler)
 			r.Post("/bulk-delete", bulkDeleteBooksHandler)
 			r.Post("/bulk-delete-by-filter", bulkDeleteByFilterHandler)
+			r.Post("/bulk-metadata", bulkUpdateMetadataHandler)
 			r.Route("/{bookID}", func(r chi.Router) {
 				r.Get("/", getBookHandler)
 				r.Put("/", updateBookHandler)
@@ -200,6 +226,8 @@ func initRoutes(r *chi.Mux) {
 				r.Put("/progress", UpdateReadingProgressHandler)
 				r.Put("/speed-reader", UpdateSpeedReaderProgressHandler)
 				r.Post("/cover/regenerate", RegenerateBookCoverHandler)
+				r.Post("/cover/custom", UploadBookCoverHandler)
+				r.Delete("/cover/custom", ResetBookCoverHandler)
 				r.Get("/annotations", GetAnnotationsHandler)
 				r.Post("/annotations", CreateAnnotationHandler)
 				r.Delete("/annotations/{id}", DeleteAnnotationHandler)
@@ -222,6 +250,7 @@ func initRoutes(r *chi.Mux) {
 		r.Route("/libraries", func(r chi.Router) {
 			r.Get("/", getLibrariesHandler)
 			r.Post("/", createLibraryHandler)
+			r.Patch("/order", updateLibraryOrderHandler)
 			r.Route("/{libraryID}", func(r chi.Router) {
 				r.Get("/", getLibraryHandler)
 				r.Put("/", updateLibraryHandler)
@@ -414,6 +443,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	series := r.URL.Query().Get("series")
 	genre := r.URL.Query().Get("genre")
 	tags := r.URL.Query().Get("tags")
+	format := r.URL.Query().Get("format")
 	publisher := r.URL.Query().Get("publisher")
 	language := r.URL.Query().Get("language")
 	pubDate := r.URL.Query().Get("pub_date")
@@ -517,7 +547,8 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 			COALESCE(bm.series_number_display, '') || ' ' ||
 			CASE WHEN COALESCE(bm.series_number, 0) != 0 THEN CAST(bm.series_number AS TEXT) ELSE '' END || ' ' ||
 			COALESCE(bm.isbn, '') || ' ' ||
-			COALESCE(bm.asin, '')
+			COALESCE(bm.asin, '') || ' ' ||
+			` + activeFileSearchTextSQL + `
 		)`
 		for _, token := range searchTokens(searchQuery) {
 			addFilterCondition(searchText+" LIKE ?", "%"+token+"%")
@@ -549,6 +580,12 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	if tags != "" {
 		for _, value := range queryValues("tags", true) {
 			addHierarchicalJSONFilterCondition(addFilterCondition, "bm.tags", value)
+		}
+	}
+
+	if format != "" {
+		for _, value := range queryValues("format", false) {
+			addFilterCondition("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", strings.ToLower(value))
 		}
 	}
 
@@ -736,6 +773,7 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 		PubDate             string  `json:"pub_date"`
 		Description         string  `json:"description"`
 		CoverPath           string  `json:"cover_path"`
+		CoverSource         string  `json:"cover_source"`
 		CoverUpdatedOn      int64   `json:"cover_updated_on"`
 		Rating              float64 `json:"rating"`
 		Genres              string  `json:"genres"`
@@ -765,6 +803,7 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(bm.pub_date, '') as pub_date,
 		       COALESCE(bm.description, '') as description,
 		       COALESCE(bm.cover_path, '') as cover_path,
+		       COALESCE(bm.cover_source, '') as cover_source,
 		       COALESCE(bm.cover_updated_on, 0) as cover_updated_on,
 		       COALESCE(bm.rating, 0) as rating,
 		       COALESCE(bm.genres, '[]') as genres,
@@ -786,7 +825,7 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 	`, bookID).Scan(
 		&book.ID, &book.LibraryID, &book.AddedAt, &book.LibraryName,
 		&book.Title, &book.Authors, &book.Series, &book.SeriesNumber,
-		&book.SeriesNumberDisplay, &book.Publisher, &book.PubDate, &book.Description, &book.CoverPath,
+		&book.SeriesNumberDisplay, &book.Publisher, &book.PubDate, &book.Description, &book.CoverPath, &book.CoverSource,
 		&book.CoverUpdatedOn, &book.Rating, &book.Genres, &book.Tags, &book.ISBN, &book.ASIN, &book.Language, &book.PageCount, &book.ComicSpreadFallback,
 		&book.Status, &book.Percent, &book.SpeedReaderPercent, &opened,
 	)
@@ -1546,13 +1585,14 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT l.id, l.name, COALESCE(l.icon, '') as icon,
 		       COALESCE(l.exclude_from_suggestions, 0) as exclude_from_suggestions,
 		       COALESCE(l.comic_spread_fallback, 'inherit') as comic_spread_fallback,
+		       COALESCE(l.sort_order, 0) as sort_order,
 		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL THEN b.id END) as book_count
 		FROM library l
 		LEFT JOIN book b ON l.id = b.library_id
 		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
 		WHERE `+ownerClause+`
-		GROUP BY l.id, l.name, l.icon, l.exclude_from_suggestions, l.comic_spread_fallback
-		ORDER BY l.name
+		GROUP BY l.id, l.name, l.icon, l.exclude_from_suggestions, l.comic_spread_fallback, l.sort_order
+		ORDER BY CASE WHEN COALESCE(l.sort_order, 0) = 0 THEN 1 ELSE 0 END, l.sort_order, l.name
 	`, ownerArgs...)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch libraries")
@@ -1566,6 +1606,7 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 		Icon                   string `json:"icon"`
 		ExcludeFromSuggestions bool   `json:"exclude_from_suggestions"`
 		ComicSpreadFallback    string `json:"comic_spread_fallback"`
+		SortOrder              int64  `json:"sort_order"`
 		BookCount              int64  `json:"book_count"`
 		IsImporting            bool   `json:"is_importing"`
 	}
@@ -1574,7 +1615,7 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var lib LibraryResponse
 		var excludeFromSuggestions int
-		if err := rows.Scan(&lib.ID, &lib.Name, &lib.Icon, &excludeFromSuggestions, &lib.ComicSpreadFallback, &lib.BookCount); err != nil {
+		if err := rows.Scan(&lib.ID, &lib.Name, &lib.Icon, &excludeFromSuggestions, &lib.ComicSpreadFallback, &lib.SortOrder, &lib.BookCount); err != nil {
 			continue
 		}
 		lib.ExcludeFromSuggestions = excludeFromSuggestions == 1
@@ -2158,7 +2199,9 @@ func createLibraryHandler(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	comicSpreadFallback := coverprefs.NormalizeComicSpreadFallback(req.ComicSpreadFallback, true)
-	result, err := tx.Exec(`INSERT INTO library (id, name, icon, owner_user_id, exclude_from_suggestions, comic_spread_fallback) VALUES (?, ?, ?, ?, ?, ?)`, libraryID, req.Name, req.Icon, current.ID, boolToInt(req.ExcludeFromSuggestions), comicSpreadFallback)
+	var nextSortOrder int64
+	_ = tx.QueryRow(`SELECT COALESCE(MAX(sort_order), 0) + 1 FROM library WHERE owner_user_id = ?`, current.ID).Scan(&nextSortOrder)
+	result, err := tx.Exec(`INSERT INTO library (id, name, icon, owner_user_id, exclude_from_suggestions, comic_spread_fallback, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)`, libraryID, req.Name, req.Icon, current.ID, boolToInt(req.ExcludeFromSuggestions), comicSpreadFallback, nextSortOrder)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to create library")
 		return
@@ -2195,6 +2238,51 @@ func createLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		"scan_queued":              scanQueued,
 		"scan_existing":            scanExisting,
 	})
+}
+
+func updateLibraryOrderHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionManageLibraries) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+	if current == nil {
+		errorResponse(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	var req struct {
+		LibraryIDs []int64 `json:"library_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.LibraryIDs) == 0 {
+		errorResponse(w, http.StatusBadRequest, "Invalid library order")
+		return
+	}
+
+	tx, err := appDB.Begin()
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to start transaction")
+		return
+	}
+	defer tx.Rollback()
+
+	for index, id := range req.LibraryIDs {
+		result, err := tx.Exec(`UPDATE library SET sort_order = ? WHERE id = ? AND owner_user_id = ?`, index+1, id, current.ID)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to update library order")
+			return
+		}
+		if affected, _ := result.RowsAffected(); affected == 0 {
+			errorResponse(w, http.StatusForbidden, "Permission denied")
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to save library order")
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func updateLibraryHandler(w http.ResponseWriter, r *http.Request) {
@@ -2520,6 +2608,7 @@ func searchBooksHandler(w http.ResponseWriter, r *http.Request) {
 		Genre:      searchQueryValues(r, "genre", true),
 		Tags:       searchQueryValues(r, "tags", true),
 		Status:     searchQueryValues(r, "status", false),
+		Format:     searchQueryValues(r, "format", false),
 		FilterMode: r.URL.Query().Get("filter_mode"),
 		Sort:       r.URL.Query().Get("sort"),
 		SortDir:    r.URL.Query().Get("sort_dir"),
@@ -2663,6 +2752,37 @@ func getScalarMetadataOptions(column string, current *AppUser) ([]metadataOption
 	return sortedMetadataOptions(counts), rows.Err()
 }
 
+func getFormatMetadataOptions(current *AppUser) ([]metadataOption, error) {
+	ownerClause, ownerArgs := userOwnershipClause(current, "l")
+	rows, err := appDB.Query(`
+		SELECT LOWER(bf.format), COUNT(DISTINCT bf.book_id) as book_count
+		FROM book_file bf
+		JOIN book b ON bf.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+` AND bf.missing_at IS NULL AND bf.format IS NOT NULL AND bf.format != ''
+		GROUP BY LOWER(bf.format)
+	`, ownerArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var name string
+		var bookCount int64
+		if err := rows.Scan(&name, &bookCount); err != nil {
+			continue
+		}
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" {
+			counts[name] += bookCount
+		}
+	}
+
+	return sortedMetadataOptions(counts), rows.Err()
+}
+
 func getFilterOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	current := getUserFromContext(r.Context())
 
@@ -2696,12 +2816,18 @@ func getFilterOptionsHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch languages")
 		return
 	}
+	formats, err := getFormatMetadataOptions(current)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to fetch formats")
+		return
+	}
 
 	jsonResponse(w, http.StatusOK, map[string][]metadataOption{
 		"authors":    authors,
 		"series":     series,
 		"genres":     genres,
 		"tags":       tags,
+		"formats":    formats,
 		"publishers": publishers,
 		"languages":  languages,
 	})
