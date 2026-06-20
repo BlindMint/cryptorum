@@ -78,7 +78,7 @@
 		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
 			{#each getVisibleSeries() as serie}
 				<a
-					href="/library?series={encodeURIComponent(serie.name)}"
+					href="/library?series={encodeURIComponent(serie.name)}&sort=series&sort_dir=asc"
 					class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-4 hover:border-[var(--color-primary-500)]/50 transition-colors overflow-hidden"
 				>
 					<div class="flex items-center space-x-3 mb-2 min-w-0">

@@ -24,27 +24,29 @@ import (
 	"time"
 
 	"cryptorum/internal/coverprefs"
+	"cryptorum/internal/seriesnum"
 )
 
 const comicSpreadFallbackAspectThreshold = 1.25
 
 // BookMetadata represents extracted book metadata
 type BookMetadata struct {
-	Title        string   `json:"title"`
-	Authors      []string `json:"authors"`
-	Series       string   `json:"series"`
-	SeriesNumber float64  `json:"series_number,omitempty"`
-	Publisher    string   `json:"publisher"`
-	PubDate      string   `json:"pub_date"`
-	Description  string   `json:"description"`
-	Rating       float64  `json:"rating,omitempty"`
-	Genres       []string `json:"genres"`
-	ISBN         string   `json:"isbn"`
-	ASIN         string   `json:"asin,omitempty"`
-	CoverData    []byte   `json:"-"` // Cover image data
-	PageCount    int      `json:"page_count,omitempty"`
-	Language     string   `json:"language,omitempty"`
-	Source       string   `json:"-"`
+	Title               string   `json:"title"`
+	Authors             []string `json:"authors"`
+	Series              string   `json:"series"`
+	SeriesNumber        float64  `json:"series_number,omitempty"`
+	SeriesNumberDisplay string   `json:"series_number_display,omitempty"`
+	Publisher           string   `json:"publisher"`
+	PubDate             string   `json:"pub_date"`
+	Description         string   `json:"description"`
+	Rating              float64  `json:"rating,omitempty"`
+	Genres              []string `json:"genres"`
+	ISBN                string   `json:"isbn"`
+	ASIN                string   `json:"asin,omitempty"`
+	CoverData           []byte   `json:"-"` // Cover image data
+	PageCount           int      `json:"page_count,omitempty"`
+	Language            string   `json:"language,omitempty"`
+	Source              string   `json:"-"`
 }
 
 type ExtractOptions struct {
@@ -385,6 +387,7 @@ func extractPDFMetadata(filePath string) (*BookMetadata, error) {
 	}
 	if metadata.SeriesNumber == 0 {
 		metadata.SeriesNumber = filenameMetadata.SeriesNumber
+		metadata.SeriesNumberDisplay = filenameMetadata.SeriesNumberDisplay
 	}
 
 	metadata.CoverData = renderPDFCover(filePath)
@@ -730,8 +733,9 @@ func applyComicInfoMetadata(metadata *BookMetadata, comicInfo comicInfoXML) {
 		}
 	}
 	if comicInfo.Number != "" && metadata.SeriesNumber == 0 {
-		if number, err := strconv.ParseFloat(strings.TrimSpace(comicInfo.Number), 64); err == nil {
+		if number, display, err := seriesnum.Parse(comicInfo.Number); err == nil {
 			metadata.SeriesNumber = number
+			metadata.SeriesNumberDisplay = display
 		}
 	}
 }
@@ -1476,8 +1480,9 @@ func extractEbookMetaMetadata(filePath string) *BookMetadata {
 		case "series":
 			metadata.Series = value
 		case "series index":
-			if parsed, err := strconv.ParseFloat(value, 64); err == nil {
-				metadata.SeriesNumber = parsed
+			if number, display, err := seriesnum.Parse(value); err == nil {
+				metadata.SeriesNumber = number
+				metadata.SeriesNumberDisplay = display
 			}
 		}
 	}
@@ -1538,7 +1543,13 @@ func extractFromFilename(filePath string) *BookMetadata {
 	// Pattern: "Author - Title" or "Author - Series - Title"
 	if parts := strings.SplitN(name, " - ", 3); len(parts) >= 2 {
 		if len(parts) == 3 {
-			metadata.Series = strings.TrimSpace(parts[1])
+			if series, number, display, ok := parseSeriesLabel(parts[1]); ok {
+				metadata.Series = series
+				metadata.SeriesNumber = number
+				metadata.SeriesNumberDisplay = display
+			} else {
+				metadata.Series = strings.TrimSpace(parts[1])
+			}
 			metadata.Title = strings.TrimSpace(parts[2])
 		} else {
 			metadata.Title = strings.TrimSpace(parts[1])
@@ -1554,13 +1565,12 @@ func extractFromFilename(filePath string) *BookMetadata {
 		return metadata
 	}
 
-	// Pattern: "Series XX - Title"
-	if match := findSeriesNumber(name); match != "" {
-		metadata.Series = match
-		parts := strings.SplitN(name, "-", 2)
-		if len(parts) == 2 {
-			metadata.Title = strings.TrimSpace(parts[1])
-		}
+	// Pattern: "Series 01 - Title" or "Series IV - Title"
+	if series, number, display, title, ok := parseSeriesTitlePattern(name); ok {
+		metadata.Series = series
+		metadata.SeriesNumber = number
+		metadata.SeriesNumberDisplay = display
+		metadata.Title = title
 		return metadata
 	}
 
@@ -1582,18 +1592,44 @@ func findParenthesesContent(s string) string {
 	return ""
 }
 
-func findSeriesNumber(s string) string {
-	// Look for patterns like "Book 1", "Vol 2", "01", etc.
-	// Simplified implementation
-	if idx := strings.IndexAny(s, "0123456789"); idx >= 0 {
-		// Extract number
-		end := idx
-		for end < len(s) && (s[end] >= '0' && s[end] <= '9') {
-			end++
-		}
-		return s[idx:end]
+func parseSeriesTitlePattern(s string) (string, float64, string, string, bool) {
+	parts := strings.SplitN(s, "-", 2)
+	if len(parts) != 2 {
+		return "", 0, "", "", false
 	}
-	return ""
+
+	prefix := strings.TrimSpace(parts[0])
+	title := strings.TrimSpace(parts[1])
+	if prefix == "" || title == "" {
+		return "", 0, "", "", false
+	}
+
+	series, number, display, ok := parseSeriesLabel(prefix)
+	if !ok {
+		return "", 0, "", "", false
+	}
+	return series, number, display, title, true
+}
+
+func parseSeriesLabel(label string) (string, float64, string, bool) {
+	label = strings.TrimSpace(label)
+	fields := strings.Fields(label)
+	if len(fields) == 0 {
+		return "", 0, "", false
+	}
+
+	candidate := strings.Trim(fields[len(fields)-1], "#.()[]{}")
+	number, display, err := seriesnum.Parse(candidate)
+	if err != nil || number == 0 {
+		return "", 0, "", false
+	}
+
+	series := strings.TrimSpace(strings.TrimSuffix(label, fields[len(fields)-1]))
+	series = strings.TrimSpace(strings.TrimRight(series, "#:"))
+	if series == "" {
+		return "", 0, "", false
+	}
+	return series, number, display, true
 }
 
 // SaveCover saves the cover image to disk

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -16,17 +17,21 @@ const (
 )
 
 type SearchResult struct {
-	ID          int64   `json:"id"`
-	Title       string  `json:"title"`
-	Authors     string  `json:"authors"`
-	Description string  `json:"description"`
-	Series      string  `json:"series,omitempty"`
-	CoverPath   string  `json:"cover_path"`
-	Status      string  `json:"status"`
-	Percent     float64 `json:"percent"`
-	Opened      bool    `json:"opened"`
-	AddedAt     int64   `json:"added_at"`
-	LastReadAt  int64   `json:"last_read_at"`
+	ID                  int64   `json:"id"`
+	Title               string  `json:"title"`
+	Authors             string  `json:"authors"`
+	Description         string  `json:"description"`
+	Series              string  `json:"series,omitempty"`
+	SeriesNumber        float64 `json:"series_number,omitempty"`
+	SeriesNumberDisplay string  `json:"series_number_display,omitempty"`
+	Format              string  `json:"format,omitempty"`
+	FilePath            string  `json:"file_path,omitempty"`
+	CoverPath           string  `json:"cover_path"`
+	Status              string  `json:"status"`
+	Percent             float64 `json:"percent"`
+	Opened              bool    `json:"opened"`
+	AddedAt             int64   `json:"added_at"`
+	LastReadAt          int64   `json:"last_read_at"`
 }
 
 type bookSearchCandidate struct {
@@ -47,10 +52,28 @@ type BookSearchFilters struct {
 	Genre      []string
 	Tags       []string
 	Status     []string
+	Format     []string
 	FilterMode string
 	Sort       string
 	SortDir    string
 }
+
+const activeFileSearchTextSQL = `COALESCE((
+	SELECT group_concat(
+		COALESCE(bf.format, '') || ' ' ||
+		CASE
+			WHEN lp.path IS NOT NULL AND bf.path = lp.path THEN ''
+			WHEN lp.path IS NOT NULL AND bf.path LIKE lp.path || '/%' THEN substr(bf.path, length(lp.path) + 2)
+			ELSE bf.path
+		END,
+		' '
+	)
+	FROM book_file bf
+	LEFT JOIN library_path lp
+		ON lp.library_id = b.library_id
+		AND (bf.path = lp.path OR bf.path LIKE lp.path || '/%')
+	WHERE bf.book_id = b.id AND bf.missing_at IS NULL
+), '')`
 
 func searchBooks(query string, libraryID string, current *AppUser, filters BookSearchFilters) ([]SearchResult, error) {
 	queryTokens := searchTokens(query)
@@ -138,6 +161,10 @@ func queryFTSBookCandidates(ftsQuery string, libraryID string, current *AppUser,
 		       COALESCE(bm.authors, '[]') as authors,
 		       COALESCE(bm.description, '') as description,
 		       COALESCE(bm.series, '') as series,
+		       COALESCE(bm.series_number, 0) as series_number,
+		       COALESCE(bm.series_number_display, '') as series_number_display,
+		       COALESCE((SELECT bf.format FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL ORDER BY bf.format ASC LIMIT 1), '') as format,
+		       `+activeFileSearchTextSQL+` as file_path,
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(rp.status, 'unread') as status,
 		       COALESCE(rp.percent, 0) as percent,
@@ -168,6 +195,10 @@ func queryFTSBookCandidates(ftsQuery string, libraryID string, current *AppUser,
 			&candidate.result.Authors,
 			&candidate.result.Description,
 			&candidate.result.Series,
+			&candidate.result.SeriesNumber,
+			&candidate.result.SeriesNumberDisplay,
+			&candidate.result.Format,
+			&candidate.result.FilePath,
 			&candidate.result.CoverPath,
 			&candidate.result.Status,
 			&candidate.result.Percent,
@@ -201,10 +232,14 @@ func queryTokenLikeBookCandidates(
 	searchText := `LOWER(
 		COALESCE(bm.title, '') || ' ' ||
 		COALESCE(bm.authors, '') || ' ' ||
+		REPLACE(REPLACE(COALESCE(bm.authors, ''), '.', ''), ' ', '') || ' ' ||
 		COALESCE(bm.description, '') || ' ' ||
 		COALESCE(bm.series, '') || ' ' ||
+		COALESCE(bm.series_number_display, '') || ' ' ||
+		CASE WHEN COALESCE(bm.series_number, 0) != 0 THEN CAST(bm.series_number AS TEXT) ELSE '' END || ' ' ||
 		COALESCE(bm.isbn, '') || ' ' ||
-		COALESCE(bm.asin, '')
+		COALESCE(bm.asin, '') || ' ' ||
+		` + activeFileSearchTextSQL + `
 	)`
 	tokenConditions := make([]string, 0, len(queryTokens))
 	args := append(append([]interface{}{}, ownerArgs...), libraryArgs...)
@@ -221,6 +256,10 @@ func queryTokenLikeBookCandidates(
 		       COALESCE(bm.authors, '[]') as authors,
 		       COALESCE(bm.description, '') as description,
 		       COALESCE(bm.series, '') as series,
+		       COALESCE(bm.series_number, 0) as series_number,
+		       COALESCE(bm.series_number_display, '') as series_number_display,
+		       COALESCE((SELECT bf.format FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL ORDER BY bf.format ASC LIMIT 1), '') as format,
+		       `+activeFileSearchTextSQL+` as file_path,
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(rp.status, 'unread') as status,
 		       COALESCE(rp.percent, 0) as percent,
@@ -251,6 +290,10 @@ func queryTokenLikeBookCandidates(
 			&candidate.result.Authors,
 			&candidate.result.Description,
 			&candidate.result.Series,
+			&candidate.result.SeriesNumber,
+			&candidate.result.SeriesNumberDisplay,
+			&candidate.result.Format,
+			&candidate.result.FilePath,
 			&candidate.result.CoverPath,
 			&candidate.result.Status,
 			&candidate.result.Percent,
@@ -284,6 +327,10 @@ func queryFallbackBookCandidates(libraryID string, current *AppUser, filters Boo
 		       COALESCE(bm.authors, '[]') as authors,
 		       COALESCE(bm.description, '') as description,
 		       COALESCE(bm.series, '') as series,
+		       COALESCE(bm.series_number, 0) as series_number,
+		       COALESCE(bm.series_number_display, '') as series_number_display,
+		       COALESCE((SELECT bf.format FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL ORDER BY bf.format ASC LIMIT 1), '') as format,
+		       `+activeFileSearchTextSQL+` as file_path,
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(rp.status, 'unread') as status,
 		       COALESCE(rp.percent, 0) as percent,
@@ -312,6 +359,10 @@ func queryFallbackBookCandidates(libraryID string, current *AppUser, filters Boo
 			&candidate.result.Authors,
 			&candidate.result.Description,
 			&candidate.result.Series,
+			&candidate.result.SeriesNumber,
+			&candidate.result.SeriesNumberDisplay,
+			&candidate.result.Format,
+			&candidate.result.FilePath,
 			&candidate.result.CoverPath,
 			&candidate.result.Status,
 			&candidate.result.Percent,
@@ -339,7 +390,7 @@ func buildBookSearchFilterClause(filters BookSearchFilters) (string, []interface
 		addFilterCondition("COALESCE(rp.status, 'unread') = ?", value)
 	}
 	for _, value := range filters.Author {
-		addFilterCondition(`EXISTS (SELECT 1 FROM json_each(COALESCE(bm.authors, '[]')) WHERE value = ?)`, value)
+		addAuthorFilterCondition(addFilterCondition, "bm.authors", value)
 	}
 	for _, value := range filters.Series {
 		addFilterCondition("COALESCE(bm.series, '') = ?", value)
@@ -349,6 +400,12 @@ func buildBookSearchFilterClause(filters BookSearchFilters) (string, []interface
 	}
 	for _, value := range filters.Tags {
 		addHierarchicalJSONFilterCondition(addFilterCondition, "bm.tags", value)
+	}
+	for _, value := range filters.Format {
+		format := strings.ToLower(strings.TrimSpace(value))
+		if format != "" {
+			addFilterCondition("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", format)
+		}
 	}
 
 	if len(filterConditions) == 0 {
@@ -384,6 +441,9 @@ func sortScoredBookSearchResults(scored []scoredBookSearchResult, sortBy, sortDi
 			compare = compareInt64(left.AddedAt, right.AddedAt)
 		case "last_read":
 			compare = compareInt64(left.LastReadAt, right.LastReadAt)
+		case "series":
+			compare = compareSeriesSearchResults(left, right, desc)
+			return compare < 0
 		case "relevance":
 			if math.Abs(scored[i].score-scored[j].score) < 0.0001 {
 				compare = strings.Compare(left.Title, right.Title)
@@ -415,6 +475,59 @@ func compareInt64(left, right int64) int {
 	return 0
 }
 
+func compareSeriesNumber(left, right float64) int {
+	if left == 0 && right != 0 {
+		return 1
+	}
+	if left != 0 && right == 0 {
+		return -1
+	}
+	if left < right {
+		return -1
+	}
+	if left > right {
+		return 1
+	}
+	return 0
+}
+
+func compareMissingLast(left, right string) int {
+	left = strings.ToLower(strings.TrimSpace(left))
+	right = strings.ToLower(strings.TrimSpace(right))
+	if left == "" && right != "" {
+		return 1
+	}
+	if left != "" && right == "" {
+		return -1
+	}
+	return strings.Compare(left, right)
+}
+
+func compareSeriesSearchResults(left, right SearchResult, desc bool) int {
+	seriesCompare := compareMissingLast(left.Series, right.Series)
+	if seriesCompare != 0 {
+		return seriesCompare
+	}
+
+	seriesCompare = strings.Compare(strings.ToLower(left.Series), strings.ToLower(right.Series))
+	if desc {
+		seriesCompare = -seriesCompare
+	}
+	if seriesCompare != 0 {
+		return seriesCompare
+	}
+
+	numberCompare := compareSeriesNumber(left.SeriesNumber, right.SeriesNumber)
+	if desc && left.SeriesNumber != 0 && right.SeriesNumber != 0 {
+		numberCompare = -numberCompare
+	}
+	if numberCompare != 0 {
+		return numberCompare
+	}
+
+	return strings.Compare(strings.ToLower(left.Title), strings.ToLower(right.Title))
+}
+
 func buildFTSQuery(tokens []string) string {
 	parts := make([]string, 0, len(tokens))
 	for _, token := range tokens {
@@ -427,18 +540,21 @@ func buildFTSQuery(tokens []string) string {
 }
 
 func scoreBookSearchCandidate(queryTokens []string, candidate bookSearchCandidate) float64 {
+	seriesText := seriesSearchText(candidate.result)
 	titleScore, titleCoverage := scoreSearchField(queryTokens, candidate.result.Title)
 	authorsScore, authorsCoverage := scoreSearchField(queryTokens, authorsSearchText(candidate.result.Authors))
-	seriesScore, seriesCoverage := scoreSearchField(queryTokens, candidate.result.Series)
+	seriesScore, seriesCoverage := scoreSearchField(queryTokens, seriesText)
 	descriptionScore, descriptionCoverage := scoreSearchField(queryTokens, candidate.result.Description)
+	fileScore, fileCoverage := scoreSearchField(queryTokens, candidate.result.Format+" "+candidate.result.FilePath)
 
-	score := titleScore*5.0 + authorsScore*3.0 + seriesScore*2.0 + descriptionScore*0.5
-	bestCoverage := math.Max(titleCoverage, math.Max(authorsCoverage, math.Max(seriesCoverage, descriptionCoverage)))
+	score := titleScore*5.0 + authorsScore*3.0 + seriesScore*2.0 + descriptionScore*0.5 + fileScore*1.25
+	bestCoverage := math.Max(titleCoverage, math.Max(authorsCoverage, math.Max(seriesCoverage, math.Max(descriptionCoverage, fileCoverage))))
 	totalCoverage := combinedSearchCoverage(queryTokens, []string{
 		candidate.result.Title,
 		authorsSearchText(candidate.result.Authors),
-		candidate.result.Series,
+		seriesText,
 		candidate.result.Description,
+		candidate.result.Format + " " + candidate.result.FilePath,
 	})
 
 	score += totalCoverage * 2.0
@@ -456,6 +572,27 @@ func scoreBookSearchCandidate(queryTokens []string, candidate bookSearchCandidat
 		return 0
 	}
 	return score
+}
+
+func seriesSearchText(result SearchResult) string {
+	var parts []string
+	if result.Series != "" {
+		parts = append(parts, result.Series)
+	}
+	if result.SeriesNumberDisplay != "" {
+		parts = append(parts, result.SeriesNumberDisplay)
+	}
+	if result.SeriesNumber != 0 {
+		parts = append(parts, strconvFormatSeriesNumber(result.SeriesNumber))
+	}
+	return strings.Join(parts, " ")
+}
+
+func strconvFormatSeriesNumber(value float64) string {
+	if value == float64(int64(value)) {
+		return strconv.FormatInt(int64(value), 10)
+	}
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func scoreSearchField(queryTokens []string, field string) (float64, float64) {
@@ -606,9 +743,13 @@ func exactNormalizedContains(field string, query string) bool {
 func authorsSearchText(raw string) string {
 	var authors []string
 	if err := json.Unmarshal([]byte(raw), &authors); err == nil {
-		return strings.Join(authors, " ")
+		parts := make([]string, 0, len(authors)*2)
+		for _, author := range authors {
+			parts = append(parts, author, normalizedAuthorMatchKey(author))
+		}
+		return strings.Join(parts, " ")
 	}
-	return raw
+	return raw + " " + normalizedAuthorMatchKey(raw)
 }
 
 func damerauLevenshteinDistance(left string, right string) int {

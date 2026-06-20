@@ -13,6 +13,7 @@
 
 	let book = $state<any>(null);
 	let loading = $state(true);
+	let loadError = $state('');
 	let words = $state<ProcessedWord[]>([]);
 	let currentIndex = $state(0);
 	let isPlaying = $state(false);
@@ -131,6 +132,20 @@
 		}
 
 		return processed;
+	}
+
+	async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
+		const text = (await response.text().catch(() => '')).trim();
+		if (!text) return fallback;
+		try {
+			const parsed = JSON.parse(text);
+			if (typeof parsed?.error === 'string' && parsed.error.trim()) {
+				return parsed.error.trim();
+			}
+		} catch {
+			// Fall through to the raw response body.
+		}
+		return text;
 	}
 
 	let settings = $state<SpeedReaderSetting>({
@@ -336,18 +351,26 @@
 				const text = await res.text();
 				words = processText(text);
 				if (words.length === 0) {
+					loadError = 'No text was extracted for speed reading.';
 					currentIndex = 0;
 				} else if (savedProgress?.speed_reader_word_index > 0) {
+					loadError = '';
 					currentIndex = Math.max(0, Math.min(words.length - 1, savedProgress.speed_reader_word_index));
 				} else if (savedProgress?.speed_reader_percent > 0) {
+					loadError = '';
 					currentIndex = Math.max(
 						0,
 						Math.min(words.length - 1, Math.floor((savedProgress.speed_reader_percent / 100) * words.length))
 					);
+				} else {
+					loadError = '';
 				}
+			} else {
+				loadError = await responseErrorMessage(res, 'Failed to load text for speed reading.');
 			}
 		} catch (e) {
 			console.error('Failed to load text:', e);
+			loadError = 'Failed to load text for speed reading.';
 		}
 	}
 
@@ -858,7 +881,7 @@
 				{/if}
 			</div>
 		{:else}
-			<p class="text-white/60">No text available for speed reading</p>
+			<p class="max-w-xl px-6 text-center text-white/60">{loadError || 'No text available for speed reading'}</p>
 		{/if}
 	</div>
 

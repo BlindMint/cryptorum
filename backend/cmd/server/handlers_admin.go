@@ -1106,6 +1106,14 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 	includeUnreadOnly := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("unread")), "true")
 	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
 	typeFilters := splitCSVFilter(firstQueryValue(r.URL.Query().Get("type"), r.URL.Query().Get("job_type")))
+	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	var startAt, endAt int64
+	if value := strings.TrimSpace(r.URL.Query().Get("start")); value != "" {
+		startAt, _ = strconv.ParseInt(value, 10, 64)
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("end")); value != "" {
+		endAt, _ = strconv.ParseInt(value, 10, 64)
+	}
 
 	notifications := []AdminNotification{}
 	if statusFilter == "" {
@@ -1118,6 +1126,19 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 		conditions := []string{}
 		if includeUnreadOnly {
 			conditions = append(conditions, "read_at IS NULL")
+		}
+		if startAt > 0 {
+			conditions = append(conditions, "created_at >= ?")
+			args = append(args, startAt)
+		}
+		if endAt > 0 {
+			conditions = append(conditions, "created_at <= ?")
+			args = append(args, endAt)
+		}
+		if searchFilter != "" {
+			conditions = append(conditions, "(LOWER(kind) LIKE ? OR LOWER(title) LIKE ? OR LOWER(COALESCE(message, '')) LIKE ?)")
+			like := "%" + searchFilter + "%"
+			args = append(args, like, like, like)
 		}
 		for _, typeFilter := range typeFilters {
 			switch typeFilter {
@@ -1178,11 +1199,28 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 				FROM app_log
 			`
 			logArgs := []any{}
+			logConditions := []string{}
 			if len(logCategoryFilters) > 0 {
-				logQuery += " WHERE category IN (" + placeholders(len(logCategoryFilters)) + ")"
+				logConditions = append(logConditions, "category IN ("+placeholders(len(logCategoryFilters))+")")
 				for _, category := range logCategoryFilters {
 					logArgs = append(logArgs, category)
 				}
+			}
+			if startAt > 0 {
+				logConditions = append(logConditions, "created_at >= ?")
+				logArgs = append(logArgs, startAt)
+			}
+			if endAt > 0 {
+				logConditions = append(logConditions, "created_at <= ?")
+				logArgs = append(logArgs, endAt)
+			}
+			if searchFilter != "" {
+				logConditions = append(logConditions, "(LOWER(level) LIKE ? OR LOWER(category) LIKE ? OR LOWER(message) LIKE ? OR LOWER(COALESCE(data_json, '')) LIKE ?)")
+				like := "%" + searchFilter + "%"
+				logArgs = append(logArgs, like, like, like, like)
+			}
+			if len(logConditions) > 0 {
+				logQuery += " WHERE " + strings.Join(logConditions, " AND ")
 			}
 			logQuery += " ORDER BY created_at DESC LIMIT ?"
 			logArgs = append(logArgs, limit)
@@ -1229,6 +1267,19 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 	if statusFilter != "" {
 		jobConditions = append(jobConditions, "status = ?")
 		jobArgs = append(jobArgs, statusFilter)
+	}
+	if startAt > 0 {
+		jobConditions = append(jobConditions, "created_at >= ?")
+		jobArgs = append(jobArgs, startAt)
+	}
+	if endAt > 0 {
+		jobConditions = append(jobConditions, "created_at <= ?")
+		jobArgs = append(jobArgs, endAt)
+	}
+	if searchFilter != "" {
+		jobConditions = append(jobConditions, "(LOWER(job_type) LIKE ? OR LOWER(title) LIKE ? OR LOWER(status) LIKE ? OR LOWER(COALESCE(error, '')) LIKE ? OR LOWER(COALESCE(payload_json, '')) LIKE ? OR LOWER(COALESCE(result_json, '')) LIKE ?)")
+		like := "%" + searchFilter + "%"
+		jobArgs = append(jobArgs, like, like, like, like, like, like)
 	}
 	if len(typeFilters) > 0 {
 		jobConditions = append(jobConditions, "job_type IN ("+placeholders(len(typeFilters))+")")
