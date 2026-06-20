@@ -38,6 +38,8 @@
 				return 'Metadata Lookup';
 			case 'metadata_apply':
 				return 'Metadata Apply';
+			case 'bulk_metadata_update':
+				return 'Bulk Metadata';
 			case 'database_backup':
 				return 'Backup';
 			default:

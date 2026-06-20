@@ -149,7 +149,7 @@
 						<button
 							type="button"
 							onclick={() => activeTab = 'prime'}
-							class="inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'prime' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-400)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+							class="library-icon-tab inline-flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'prime' ? 'active text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 						>
 							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 								<path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
@@ -159,7 +159,7 @@
 						<button
 							type="button"
 							onclick={() => activeTab = 'svg'}
-							class="inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'svg' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-400)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+							class="library-icon-tab inline-flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'svg' ? 'active text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 						>
 							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 								<path d="M4 4h16v16H4z"></path>
@@ -327,5 +327,28 @@
 		width: 100%;
 		height: 100%;
 		overflow: visible;
+	}
+
+	.library-icon-tab {
+		position: relative;
+	}
+
+	.library-icon-tab::after {
+		content: '';
+		position: absolute;
+		left: 1rem;
+		right: 1rem;
+		bottom: 0;
+		height: 2px;
+		border-radius: 999px;
+		background: var(--color-primary-500);
+		opacity: 0;
+		transform: scaleX(0.35);
+		transition: opacity 140ms ease-out, transform 160ms ease-out;
+	}
+
+	.library-icon-tab.active::after {
+		opacity: 1;
+		transform: scaleX(1);
 	}
 </style>

@@ -87,8 +87,11 @@ func evaluateMagicShelfRules(shelfID string, rulesJSON string, user *AppUser) (*
 		case "authors":
 			switch condition.Operator {
 			case "contains":
-				conditions = append(conditions, "COALESCE(bm.authors, '[]') LIKE ?")
-				args = append(args, "%"+condition.Value.(string)+"%")
+				key := normalizedAuthorMatchKey(fmt.Sprintf("%v", condition.Value))
+				if key != "" {
+					conditions = append(conditions, `EXISTS (SELECT 1 FROM json_each(COALESCE(bm.authors, '[]')) WHERE `+normalizedAuthorSQLExpression("value")+` LIKE ?)`)
+					args = append(args, "%"+key+"%")
+				}
 			}
 		case "series":
 			switch condition.Operator {

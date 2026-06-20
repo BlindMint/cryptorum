@@ -97,17 +97,27 @@ func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []stri
 
 	imported := 0
 	scanStartedAt := time.Now().Unix()
+	seenPaths := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		seenPaths[file.Path] = struct{}{}
+	}
 
 	existing, err := s.loadLibraryFileInventory(libraryID)
 	if err != nil {
 		return 0, err
 	}
 
+	missing, err := s.markMissingFiles(libraryID, seenPaths, scanStartedAt)
+	if err != nil {
+		slog.Warn("Failed to pre-mark missing files", "libraryID", libraryID, "error", err)
+	} else {
+		progress.MissingFiles = missing
+	}
+
 	progress.Phase = "processing"
 	if onProgress != nil {
 		onProgress(progress)
 	}
-	seenPaths := make(map[string]struct{}, len(files))
 	for _, file := range files {
 		if shouldCancel != nil && shouldCancel() {
 			progress.Phase = "cancelled"
@@ -116,7 +126,6 @@ func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []stri
 			}
 			return imported, ErrScanCancelled
 		}
-		seenPaths[file.Path] = struct{}{}
 		if record, ok := existing[file.Path]; ok &&
 			record.Size == file.Size &&
 			record.LastModified == file.ModTimeUnix &&
@@ -171,12 +180,6 @@ func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []stri
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	missing, err := s.markMissingFiles(libraryID, seenPaths, scanStartedAt)
-	if err != nil {
-		slog.Warn("Failed to mark missing files", "libraryID", libraryID, "error", err)
-	} else {
-		progress.MissingFiles = missing
-	}
 	progress.Phase = "complete"
 	if onProgress != nil {
 		onProgress(progress)
@@ -667,14 +670,15 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 
 	_, err := s.db.Exec(`
 		INSERT INTO book_metadata
-		    (book_id, title, authors, series, series_number, publisher, pub_date,
+		    (book_id, title, authors, series, series_number, series_number_display, publisher, pub_date,
 		     description, rating, genres, isbn, asin, language, page_count, cover_path, cover_updated_on, owner_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(book_id) DO UPDATE SET
 		    title         = COALESCE(NULLIF(excluded.title, ''), title),
 		    authors       = COALESCE(NULLIF(excluded.authors, '[]'), authors),
 		    series        = COALESCE(NULLIF(excluded.series, ''), series),
 		    series_number = COALESCE(NULLIF(excluded.series_number, 0), series_number),
+		    series_number_display = COALESCE(NULLIF(excluded.series_number_display, ''), series_number_display),
 		    publisher     = COALESCE(NULLIF(excluded.publisher, ''), publisher),
 		    pub_date      = COALESCE(NULLIF(excluded.pub_date, ''), pub_date),
 		    description   = COALESCE(NULLIF(excluded.description, ''), description),
@@ -689,7 +693,7 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 		        WHEN excluded.cover_path != '' THEN excluded.cover_updated_on
 		        ELSE cover_updated_on
 		    END
-	`, bookID, meta.Title, string(authorsJSON), meta.Series, meta.SeriesNumber,
+	`, bookID, meta.Title, string(authorsJSON), meta.Series, meta.SeriesNumber, meta.SeriesNumberDisplay,
 		meta.Publisher, meta.PubDate, meta.Description, meta.Rating,
 		string(genresJSON), meta.ISBN, meta.ASIN, meta.Language, meta.PageCount, coverPath, coverUpdatedOn, ownerUserID)
 

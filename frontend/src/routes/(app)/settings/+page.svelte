@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import { readerSettings, epubThemes, fontFamilies, fontWeightOptions, cbxFitModes, cbxScrollModes, skipIntervalOptions, sleepTimerOptions, waveformStyles, type ReaderSettings } from '$lib/stores/readerSettings';
 	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, updateCustomTheme, removeCustomTheme, resetPrimaryToDefault, resetSurfaceToDefault, generateId, updateGlowEnabled, updateGlowAutoMode, updateGlowColor, updateGlowIntensity, updateBgImageEnabled, updateBgImageTransparency, updateBgImageDisplay, updateSelectedBgImage, addBackgroundImage, removeBackgroundImage, DEFAULT_THEME_PRIMARY, DEFAULT_THEME_SURFACE } from '$lib/stores/theme';
 	import { appActivity } from '$lib/stores';
@@ -37,6 +37,8 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	let scanPollTimer: number | null = null;
 	let activeLibraryScanJobs = $state<any[]>([]);
 	let activeTab = $state<'general' | 'metadata' | 'reader' | 'appearance' | 'jobs' | 'admin'>('general');
+	let settingsTabContainer: HTMLDivElement | null = $state(null);
+	let settingsTabIndicatorStyle = $state('opacity: 0; transform: translateX(0); width: 0;');
 	let settingsSaved = $state(false);
 	const globalComicSpreadFallbackOptions = [
 		{ value: 'right', label: 'Right side' },
@@ -813,10 +815,28 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		if (tab === 'general') {
 			url.searchParams.delete('tab');
 		} else {
-			url.searchParams.set('tab', tab);
+			url.searchParams.set('tab', tab === 'jobs' ? 'activity' : tab);
 		}
 		window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 	}
+
+	async function updateSettingsTabIndicator() {
+		await tick();
+		const container = settingsTabContainer;
+		const activeButton = container?.querySelector('[data-tab-active="true"]') as HTMLElement | null;
+		if (!container || !activeButton) {
+			settingsTabIndicatorStyle = 'opacity: 0; transform: translateX(0); width: 0;';
+			return;
+		}
+		const containerRect = container.getBoundingClientRect();
+		const activeRect = activeButton.getBoundingClientRect();
+		settingsTabIndicatorStyle = `opacity: 1; width: ${activeRect.width}px; transform: translateX(${activeRect.left - containerRect.left + container.scrollLeft}px);`;
+	}
+
+	$effect(() => {
+		activeTab;
+		void updateSettingsTabIndicator();
+	});
 	
 	onMount(async () => {
 		settingsMainEl = document.querySelector('main');
@@ -828,7 +848,9 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 			const tab = new URLSearchParams(window.location.search).get('tab');
 			if (tab === 'users') {
 				activeTab = 'admin';
-			} else if (tab === 'general' || tab === 'metadata' || tab === 'reader' || tab === 'appearance' || tab === 'jobs' || tab === 'admin') {
+			} else if (tab === 'activity' || tab === 'jobs') {
+				activeTab = 'jobs';
+			} else if (tab === 'general' || tab === 'metadata' || tab === 'reader' || tab === 'appearance' || tab === 'admin') {
 				activeTab = tab;
 			}
 		}
@@ -839,9 +861,14 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		(window as any).refreshSettingsScans = refreshScanState;
 		void readerSettings.syncWithBackend();
 		loading = false;
+		void updateSettingsTabIndicator();
+		window.addEventListener('resize', updateSettingsTabIndicator);
 	});
 
 	onDestroy(() => {
+		if (typeof window !== 'undefined') {
+			window.removeEventListener('resize', updateSettingsTabIndicator);
+		}
 		if (settingsMainEl) {
 			settingsMainEl.style.overscrollBehaviorY = previousMainOverscrollBehaviorY;
 		}
@@ -865,40 +892,47 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
  	</div>
 
   	<!-- Tabs -->
-  	<div class="settings-tab-scroll flex space-x-1 overflow-x-auto overflow-y-hidden border-b border-[var(--color-surface-border)]">
+  	<div bind:this={settingsTabContainer} class="settings-tab-scroll relative flex space-x-1 overflow-x-auto overflow-y-hidden border-b border-[var(--color-surface-border)]" onscroll={updateSettingsTabIndicator}>
+		<div class="settings-tab-indicator" style={settingsTabIndicatorStyle}></div>
   		<button
   			onclick={() => setActiveTab('general')}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors border-b-2 {activeTab === 'general' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+			data-tab-active={activeTab === 'general'}
+  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'general' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
   		>
   			General
   		</button>
   		<button
   			onclick={() => setActiveTab('appearance')}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors border-b-2 {activeTab === 'appearance' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+			data-tab-active={activeTab === 'appearance'}
+  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'appearance' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
   		>
   			Appearance
   		</button>
   		<button
   			onclick={() => setActiveTab('reader')}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors border-b-2 {activeTab === 'reader' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+			data-tab-active={activeTab === 'reader'}
+  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'reader' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
   		>
   			Reader
   		</button>
   		<button
   			onclick={() => setActiveTab('metadata')}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors border-b-2 {activeTab === 'metadata' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+			data-tab-active={activeTab === 'metadata'}
+  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'metadata' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
   		>
   			Metadata
   		</button>
 		<button
 			onclick={() => setActiveTab('jobs')}
-			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors border-b-2 {activeTab === 'jobs' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+			data-tab-active={activeTab === 'jobs'}
+			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'jobs' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 		>
-			Jobs
+			Activity
 		</button>
   		<button
   			onclick={() => setActiveTab('admin')}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors border-b-2 {activeTab === 'admin' ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+			data-tab-active={activeTab === 'admin'}
+  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'admin' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
   		>
   			Admin
   		</button>
@@ -2017,12 +2051,12 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 						<button
 							onclick={triggerScan}
 							class="inline-flex h-10 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)] disabled:cursor-not-allowed disabled:opacity-70 sm:flex-none"
-							title={scanActive ? 'View active jobs' : 'Scan all libraries'}
+							title={scanActive ? 'View activity' : 'Scan all libraries'}
 						>
 							<svg class="h-4 w-4 {scanActive ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
 							</svg>
-							<span>{scanActive ? 'View Jobs' : 'Scan Libraries'}</span>
+							<span>{scanActive ? 'View Activity' : 'Scan Libraries'}</span>
 						</button>
 						<button
 							onclick={() => openLibraryModal()}
@@ -2395,6 +2429,17 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	.settings-tab-button {
 		flex: 0 0 auto;
 		white-space: nowrap;
+	}
+
+	.settings-tab-indicator {
+		position: absolute;
+		bottom: 0;
+		left: 0;
+		height: 2px;
+		border-radius: 999px;
+		background: var(--color-primary-500);
+		pointer-events: none;
+		transition: transform 160ms ease-out, width 160ms ease-out, opacity 120ms ease-out;
 	}
 
 	.reader-control-grid > div {

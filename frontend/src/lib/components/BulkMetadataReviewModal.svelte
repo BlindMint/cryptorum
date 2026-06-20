@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { appActivity } from '$lib/stores';
+	import { appActivity, reviewedMetadataLookupJobs } from '$lib/stores';
 
 	type MetadataCandidate = {
 		provider: string;
@@ -76,10 +76,11 @@
 	let applying = $state(false);
 	let applyMessage = $state('');
 	let includeCover = $state(true);
+	let appliedBookIds = $state<Set<number>>(new Set());
 	let pollTimer: number | null = null;
 	let selectionTouched = false;
 
-	const items = $derived(job?.result?.items ?? []);
+	const items = $derived((job?.result?.items ?? []).filter((item) => !appliedBookIds.has(item.book_id)));
 	const matchedItems = $derived(items.filter((item) => item.match));
 	const selectedItems = $derived(items.filter((item) => item.match && selected.has(item.book_id)));
 
@@ -194,6 +195,9 @@
 			for (const item of validItems) next.delete(item.book_id);
 			selectionTouched = true;
 			selected = next;
+			const applied = new Set(appliedBookIds);
+			for (const item of validItems) applied.add(item.book_id);
+			appliedBookIds = applied;
 			applyMessage = payload.length === 1 ? 'Metadata updated.' : 'Metadata update job queued.';
 			await onApplied?.();
 		} catch (error) {
@@ -206,6 +210,8 @@
 	}
 
 	onMount(() => {
+		reviewedMetadataLookupJobs.init();
+		reviewedMetadataLookupJobs.mark(jobId);
 		job = initialJob;
 		loading = !initialJob;
 		syncDefaultSelection();
@@ -237,7 +243,7 @@
 				{/if}
 				<button
 					type="button"
-					class="rounded-md border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+					class="rounded-md border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-base)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
 					onclick={onClose}
 				>
 					Close
@@ -258,23 +264,23 @@
 						{job.completed_items} / {job.total_items} checked, {matchedItems.length} match{matchedItems.length === 1 ? '' : 'es'}, {job.failed_items} failed
 					</div>
 					<div class="flex flex-wrap items-center gap-2">
-						<label class="flex items-center gap-2 text-sm text-[var(--color-surface-text)]">
+						<label class="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)]">
 							<input type="checkbox" bind:checked={includeCover} class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]" />
 							Update covers
 						</label>
-						<button type="button" class="rounded-md border border-[var(--color-surface-border)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]" onclick={selectAllMatches}>
+						<button type="button" class="rounded-md border border-[var(--color-surface-border)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-base)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]" onclick={selectAllMatches}>
 							Select matches
 						</button>
-						<button type="button" class="rounded-md border border-[var(--color-surface-border)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]" onclick={clearSelection}>
+						<button type="button" class="rounded-md border border-[var(--color-surface-border)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-base)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]" onclick={clearSelection}>
 							Clear
 						</button>
 						<button
 							type="button"
-							class="rounded-md bg-[var(--color-primary-500)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[var(--color-primary-600)] disabled:opacity-50"
+							class="rounded-md bg-[var(--color-primary-500)] px-3 py-1.5 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
 							onclick={() => applyItems(selectedItems)}
 							disabled={applying || selectedItems.length === 0}
 						>
-							{applying ? 'Updating...' : `Update metadata (${selectedItems.length})`}
+							{applying ? 'Applying...' : `Apply top match (${selectedItems.length})`}
 						</button>
 					</div>
 				</div>
@@ -286,12 +292,12 @@
 			<div class="min-h-0 flex-1 overflow-y-auto p-4">
 				{#if items.length === 0}
 					<div class="rounded-lg border border-dashed border-[var(--color-surface-border)] px-6 py-12 text-center text-sm text-[var(--color-surface-text-muted)]">
-						No lookup results yet.
+						{appliedBookIds.size > 0 ? 'All visible matches have been applied.' : 'No lookup results yet.'}
 					</div>
 				{:else}
 					<div class="space-y-3">
 						{#each items as item}
-							<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
+							<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4 transition-all duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-700)]/60 hover:shadow-sm">
 								<div class="mb-3 flex items-center justify-between gap-3">
 									<label class="flex min-w-0 items-center gap-3">
 										<input
@@ -311,7 +317,7 @@
 										</span>
 										<button
 											type="button"
-											class="rounded-md border border-[var(--color-surface-border)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] disabled:opacity-50"
+											class="rounded-md border border-[var(--color-surface-border)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-overlay)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
 											onclick={() => applyItems([item])}
 											disabled={applying || !item.match}
 										>

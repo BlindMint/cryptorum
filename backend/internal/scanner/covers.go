@@ -17,6 +17,7 @@ type coverCandidate struct {
 	libraryID             int64
 	filePath              string
 	existingCoverPath     string
+	coverSource           string
 	comicSpreadFallback   string
 	librarySpreadFallback string
 }
@@ -110,6 +111,7 @@ func (s *Scanner) CountCoverCandidatesForLibrary(libraryID int64, missingOnly bo
 func (s *Scanner) coverCandidates(libraryID int64, missingOnly bool) ([]coverCandidate, error) {
 	query := `
 		SELECT b.id, b.library_id, bf.path, COALESCE(bm.cover_path, ''),
+		       COALESCE(bm.cover_source, ''),
 		       COALESCE(bm.comic_spread_fallback, 'inherit'),
 		       COALESCE(l.comic_spread_fallback, 'inherit')
 		FROM book b
@@ -138,9 +140,14 @@ func (s *Scanner) coverCandidates(libraryID int64, missingOnly bool) ([]coverCan
 			&candidate.libraryID,
 			&candidate.filePath,
 			&candidate.existingCoverPath,
+			&candidate.coverSource,
 			&candidate.comicSpreadFallback,
 			&candidate.librarySpreadFallback,
 		); err != nil {
+			continue
+		}
+
+		if candidate.coverSource == "custom" {
 			continue
 		}
 
@@ -166,10 +173,11 @@ func (s *Scanner) updateCoverRecord(bookID int64, oldCoverPath, newCoverPath str
 	now := time.Now().Unix()
 
 	if _, err := s.db.Exec(`
-		INSERT INTO book_metadata (book_id, cover_path, cover_updated_on, authors, genres, locked_fields)
-		VALUES (?, ?, ?, '[]', '[]', '[]')
+		INSERT INTO book_metadata (book_id, cover_path, cover_source, cover_updated_on, authors, genres, locked_fields)
+		VALUES (?, ?, '', ?, '[]', '[]', '[]')
 		ON CONFLICT(book_id) DO UPDATE SET
 			cover_path = excluded.cover_path,
+			cover_source = excluded.cover_source,
 			cover_updated_on = excluded.cover_updated_on
 	`, bookID, newCoverPath, now); err != nil {
 		return err

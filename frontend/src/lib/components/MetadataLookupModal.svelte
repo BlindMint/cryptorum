@@ -58,9 +58,20 @@
 		title?: string;
 		onClose: () => void;
 		onApplied?: () => Promise<void> | void;
+		confirmBeforeApply?: boolean;
+		hasUnsavedChanges?: boolean;
+		onApplyCurrentEdits?: () => Promise<boolean> | boolean;
 	}
 
-	let { bookIds = [], title = 'Metadata Lookup', onClose, onApplied }: Props = $props();
+	let {
+		bookIds = [],
+		title = 'Metadata Lookup',
+		onClose,
+		onApplied,
+		confirmBeforeApply = false,
+		hasUnsavedChanges = false,
+		onApplyCurrentEdits
+	}: Props = $props();
 
 	let targets = $state<LookupTarget[]>([]);
 	let activeBookId = $state<number | null>(null);
@@ -69,6 +80,7 @@
 	let includeCover = $state(true);
 	let loading = $state(true);
 	let applying = $state(false);
+	let pendingApply = $state<{ mode: 'single' | 'all'; bookId?: number } | null>(null);
 	let initialized = false;
 
 	function parseAuthors(value: string | undefined): string[] {
@@ -167,6 +179,10 @@
 		return targets.findIndex((target) => target.bookId === activeBookId);
 	}
 
+	function isAnyTargetSearching(): boolean {
+		return targets.some((target) => target.loading);
+	}
+
 	function goToTarget(offset: number) {
 		if (targets.length === 0) return;
 		const currentIndex = activeTargetIndex();
@@ -195,9 +211,13 @@
 	function resultSummaryForTarget(target: LookupTarget): string {
 		const title = target.queryTitle.trim();
 		const authors = target.queryAuthors.trim();
+		const isbn = target.queryIsbn.trim();
+		const asin = target.queryAsin.trim();
 		if (title && authors) return `${title} by ${authors}`;
 		if (title) return title;
 		if (authors) return authors;
+		if (isbn) return `ISBN ${isbn}`;
+		if (asin) return `ASIN ${asin}`;
 		return `Book ${target.bookId}`;
 	}
 
@@ -403,6 +423,37 @@
 		}
 	}
 
+	function requestApplyMetadata(bookId: number) {
+		if (confirmBeforeApply) {
+			pendingApply = { mode: 'single', bookId };
+			return;
+		}
+		void applyMetadata(bookId);
+	}
+
+	function requestApplyAllSelected() {
+		if (confirmBeforeApply) {
+			pendingApply = { mode: 'all' };
+			return;
+		}
+		void applyAllSelected();
+	}
+
+	async function continuePendingApply(applyCurrentEditsFirst = false) {
+		const action = pendingApply;
+		if (!action) return;
+		if (applyCurrentEditsFirst && onApplyCurrentEdits) {
+			const saved = await onApplyCurrentEdits();
+			if (!saved) return;
+		}
+		pendingApply = null;
+		if (action.mode === 'single' && action.bookId) {
+			await applyMetadata(action.bookId);
+		} else {
+			await applyAllSelected();
+		}
+	}
+
 	function getSelectedResult(target: LookupTarget): MetadataCandidate | null {
 		return target.selectedIndex >= 0 ? target.results[target.selectedIndex] ?? null : null;
 	}
@@ -412,7 +463,7 @@
 	});
 </script>
 
-<div class="fixed inset-0 z-[120] flex items-center justify-center p-4 relative">
+<div class="fixed inset-0 z-[120] flex items-center justify-center p-4">
 	<button
 		type="button"
 		aria-label="Close metadata lookup modal"
@@ -428,13 +479,18 @@
 				</p>
 			</div>
 			<div class="flex items-center gap-2">
-				<button
-					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)]"
-					onclick={searchAllTargets}
-					disabled={loading || applying}
-				>
-					Search All
-				</button>
+					<button
+						class="inline-flex items-center gap-2 rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)]"
+						onclick={searchAllTargets}
+						disabled={loading || applying}
+					>
+						<span class="inline-flex h-3.5 w-3.5 items-center justify-center" aria-hidden="true">
+							{#if isAnyTargetSearching()}
+								<span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--color-surface-border)] border-t-[var(--color-primary-500)]"></span>
+							{/if}
+						</span>
+						{isAnyTargetSearching() ? 'Searching All...' : 'Search All'}
+					</button>
 				<button
 					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)]"
 					onclick={onClose}
@@ -445,8 +501,53 @@
 		</div>
 
 		{#if loading}
-			<div class="flex items-center justify-center px-6 py-12">
-				<div class="h-12 w-12 animate-spin rounded-full border-b-2 border-[var(--color-primary-500)]"></div>
+			<div class="flex h-[calc(92vh-88px)] flex-col gap-4 overflow-hidden p-4 lg:p-6">
+				<div class="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)]">
+					<div class="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
+						<div class="border-b border-[var(--color-surface-border)] px-4 py-3">
+							<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Search Fields</h3>
+							<p class="text-sm text-[var(--color-surface-text-muted)]">Loading book details and providers...</p>
+						</div>
+						<div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-4" aria-busy="true">
+							{#each ['Title', 'Authors', 'ISBN', 'ASIN', 'Series', 'Publisher', 'Provider'] as label}
+								<div>
+									<div class="mb-1 text-sm font-medium text-[var(--color-surface-text-muted)]">{label}</div>
+									<div class="h-[42px] rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
+										<div class="h-full w-2/3 animate-pulse rounded-lg bg-[var(--color-surface-700)]/70"></div>
+									</div>
+								</div>
+							{/each}
+							<div class="flex items-center gap-3">
+								<div class="h-4 w-4 rounded border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]"></div>
+								<div class="h-4 w-40 animate-pulse rounded bg-[var(--color-surface-700)]/70"></div>
+							</div>
+							<div class="grid grid-cols-2 gap-2 pt-2">
+								<div class="h-9 rounded-lg bg-[var(--color-primary-500)]/40"></div>
+								<div class="h-9 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]"></div>
+							</div>
+						</div>
+					</div>
+
+					<div class="min-h-0 overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
+						<div class="border-b border-[var(--color-surface-border)] px-4 py-3">
+							<div class="flex items-center justify-between gap-3">
+								<div>
+									<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Results</h3>
+									<p class="text-sm text-[var(--color-surface-text-muted)]">Search results will appear here.</p>
+								</div>
+								<div class="h-4 w-16 animate-pulse rounded bg-[var(--color-surface-700)]/70"></div>
+							</div>
+						</div>
+						<div class="min-h-0 overflow-y-auto p-4">
+							<div class="flex h-full min-h-56 items-center justify-center rounded-2xl border border-dashed border-[var(--color-surface-border)] text-center">
+								<div>
+									<div class="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-[var(--color-surface-border)] border-t-[var(--color-primary-500)]"></div>
+									<p class="mt-3 text-sm text-[var(--color-surface-text-muted)]">Preparing metadata lookup...</p>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
 			</div>
 		{:else if targets.length > 0}
 			{@const target = activeTarget()}
@@ -545,9 +646,9 @@
 									<div>
 										<label for={`lookup-provider-${target.bookId}`} class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">Provider</label>
 										<select bind:value={selectedProvider} class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]">
-										<option value="">All providers</option>
+										<option value="" class="bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)]">All providers</option>
 										{#each providers as provider}
-											<option value={provider.id}>{provider.name}</option>
+											<option value={provider.id} class="bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)]">{provider.name}</option>
 										{/each}
 									</select>
 								</div>
@@ -555,17 +656,22 @@
 									<input id="include-cover" type="checkbox" bind:checked={includeCover} class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]" />
 									<label for="include-cover" class="text-sm text-[var(--color-surface-text)]">Update cover when available</label>
 								</div>
-								<div class="grid grid-cols-2 gap-2 pt-2">
-									<button
-										class="rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-primary-600)] disabled:opacity-50"
-										onclick={() => searchTarget(target.bookId)}
-										disabled={target.loading || applying}
-									>
-										{target.loading ? 'Searching...' : 'Search'}
-									</button>
+									<div class="grid grid-cols-2 gap-2 pt-2">
+										<button
+											class="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-primary-600)] disabled:opacity-50"
+											onclick={() => searchTarget(target.bookId)}
+											disabled={target.loading || applying}
+										>
+											<span class="inline-flex h-3.5 w-3.5 items-center justify-center" aria-hidden="true">
+												{#if target.loading}
+													<span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/35 border-t-white"></span>
+												{/if}
+											</span>
+											{target.loading ? 'Searching...' : 'Search'}
+										</button>
 									<button
 										class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-overlay)] disabled:opacity-50"
-										onclick={() => applyMetadata(target.bookId)}
+										onclick={() => requestApplyMetadata(target.bookId)}
 										disabled={target.loading || applying || target.selectedIndex < 0}
 									>
 										Apply Current
@@ -574,7 +680,7 @@
 								{#if targets.length > 1}
 									<button
 										class="w-full rounded-lg border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/10 px-3 py-2 text-sm font-medium text-[var(--color-primary-300)] transition-colors hover:bg-[var(--color-primary-500)]/20 disabled:opacity-50"
-										onclick={applyAllSelected}
+										onclick={requestApplyAllSelected}
 										disabled={applying}
 									>
 										Queue Bulk Update
@@ -597,8 +703,14 @@
 											{target.results.length} result{target.results.length === 1 ? '' : 's'} for {resultSummaryForTarget(target)}
 										</p>
 									</div>
-									<div class="text-sm text-[var(--color-surface-text-muted)]">
-										Book ID {target.bookId}
+									<div class="flex flex-wrap items-center justify-end gap-2 text-sm text-[var(--color-surface-text-muted)]">
+										{#if target.loading}
+											<span class="inline-flex items-center gap-2 rounded-full border border-[var(--color-primary-500)]/35 bg-[var(--color-primary-500)]/10 px-2.5 py-1 text-xs font-medium text-[var(--color-primary-200)]">
+												<span class="h-3 w-3 animate-spin rounded-full border-2 border-[var(--color-surface-border)] border-t-[var(--color-primary-500)]" aria-hidden="true"></span>
+												Searching providers...
+											</span>
+										{/if}
+										<span>Book ID {target.bookId}</span>
 									</div>
 								</div>
 							</div>
@@ -666,4 +778,51 @@
 			</div>
 		{/if}
 	</div>
+
+	{#if pendingApply}
+		<div class="fixed inset-0 z-20 flex items-center justify-center p-4">
+			<button
+				type="button"
+				class="absolute inset-0 bg-black/70"
+				aria-label="Cancel metadata apply"
+				onclick={() => pendingApply = null}
+			></button>
+			<div class="relative w-full max-w-lg rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 shadow-2xl">
+				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Apply metadata result?</h3>
+				<p class="mt-2 text-sm text-[var(--color-surface-text-muted)]">
+					Applying this result will overwrite existing metadata for this book{pendingApply.mode === 'all' ? ' selection' : ''}.
+					{#if hasUnsavedChanges}
+						Unsaved inline edits will be lost unless you apply them first.
+					{/if}
+				</p>
+				<div class="mt-5 flex flex-wrap justify-end gap-2">
+					<button
+						type="button"
+						onclick={() => pendingApply = null}
+						class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)]"
+					>
+						Cancel
+					</button>
+					{#if hasUnsavedChanges && onApplyCurrentEdits}
+						<button
+							type="button"
+							onclick={() => continuePendingApply(true)}
+							disabled={applying}
+							class="rounded-lg border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/10 px-4 py-2 text-sm font-medium text-[var(--color-primary-200)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-500)]/20 disabled:opacity-50"
+						>
+							Apply Current Edits First
+						</button>
+					{/if}
+					<button
+						type="button"
+						onclick={() => continuePendingApply(false)}
+						disabled={applying}
+						class="rounded-lg bg-[var(--color-primary-500)] px-4 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] disabled:opacity-50"
+					>
+						Overwrite Metadata
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>

@@ -63,6 +63,7 @@ type MetadataSearchFields struct {
 type metadataSearchVariant struct {
 	Fields MetadataSearchFields
 	Query  string
+	Mode   string
 	Bonus  float64
 }
 
@@ -79,6 +80,12 @@ var metadataSearchCache = struct {
 }
 
 const metadataSearchCacheTTL = 10 * time.Minute
+
+const (
+	metadataSearchModeGeneric = "generic"
+	metadataSearchModeISBN    = "isbn"
+	metadataSearchModeASIN    = "asin"
+)
 
 // GoogleBooksResponse represents the Google Books API response
 type GoogleBooksResponse struct {
@@ -114,8 +121,12 @@ type GoogleBooksVolumeInfo struct {
 
 // OpenLibraryResponse represents the Open Library API response
 type OpenLibraryResponse struct {
-	Title   string `json:"title"`
-	Authors []struct {
+	Title      string   `json:"title"`
+	AuthorName []string `json:"author_name"`
+	Publisher  []string `json:"publisher"`
+	ISBN       []string `json:"isbn"`
+	CoverID    int      `json:"cover_i"`
+	Authors    []struct {
 		Name string `json:"name"`
 	} `json:"authors"`
 	Publishers []struct {
@@ -214,10 +225,11 @@ func searchMetadataCandidates(fields MetadataSearchFields) []MetadataCandidate {
 	bestByKey := map[string]MetadataCandidate{}
 	resultsByQuery := map[string][]MetadataCandidate{}
 	for _, variant := range variants {
-		results, ok := resultsByQuery[variant.Query]
+		resultKey := metadataSearchVariantKey(variant)
+		results, ok := resultsByQuery[resultKey]
 		if !ok {
-			results = fetchMetadataCandidates(variant.Query, fields.Provider)
-			resultsByQuery[variant.Query] = results
+			results = fetchMetadataCandidates(variant.Query, fields.Provider, variant.Mode)
+			resultsByQuery[resultKey] = results
 		}
 		for _, candidate := range results {
 			candidate.MatchScore = scoreMetadataCandidateForFields(variant.Fields, candidate) + variant.Bonus + providerMatchBonus(candidate.Provider)
@@ -266,7 +278,25 @@ func metadataSearchVariants(fields MetadataSearchFields) []metadataSearchVariant
 	variants := []metadataSearchVariant{{
 		Fields: fields,
 		Query:  baseQuery,
+		Mode:   metadataSearchModeGeneric,
 	}}
+
+	if isbn := normalizeISBN(fields.ISBN); isbn != "" {
+		variants = appendMetadataSearchVariant(variants, metadataSearchVariant{
+			Fields: MetadataSearchFields{ISBN: fields.ISBN},
+			Query:  isbn,
+			Mode:   metadataSearchModeISBN,
+			Bonus:  18,
+		})
+	}
+	if asin := normalizeASIN(fields.ASIN); asin != "" {
+		variants = appendMetadataSearchVariant(variants, metadataSearchVariant{
+			Fields: MetadataSearchFields{ASIN: fields.ASIN},
+			Query:  asin,
+			Mode:   metadataSearchModeASIN,
+			Bonus:  12,
+		})
+	}
 
 	if strings.TrimSpace(fields.Query) != "" {
 		return variants
@@ -291,6 +321,7 @@ func metadataSearchVariants(fields MetadataSearchFields) []metadataSearchVariant
 			variants = append(variants, metadataSearchVariant{
 				Fields: swappedFields,
 				Query:  swappedQuery,
+				Mode:   metadataSearchModeGeneric,
 				Bonus:  8,
 			})
 		}
@@ -309,6 +340,7 @@ func metadataSearchVariants(fields MetadataSearchFields) []metadataSearchVariant
 			variants = append(variants, metadataSearchVariant{
 				Fields: authorOnlyFields,
 				Query:  query,
+				Mode:   metadataSearchModeGeneric,
 				Bonus:  5,
 			})
 		}
@@ -326,12 +358,35 @@ func metadataSearchVariants(fields MetadataSearchFields) []metadataSearchVariant
 			variants = append(variants, metadataSearchVariant{
 				Fields: titleOnlyFields,
 				Query:  query,
+				Mode:   metadataSearchModeGeneric,
 				Bonus:  5,
 			})
 		}
 	}
 
 	return variants
+}
+
+func appendMetadataSearchVariant(variants []metadataSearchVariant, variant metadataSearchVariant) []metadataSearchVariant {
+	key := metadataSearchVariantKey(variant)
+	for _, existing := range variants {
+		if metadataSearchVariantKey(existing) == key {
+			return variants
+		}
+	}
+	return append(variants, variant)
+}
+
+func metadataSearchVariantKey(variant metadataSearchVariant) string {
+	return normalizedMetadataSearchMode(variant.Mode) + "|" + normalizeMetadataSearchText(variant.Query)
+}
+
+func normalizedMetadataSearchMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		return metadataSearchModeGeneric
+	}
+	return mode
 }
 
 func parseBoolQuery(value string) bool {
@@ -343,26 +398,32 @@ func parseBoolQuery(value string) bool {
 	}
 }
 
-func fetchMetadataCandidates(query, provider string) []MetadataCandidate {
-	cacheKey := metadataSearchCacheKey(query, provider)
+func fetchMetadataCandidates(query, provider, mode string) []MetadataCandidate {
+	cacheKey := metadataSearchCacheKey(query, provider, mode)
 	if cached, ok := getCachedMetadataCandidates(cacheKey); ok {
 		return cached
 	}
 
-	candidates, cacheable := fetchMetadataCandidatesUncached(query, provider)
+	candidates, cacheable := fetchMetadataCandidatesUncached(query, provider, mode)
 	if cacheable {
 		setCachedMetadataCandidates(cacheKey, candidates)
 	}
 	return candidates
 }
 
-func fetchMetadataCandidatesUncached(query, provider string) ([]MetadataCandidate, bool) {
+func fetchMetadataCandidatesUncached(query, provider, mode string) ([]MetadataCandidate, bool) {
 	var candidates []MetadataCandidate
 	successfulRequests := 0
+	mode = normalizedMetadataSearchMode(mode)
+	isbnQuery := normalizeISBN(query)
 
 	// Search from specified provider or all providers
 	if provider == "" || provider == "google_books" {
-		googleResults, err := searchGoogleBooks(query)
+		googleQuery := query
+		if mode == metadataSearchModeISBN && isbnQuery != "" {
+			googleQuery = "isbn:" + isbnQuery
+		}
+		googleResults, err := searchGoogleBooks(googleQuery)
 		if err == nil {
 			successfulRequests++
 			candidates = append(candidates, googleResults...)
@@ -370,7 +431,13 @@ func fetchMetadataCandidatesUncached(query, provider string) ([]MetadataCandidat
 	}
 
 	if provider == "" || provider == "open_library" {
-		openLibResults, err := searchOpenLibrary(query)
+		var openLibResults []MetadataCandidate
+		var err error
+		if mode == metadataSearchModeISBN && isbnQuery != "" {
+			openLibResults, err = searchOpenLibraryISBN(isbnQuery)
+		} else {
+			openLibResults, err = searchOpenLibrary(query)
+		}
 		if err == nil {
 			successfulRequests++
 			candidates = append(candidates, openLibResults...)
@@ -412,8 +479,8 @@ func fetchMetadataCandidatesUncached(query, provider string) ([]MetadataCandidat
 	return candidates, successfulRequests > 0
 }
 
-func metadataSearchCacheKey(query, provider string) string {
-	return strings.ToLower(strings.TrimSpace(provider)) + "|" + normalizeMetadataSearchText(query)
+func metadataSearchCacheKey(query, provider, mode string) string {
+	return strings.ToLower(strings.TrimSpace(provider)) + "|" + normalizedMetadataSearchMode(mode) + "|" + normalizeMetadataSearchText(query)
 }
 
 func getCachedMetadataCandidates(key string) ([]MetadataCandidate, bool) {
@@ -902,7 +969,16 @@ func searchGoogleBooks(query string) ([]MetadataCandidate, error) {
 func searchOpenLibrary(query string) ([]MetadataCandidate, error) {
 	apiURL := fmt.Sprintf("https://openlibrary.org/search.json?q=%s&limit=5",
 		url.QueryEscape(query))
+	return searchOpenLibraryURL(apiURL)
+}
 
+func searchOpenLibraryISBN(isbn string) ([]MetadataCandidate, error) {
+	apiURL := fmt.Sprintf("https://openlibrary.org/search.json?isbn=%s&limit=5",
+		url.QueryEscape(isbn))
+	return searchOpenLibraryURL(apiURL)
+}
+
+func searchOpenLibraryURL(apiURL string) ([]MetadataCandidate, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(apiURL)
 	if err != nil {
@@ -938,10 +1014,15 @@ func searchOpenLibrary(query string) ([]MetadataCandidate, error) {
 		for _, author := range doc.Authors {
 			candidate.Authors = append(candidate.Authors, author.Name)
 		}
+		if len(candidate.Authors) == 0 && len(doc.AuthorName) > 0 {
+			candidate.Authors = append(candidate.Authors, doc.AuthorName...)
+		}
 
 		// Extract publisher
 		if len(doc.Publishers) > 0 {
 			candidate.Publisher = doc.Publishers[0].Name
+		} else if len(doc.Publisher) > 0 {
+			candidate.Publisher = doc.Publisher[0]
 		}
 
 		// Extract ISBN
@@ -949,6 +1030,8 @@ func searchOpenLibrary(query string) ([]MetadataCandidate, error) {
 			candidate.ISBN = doc.ISBN13[0]
 		} else if len(doc.ISBN10) > 0 {
 			candidate.ISBN = doc.ISBN10[0]
+		} else {
+			candidate.ISBN = preferredMetadataISBN(doc.ISBN)
 		}
 		if len(doc.Amazon) > 0 {
 			candidate.ASIN = normalizeASIN(doc.Amazon[0])
@@ -957,12 +1040,31 @@ func searchOpenLibrary(query string) ([]MetadataCandidate, error) {
 		// Get cover URL
 		if len(doc.Covers) > 0 {
 			candidate.CoverURL = fmt.Sprintf("https://covers.openlibrary.org/b/id/%d-L.jpg", doc.Covers[0])
+		} else if doc.CoverID > 0 {
+			candidate.CoverURL = fmt.Sprintf("https://covers.openlibrary.org/b/id/%d-L.jpg", doc.CoverID)
 		}
 
 		candidates = append(candidates, candidate)
 	}
 
 	return candidates, nil
+}
+
+func preferredMetadataISBN(values []string) string {
+	var first string
+	for _, value := range values {
+		normalized := normalizeISBN(value)
+		if normalized == "" {
+			continue
+		}
+		if first == "" {
+			first = normalized
+		}
+		if len(normalized) == 13 {
+			return normalized
+		}
+	}
+	return first
 }
 
 func searchBookBrainz(query string) ([]MetadataCandidate, error) {
@@ -1447,7 +1549,7 @@ func downloadCover(bookID int64, coverURL string) {
 	// Update book_metadata with cover path
 	_, _ = appDB.Exec(`
 		UPDATE book_metadata
-		SET cover_path = ?, cover_updated_on = ?
+		SET cover_path = ?, cover_source = '', cover_updated_on = ?
 		WHERE book_id = ?
 	`, coverPath, time.Now().Unix(), bookID)
 
@@ -1529,13 +1631,15 @@ func RegenerateBookCoverHandler(w http.ResponseWriter, r *http.Request) {
 	var previousPath string
 	_ = appDB.QueryRow(`SELECT COALESCE(cover_path, '') FROM book_metadata WHERE book_id = ?`, bookIDInt).Scan(&previousPath)
 
+	now := time.Now().Unix()
 	_, err = appDB.Exec(`
-		INSERT INTO book_metadata (book_id, cover_path, cover_updated_on, authors, genres, locked_fields)
-		VALUES (?, ?, ?, '[]', '[]', '[]')
+		INSERT INTO book_metadata (book_id, cover_path, cover_source, cover_updated_on, authors, genres, locked_fields)
+		VALUES (?, ?, '', ?, '[]', '[]', '[]')
 		ON CONFLICT(book_id) DO UPDATE SET
 			cover_path = excluded.cover_path,
+			cover_source = excluded.cover_source,
 			cover_updated_on = excluded.cover_updated_on
-	`, bookIDInt, coverPath, time.Now().Unix())
+	`, bookIDInt, coverPath, now)
 	if err != nil {
 		slog.Error("Failed to update regenerated cover path", "bookID", bookIDInt, "error", err)
 		errorResponse(w, http.StatusInternalServerError, "Failed to update cover metadata")
@@ -1549,7 +1653,190 @@ func RegenerateBookCoverHandler(w http.ResponseWriter, r *http.Request) {
 	recordAppLog("info", "covers", "Regenerated book cover", map[string]any{
 		"book_id": bookIDInt,
 	})
-	jsonResponse(w, http.StatusOK, map[string]string{"status": "regenerated"})
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"status":           "regenerated",
+		"cover_path":       coverPath,
+		"cover_source":     "",
+		"cover_updated_on": now,
+	})
+}
+
+// UploadBookCoverHandler stores a user-selected custom cover image for a book.
+func UploadBookCoverHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionManageMetadata) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
+	bookID := chi.URLParam(r, "bookID")
+	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid book ID")
+		return
+	}
+	allowed, err := canAccessBook(current, bookIDInt)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
+		return
+	}
+	if !allowed {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
+	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		errorResponse(w, http.StatusBadRequest, "Cover upload must be a multipart image under 16 MB")
+		return
+	}
+	file, header, err := r.FormFile("cover")
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Missing cover image")
+		return
+	}
+	defer file.Close()
+
+	contentType := header.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "image/") {
+		errorResponse(w, http.StatusBadRequest, "Cover file must be an image")
+		return
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, 16<<20))
+	if err != nil || len(data) == 0 {
+		errorResponse(w, http.StatusBadRequest, "Failed to read cover image")
+		return
+	}
+
+	settings := covers.LoadSettings(appDB.DB)
+	processed, err := covers.ProcessCover(data, settings)
+	if err != nil || len(processed) == 0 {
+		processed = data
+	}
+
+	coverPath, err := covers.SaveCoverBytes(appConfig.GetCoversPath(), bookIDInt, processed)
+	if err != nil || coverPath == "" {
+		slog.Error("Failed to save custom cover", "bookID", bookIDInt, "error", err)
+		errorResponse(w, http.StatusInternalServerError, "Failed to save custom cover")
+		return
+	}
+
+	var previousPath string
+	_ = appDB.QueryRow(`SELECT COALESCE(cover_path, '') FROM book_metadata WHERE book_id = ?`, bookIDInt).Scan(&previousPath)
+
+	now := time.Now().Unix()
+	_, err = appDB.Exec(`
+		INSERT INTO book_metadata (book_id, cover_path, cover_source, cover_updated_on, authors, genres, locked_fields, owner_user_id)
+		VALUES (?, ?, 'custom', ?, '[]', '[]', '[]', ?)
+		ON CONFLICT(book_id) DO UPDATE SET
+			cover_path = excluded.cover_path,
+			cover_source = excluded.cover_source,
+			cover_updated_on = excluded.cover_updated_on,
+			owner_user_id = excluded.owner_user_id
+	`, bookIDInt, coverPath, now, current.ID)
+	if err != nil {
+		_ = os.Remove(coverPath)
+		slog.Error("Failed to update custom cover metadata", "bookID", bookIDInt, "error", err)
+		errorResponse(w, http.StatusInternalServerError, "Failed to update cover metadata")
+		return
+	}
+
+	if previousPath != "" && previousPath != coverPath {
+		_ = os.Remove(previousPath)
+	}
+
+	recordAppLog("info", "covers", "Uploaded custom book cover", map[string]any{
+		"book_id": bookIDInt,
+	})
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"status":           "uploaded",
+		"cover_path":       coverPath,
+		"cover_source":     "custom",
+		"cover_updated_on": now,
+	})
+}
+
+// ResetBookCoverHandler removes a custom cover and restores the source-derived cover when available.
+func ResetBookCoverHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionManageMetadata) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
+	bookID := chi.URLParam(r, "bookID")
+	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid book ID")
+		return
+	}
+	allowed, err := canAccessBook(current, bookIDInt)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
+		return
+	}
+	if !allowed {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
+	var previousPath, previousSource string
+	_ = appDB.QueryRow(`SELECT COALESCE(cover_path, ''), COALESCE(cover_source, '') FROM book_metadata WHERE book_id = ?`, bookIDInt).Scan(&previousPath, &previousSource)
+
+	var sourcePath string
+	_ = appDB.QueryRow(`SELECT path FROM book_file WHERE book_id = ? LIMIT 1`, bookIDInt).Scan(&sourcePath)
+	sourcePath = translateHostPathToContainerPath(sourcePath)
+
+	var restoredPath string
+	if sourcePath != "" {
+		if meta, err := metadata.ExtractWithOptions(sourcePath, metadata.ExtractOptions{
+			ComicSpreadFallbackSide: resolveBookComicSpreadFallback(bookIDInt),
+		}); err == nil && meta != nil && len(meta.CoverData) > 0 {
+			settings := covers.LoadSettings(appDB.DB)
+			processed, processErr := covers.ProcessCover(meta.CoverData, settings)
+			if processErr != nil || len(processed) == 0 {
+				processed = meta.CoverData
+			}
+			restoredPath, _ = covers.SaveCoverBytes(appConfig.GetCoversPath(), bookIDInt, processed)
+		}
+	}
+
+	now := time.Now().Unix()
+	if restoredPath != "" {
+		_, err = appDB.Exec(`
+			INSERT INTO book_metadata (book_id, cover_path, cover_source, cover_updated_on, authors, genres, locked_fields, owner_user_id)
+			VALUES (?, ?, '', ?, '[]', '[]', '[]', ?)
+			ON CONFLICT(book_id) DO UPDATE SET
+				cover_path = excluded.cover_path,
+				cover_source = excluded.cover_source,
+				cover_updated_on = excluded.cover_updated_on,
+				owner_user_id = excluded.owner_user_id
+		`, bookIDInt, restoredPath, now, current.ID)
+	} else {
+		_, err = appDB.Exec(`
+			UPDATE book_metadata
+			SET cover_path = '', cover_source = '', cover_updated_on = ?
+			WHERE book_id = ?
+		`, now, bookIDInt)
+	}
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to reset cover")
+		return
+	}
+
+	if previousSource == "custom" && previousPath != "" && previousPath != restoredPath {
+		_ = os.Remove(previousPath)
+	}
+
+	recordAppLog("info", "covers", "Reset custom book cover", map[string]any{
+		"book_id": bookIDInt,
+	})
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"status":           "reset",
+		"cover_path":       restoredPath,
+		"cover_source":     "",
+		"cover_updated_on": now,
+	})
 }
 
 func updateBookComicSpreadFallback(bookID, ownerUserID int64, value string) error {
