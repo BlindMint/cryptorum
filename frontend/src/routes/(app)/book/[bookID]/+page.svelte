@@ -934,7 +934,7 @@
 									{saving ? 'Saving...' : 'Apply'}
 								</button>
 								<button
-									onclick={() => saveMetadata(false)}
+									onclick={() => saveMetadata(!!selectionSession)}
 									disabled={saving}
 									class="rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50"
 								>

@@ -1841,14 +1841,14 @@
  							>
  								Select All on Page
  							</button>
- 							{#if totalBooks > books.length}
- 								<button
- 									onclick={selectAllFiltered}
- 									class="px-3 py-1.5 text-sm rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white transition-colors"
- 								>
- 									Select All {totalBooks}
- 								</button>
- 							{/if}
+							{#if totalBooks > 0 && selectAllMode !== 'filtered'}
+								<button
+									onclick={selectAllFiltered}
+									class="px-3 py-1.5 text-sm rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white transition-colors"
+								>
+									Select All {totalBooks} Books
+								</button>
+							{/if}
  							<button
  								onclick={deselectAll}
  								class="px-3 py-1.5 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
