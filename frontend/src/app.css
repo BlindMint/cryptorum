@@ -41,6 +41,10 @@ body,
 	overflow-x: hidden;
 }
 
+html {
+	scrollbar-gutter: stable;
+}
+
 body::before {
 	content: '';
 	position: fixed;

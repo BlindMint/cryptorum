@@ -93,7 +93,8 @@
 	});
 
 	function loadSelectionSession() {
-		selectionSession = getMetadataEditSession($page.url.searchParams.get('selection'));
+		const selectionId = $page.url.searchParams.get('selection');
+		selectionSession = selectionId ? getMetadataEditSession(selectionId) : null;
 	}
 
 	function shouldOpenInlineMetadataEdit(): boolean {
@@ -704,12 +705,6 @@
 		return saveMetadata(true);
 	}
 
-	async function saveAndNext() {
-		if (await saveMetadata(true)) {
-			goToSelectionOffset(1);
-		}
-	}
-
 	function navigateWithFilter(field: string, value: string) {
 		const url = new URL($page.url);
 		url.pathname = '/library';
@@ -740,6 +735,10 @@
 	function goBackToPreviousContext(event: MouseEvent) {
 		event.preventDefault();
 		if (editing) {
+			if (selectionSession) {
+				backToSelection();
+				return;
+			}
 			cancelEditing();
 			return;
 		}
@@ -821,12 +820,36 @@
 </script>
 
 	<div class="space-y-6">
-		<a href="/library" onclick={goBackToPreviousContext} class="group inline-flex items-center text-[var(--color-surface-text-muted)] transition-colors duration-200 ease-out hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
-			<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-surface-text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-			</svg>
-			{editing ? 'Back to Book Details' : 'Back to Library'}
-		</a>
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<a href="/library" onclick={goBackToPreviousContext} class="group inline-flex items-center text-[var(--color-surface-text-muted)] transition-colors duration-200 ease-out hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
+				<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-surface-text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+				</svg>
+				{editing ? (selectionSession ? 'Back to Selection' : 'Back to Book Details') : 'Back to Library'}
+			</a>
+
+			{#if editing && hasSelectionNavigation()}
+				<div class="flex items-center gap-2">
+					<button
+						type="button"
+						onclick={() => goToSelectionOffset(-1)}
+						disabled={getSelectionIndex() <= 0 || saving}
+						class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-xs font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+					>
+						Prev
+					</button>
+					<span class="min-w-12 text-center text-xs font-medium uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">{getPositionLabel()}</span>
+					<button
+						type="button"
+						onclick={() => goToSelectionOffset(1)}
+						disabled={!selectionSession || getSelectionIndex() >= selectionSession.bookIds.length - 1 || saving}
+						class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-xs font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+					>
+						Next
+					</button>
+				</div>
+			{/if}
+		</div>
 
 	{#if loading}
 		<div class="flex justify-center py-12">
@@ -894,34 +917,6 @@
 						{/if}
 					</div>
 						<div class="flex flex-shrink-0 flex-col items-end gap-2">
-							{#if hasSelectionNavigation()}
-								<div class="flex items-center gap-2">
-									<button
-										type="button"
-										onclick={backToSelection}
-										class="text-xs font-medium text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)]"
-									>
-										Back to Selection
-									</button>
-									<button
-										type="button"
-										onclick={() => goToSelectionOffset(-1)}
-										disabled={getSelectionIndex() <= 0 || saving}
-										class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-xs font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
-									>
-										Prev
-									</button>
-									<span class="min-w-12 text-center text-xs font-medium uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">{getPositionLabel()}</span>
-									<button
-										type="button"
-										onclick={() => goToSelectionOffset(1)}
-										disabled={!selectionSession || getSelectionIndex() >= selectionSession.bookIds.length - 1 || saving}
-										class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-xs font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
-									>
-										Next
-									</button>
-								</div>
-							{/if}
 							<div class="flex flex-wrap justify-end gap-2">
 							{#if editing}
 								<button
@@ -945,15 +940,6 @@
 								>
 									{saving ? 'Saving...' : 'Save'}
 								</button>
-								{#if hasSelectionNavigation()}
-									<button
-										onclick={saveAndNext}
-										disabled={!selectionSession || saving || getSelectionIndex() >= selectionSession.bookIds.length - 1}
-										class="rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50"
-									>
-										{saving ? 'Saving...' : 'Save & Next'}
-									</button>
-								{/if}
 							{:else}
 								<button
 									onclick={startEditing}
