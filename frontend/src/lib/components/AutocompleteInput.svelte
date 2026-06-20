@@ -145,23 +145,6 @@
 		inputElement?.focus();
 	}
 
-	function highlightMatch(text: string): string {
-		const { segment } = getLastSegment(value);
-		if (!segment.trim()) return text;
-		const lower = text.toLowerCase();
-		const searchLower = segment.toLowerCase();
-		const index = lower.indexOf(searchLower);
-		if (index === -1) return text;
-
-		return (
-			text.slice(0, index) +
-			'<mark class="bg-[var(--color-primary-500)]/30 text-[var(--color-primary-300)]">' +
-			text.slice(index, index + segment.length) +
-			'</mark>' +
-			text.slice(index + segment.length)
-		);
-	}
-
 	$effect(() => {
 		fetchSuggestions();
 	});
@@ -182,16 +165,17 @@
 	/>
 
 	{#if showDropdown && filteredSuggestions.length > 0}
-		<div class="absolute left-0 right-0 top-full mt-1 bg-[var(--color-surface-overlay)] backdrop-blur-sm border border-[var(--color-surface-border)] rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
-			<ul class="py-1">
+		<div class="absolute left-0 right-0 top-full mt-1 z-50 max-h-60 overflow-y-auto overflow-x-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-lg backdrop-blur-sm">
+			<ul class="px-1 py-1">
 				{#each filteredSuggestions as suggestion, i}
 					<li>
 						<button
 							type="button"
 							onclick={() => selectSuggestion(suggestion)}
-							class="w-full px-3 py-2 text-left text-[var(--color-surface-text)] hover:bg-[var(--color-surface-hover)] transition-colors {i === selectedIndex ? 'bg-[var(--color-surface-hover)]' : ''}"
+							onmouseenter={() => selectedIndex = i}
+							class="autocomplete-option w-full rounded-md px-3 py-2 text-left text-[var(--color-surface-text)] transition-all duration-150 ease-out focus-visible:outline-none {i === selectedIndex ? 'active' : ''}"
 						>
-							{@html highlightMatch(suggestion)}
+							<span class="block truncate">{suggestion}</span>
 						</button>
 					</li>
 				{/each}
@@ -199,3 +183,11 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.autocomplete-option:hover,
+	.autocomplete-option.active {
+		background: color-mix(in srgb, var(--color-surface-text, #e2e8f0) 8%, transparent);
+		transform: translateX(2px);
+	}
+</style>
