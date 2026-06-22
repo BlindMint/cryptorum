@@ -1,11 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { goto } from '$app/navigation';
+	import { beforeNavigate, goto } from '$app/navigation';
 	import { appActivity, gridSize, showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { getCoverThumbUrl, getLibraryCoverThumbSize } from '$lib/utils/covers';
 	import { getBookReaderHref, isAudioFormat } from '$lib/utils/book-formats';
-	import { getInlineMetadataEditUrl, startMetadataEditSession } from '$lib/utils/metadata-edit-session';
+	import {
+		getBookDetailContextUrl,
+		getInlineMetadataEditUrl,
+		startMetadataEditContextSession,
+		startMetadataEditSession
+	} from '$lib/utils/metadata-edit-session';
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
@@ -108,6 +114,7 @@
 	let backgroundRefreshing = false;
 	let backgroundRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 	let searchUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+	let activeBulkSelectionScope = '';
 
 	function getQueryValues(params: URLSearchParams, key: string, splitComma: boolean = false): string[] {
 		const values = params.getAll(key);
@@ -189,6 +196,17 @@
 		queryParams.set('sort_dir', sortDir);
 
 		return '/api/books?' + queryParams.toString();
+	}
+
+	function buildBookNavigationUrl(): string | undefined {
+		if (sortBy === 'random') return undefined;
+		const booksUrl = buildBooksUrl(0, BATCH_SIZE, true);
+		const query = booksUrl.split('?')[1] || '';
+		const params = new URLSearchParams(query);
+		params.delete('limit');
+		params.delete('offset');
+		params.delete('include_total');
+		return `/api/books/navigation?${params.toString()}`;
 	}
 
  	async function fetchBooks(reset: boolean = true) {
@@ -332,6 +350,11 @@
 	$effect(() => {
 		// Re-fetch when URL params change
 		$page.url.search;
+		const nextSelectionScope = currentSelectionScopeKey();
+		if (bulkSelectionRestored && activeBulkSelectionScope && activeBulkSelectionScope !== nextSelectionScope) {
+			clearBulkSelectionState();
+		}
+		activeBulkSelectionScope = nextSelectionScope;
 		librarySearch = $page.url.searchParams.get('q') || '';
 		sortBy = $page.url.searchParams.get('sort') || sortBy || 'title';
 		sortDir = $page.url.searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc';
@@ -351,9 +374,40 @@
 		persistBulkSelectionState();
    	});
 
+	function selectionScopeKeyForUrl(url: URL) {
+		const libraryId = url.searchParams.get('library') || '';
+		return libraryId ? `library:${libraryId}` : 'library:all';
+	}
+
+	function currentSelectionScopeKey() {
+		return selectionScopeKeyForUrl($page.url);
+	}
+
 	function currentRouteKey() {
 		return typeof window === 'undefined' ? '' : `${window.location.pathname}${window.location.search}`;
 	}
+
+	function clearBulkSelectionState() {
+		selectedBooks = new Set();
+		bulkSelectionAnchorId = null;
+		selectAllMode = 'none';
+		showMetadataMenu = false;
+		sessionStorage.removeItem(BULK_SELECTION_STORAGE_KEY);
+	}
+
+	beforeNavigate(({ to }) => {
+		if (selectedBooks.size === 0) return;
+		if (!to?.url) {
+			clearBulkSelectionState();
+			return;
+		}
+		const targetPath = to.url.pathname;
+		const isBookWorkflow = /^\/book\/\d+/.test(targetPath);
+		const isSameLibraryScope = targetPath === '/library' && selectionScopeKeyForUrl(to.url) === currentSelectionScopeKey();
+		if (!isBookWorkflow && !isSameLibraryScope) {
+			clearBulkSelectionState();
+		}
+	});
 
 	function persistBulkSelectionState() {
 		if (typeof window === 'undefined') return;
@@ -363,7 +417,8 @@
 			return;
 		}
 		sessionStorage.setItem(BULK_SELECTION_STORAGE_KEY, JSON.stringify({
-			route: currentRouteKey(),
+			scope: currentSelectionScopeKey(),
+			sourcePath: currentRouteKey(),
 			selectedIds: Array.from(selectedBooks),
 			selectAllMode,
 			timestamp: Date.now()
@@ -376,11 +431,14 @@
 			const raw = sessionStorage.getItem(BULK_SELECTION_STORAGE_KEY);
 			if (!raw) {
 				bulkSelectionRestored = true;
+				activeBulkSelectionScope = currentSelectionScopeKey();
 				return;
 			}
 			const state = JSON.parse(raw);
-			if (state.route !== currentRouteKey()) {
+			const stateScope = typeof state.scope === 'string' ? state.scope : state.route;
+			if (stateScope !== currentSelectionScopeKey()) {
 				bulkSelectionRestored = true;
+				activeBulkSelectionScope = currentSelectionScopeKey();
 				return;
 			}
 			const selectedIds = Array.isArray(state.selectedIds) ? state.selectedIds.map(Number).filter(Number.isFinite) : [];
@@ -391,6 +449,7 @@
 			sessionStorage.removeItem(BULK_SELECTION_STORAGE_KEY);
 		} finally {
 			bulkSelectionRestored = true;
+			activeBulkSelectionScope = currentSelectionScopeKey();
 		}
 	}
 
@@ -447,7 +506,7 @@
  		fetchLibraryName();
  		fetchBooks(true);
  		fetchFilterOptions();
- 		showFormatOnCover.init();
+		showFormatOnCover.init();
 		scheduleBackgroundRefresh(BACKGROUND_REFRESH_IDLE_INTERVAL_MS);
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 
@@ -643,6 +702,25 @@
 		return books.map((book) => book.id);
 	}
 
+	function openBookDetailFromList(event: MouseEvent, bookId: number) {
+		saveRouteScrollPosition();
+		persistBulkSelectionState();
+		event.stopPropagation();
+		if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+		event.preventDefault();
+		const visibleIds = getVisibleBookIds();
+		const navigationUrl = buildBookNavigationUrl();
+		const session = startMetadataEditContextSession(visibleIds, `${$page.url.pathname}${$page.url.search}`, {
+			navigationUrl,
+			totalCount: navigationUrl ? totalBooks : visibleIds.length
+		});
+		if (!session) {
+			goto(`/book/${bookId}`);
+			return;
+		}
+		goto(getBookDetailContextUrl(bookId, session, Math.max(0, visibleIds.indexOf(bookId))));
+	}
+
  	function toggleBookSelection(bookId: number, event?: MouseEvent) {
   		if (event) {
   			event.preventDefault();
@@ -786,7 +864,7 @@
  	}
 
  	function selectAllPage() {
- 		selectedBooks = new Set(books.map(b => b.id));
+ 		selectedBooks = new Set([...selectedBooks, ...books.map(b => b.id)]);
  		selectAllMode = 'page';
  	}
 
@@ -834,6 +912,8 @@
 	}
 
  	async function addToShelf(shelfId: number) {
+		const count = getSelectionCount();
+		if (!confirmBulkAction({ action: 'add {count} books to this shelf', count })) return;
  		actionInProgress = true;
  		try {
  			let res;
@@ -869,7 +949,7 @@
 
  	async function deleteSelectedBooks() {
  		const count = selectAllMode === 'filtered' ? totalBooks : selectedBooks.size;
- 		if (!confirm(`Delete ${count} book(s)? This cannot be undone.`)) return;
+ 		if (!confirmBulkAction({ action: 'delete', count, destructive: true, alwaysConfirm: true })) return;
 
  		actionInProgress = true;
  		try {
@@ -932,6 +1012,7 @@
 
 	async function queueBulkMetadataLookup() {
 		if (selectedBooks.size === 0 || metadataLookupQueueing) return;
+		if (!confirmBulkAction({ action: 'queue metadata lookup for', count: selectedBooks.size })) return;
 		showMetadataMenu = false;
 		showBulkMetadataLookupConfirm = false;
 		metadataLookupQueueing = true;
@@ -1123,6 +1204,18 @@
  		}
  		return selectedBooks.size;
  	}
+
+	function getVisibleSelectedCount(): number {
+		if (selectAllMode === 'filtered') {
+			return Math.min(books.length, totalBooks);
+		}
+		const visibleIds = new Set(books.map((book) => book.id));
+		return Array.from(selectedBooks).filter((bookId) => visibleIds.has(bookId)).length;
+	}
+
+	function getHiddenSelectedCount(): number {
+		return Math.max(0, getSelectionCount() - getVisibleSelectedCount());
+	}
   </script>
 
 <div class="pb-20 transition-all duration-300">
@@ -1691,7 +1784,7 @@
 									<span class="absolute bottom-2 right-2 z-20 h-3 w-3 rounded-full border border-black/30 {statusDot(book.status)} shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></span>
 								{/if}
 								<div class="cover-action-overlay {activeBookActions === book.id ? 'is-active' : ''}">
-									<a href="/book/{book.id}" class="cover-action-button top-action" aria-label="View details for {book.title || 'book'}" onclick={(event) => { event.stopPropagation(); saveRouteScrollPosition(); persistBulkSelectionState(); }}>
+									<a href="/book/{book.id}" class="cover-action-button top-action" aria-label="View details for {book.title || 'book'}" onclick={(event) => openBookDetailFromList(event, book.id)}>
 										<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11v5m0-8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
 										</svg>
@@ -1711,7 +1804,7 @@
 									{/if}
 								</div>
 							</div>
-							<a href="/book/{book.id}" class="block" onclick={(event) => { event.stopPropagation(); saveRouteScrollPosition(); persistBulkSelectionState(); }}>
+							<a href="/book/{book.id}" class="block" onclick={(event) => openBookDetailFromList(event, book.id)}>
 								<h3 class="text-sm font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
     							{#if book.authors && book.authors !== '[]'}
     								<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{parseAuthors(book.authors)}</p>
@@ -1747,7 +1840,7 @@
   						role="button"
   						tabindex="0"
   					>
-						<a href="/book/{book.id}" class="block bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] {selectedBooks.has(book.id) ? 'border-[var(--color-primary-500)]' : ''} p-4 hover:border-[var(--color-primary-500)]/50 transition-colors" onclick={(event) => { event.stopPropagation(); saveRouteScrollPosition(); persistBulkSelectionState(); }}>
+						<a href="/book/{book.id}" class="block bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] {selectedBooks.has(book.id) ? 'border-[var(--color-primary-500)]' : ''} p-4 hover:border-[var(--color-primary-500)]/50 transition-colors" onclick={(event) => openBookDetailFromList(event, book.id)}>
   							<div class="flex items-center space-x-4">
 								<BookCoverFrame
 									src={book.cover_path ? getCoverThumbUrl(book.id, 'small', book.cover_updated_on) : null}
@@ -1832,6 +1925,8 @@
  							{getSelectionCount()} selected
  							{#if selectAllMode === 'filtered'}
  								<span class="text-xs text-[var(--color-surface-text-muted)]">(all {totalBooks} in filter)</span>
+							{:else if getHiddenSelectedCount() > 0}
+								<span class="text-xs text-[var(--color-surface-text-muted)]">({getVisibleSelectedCount()} visible / {getHiddenSelectedCount()} hidden by filters)</span>
  							{/if}
  						</span>
  						<div class="flex items-center space-x-2">

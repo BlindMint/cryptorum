@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { appActivity } from '$lib/stores';
+	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 	type MetadataCandidate = {
 		provider: string;
@@ -362,23 +363,26 @@
 	}
 
 	async function applyAllSelected() {
+		const selectedItems = targets
+			.filter((target) => target.selectedIndex >= 0 && target.results[target.selectedIndex])
+			.map((target) => ({
+				book_id: target.bookId,
+				metadata: {
+					...target.results[target.selectedIndex],
+					cover_url: includeCover ? target.results[target.selectedIndex].cover_url : ''
+				}
+			}));
+
+		if (selectedItems.length === 0) {
+			return;
+		}
+		if (!confirmBulkAction({ action: 'apply metadata to', count: selectedItems.length })) {
+			return;
+		}
+
 		applying = true;
 		let pendingJob: string | null = null;
 		try {
-			const selectedItems = targets
-				.filter((target) => target.selectedIndex >= 0 && target.results[target.selectedIndex])
-				.map((target) => ({
-					book_id: target.bookId,
-					metadata: {
-						...target.results[target.selectedIndex],
-						cover_url: includeCover ? target.results[target.selectedIndex].cover_url : ''
-					}
-				}));
-
-			if (selectedItems.length === 0) {
-				return;
-			}
-
 			if (selectedItems.length === 1) {
 				await applyMetadata(selectedItems[0].book_id, false);
 				await onApplied?.();

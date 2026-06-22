@@ -1,5 +1,6 @@
 <script lang="ts">
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
+	import PathDisplay from '$lib/components/PathDisplay.svelte';
 	import { getCoverThumbUrl } from '$lib/utils/covers';
 	import { getFormatDisplayLabel, uniqueBookFormats } from '$lib/utils/book-formats';
 	import { parseAuthors } from '$lib/utils/metadata-edit';
@@ -103,7 +104,7 @@
 		{#if getPrimaryFilePath()}
 			<div>
 				<div class="text-xs uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">Path</div>
-				<div class="mt-1 break-all font-mono text-xs text-[var(--color-surface-text)]">{getPrimaryFilePath()}</div>
+				<PathDisplay path={getPrimaryFilePath()} libraryPaths={book?.library_paths || []} className="mt-1" />
 			</div>
 		{/if}
 	</div>

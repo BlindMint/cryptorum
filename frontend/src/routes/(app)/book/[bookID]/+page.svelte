@@ -5,6 +5,7 @@
 	import AutocompleteInput from '$lib/components/AutocompleteInput.svelte';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
+	import PathDisplay from '$lib/components/PathDisplay.svelte';
 	import { showFormatOnCover, getFormatColor } from '$lib/stores';
 	import { getCoverThumbUrl } from '$lib/utils/covers';
 	import {
@@ -22,8 +23,11 @@
 		normalizeAuthorName,
 		parseAuthors,
 		parseJsonArray,
+		prepareAuthorRows,
 		ratingStars,
 		ratingToStars,
+		removeAuthorRow,
+		setAuthorRowValue,
 		type MetadataEditForm
 	} from '$lib/utils/metadata-edit';
 	import {
@@ -94,7 +98,9 @@
 
 	function loadSelectionSession() {
 		const selectionId = $page.url.searchParams.get('selection');
-		selectionSession = selectionId ? getMetadataEditSession(selectionId) : null;
+		const contextId = $page.url.searchParams.get('context');
+		const sessionId = selectionId || contextId;
+		selectionSession = sessionId ? getMetadataEditSession(sessionId) : null;
 	}
 
 	function shouldOpenInlineMetadataEdit(): boolean {
@@ -456,20 +462,20 @@
 
 	function startEditing() {
 		editForm = createMetadataEditForm(book);
-		authorsList = parseAuthors(book.authors || '[]');
+		authorsList = prepareAuthorRows(parseAuthors(book.authors || '[]'));
 		editing = true;
 	}
 
 	function cancelEditing() {
 		editing = false;
 		editForm = createMetadataEditForm(book);
-		authorsList = parseAuthors(book?.authors || '[]');
+		authorsList = prepareAuthorRows(parseAuthors(book?.authors || '[]'));
 		saveError = null;
 	}
 
 	function openAdvancedMetadata() {
 		if (!book?.id) return;
-		goto(getMetadataEditUrl(book.id, selectionSession, getSelectionIndex()));
+		goto(getMetadataEditUrl(book.id, isSelectionEditSession() ? selectionSession : null, getSelectionIndex()));
 	}
 
 	async function refreshAfterMetadataApply() {
@@ -488,12 +494,23 @@
 	}
 
 	function hasSelectionNavigation(): boolean {
-		return !!selectionSession && selectionSession.bookIds.length > 1 && (!book?.id || selectionSession.bookIds.includes(book.id));
+		return !!selectionSession && getNavigationTotal() > 1 && (!book?.id || selectionSession.bookIds.includes(book.id) || !!selectionSession.navigationUrl);
+	}
+
+	function isSelectionEditSession(): boolean {
+		return !!selectionSession && selectionSession.kind !== 'context';
 	}
 
 	function getPositionLabel(): string {
 		if (!hasSelectionNavigation() || !selectionSession) return '';
-		return `${Math.min(getSelectionIndex() + 1, selectionSession.bookIds.length)} of ${selectionSession.bookIds.length}`;
+		return `${Math.min(getSelectionIndex() + 1, getNavigationTotal())} of ${getNavigationTotal()}`;
+	}
+
+	function getNavigationTotal(): number {
+		if (!selectionSession) return 0;
+		return Number.isFinite(selectionSession.totalCount) && (selectionSession.totalCount || 0) > 0
+			? selectionSession.totalCount || 0
+			: selectionSession.bookIds.length;
 	}
 
 	function getCurrentMetadataPayload() {
@@ -516,7 +533,7 @@
 
 	function backToSelection() {
 		if (!confirmDiscardUnsavedChanges()) return;
-		if (selectionSession?.sourcePath) {
+		if (isSelectionEditSession() && selectionSession?.sourcePath) {
 			goto(selectionSession.sourcePath);
 			return;
 		}
@@ -531,13 +548,39 @@
 		}
 	}
 
-	function goToSelectionOffset(offset: number) {
+	async function fetchContextNavigation(offset: number): Promise<{ bookId: number; index: number; total: number } | null> {
+		if (!selectionSession?.navigationUrl || !book?.id) return null;
+		const url = new URL(selectionSession.navigationUrl, window.location.origin);
+		url.searchParams.set('current_id', String(book.id));
+		url.searchParams.set('direction', offset < 0 ? 'previous' : 'next');
+		const res = await fetch(url.pathname + url.search, { credentials: 'same-origin' });
+		if (!res.ok) return null;
+		const data = await res.json();
+		const bookId = Number(data.book_id || 0);
+		const index = Number(data.index);
+		const total = Number(data.total);
+		if (!Number.isFinite(bookId) || bookId <= 0 || !Number.isFinite(index)) return null;
+		if (Number.isFinite(total) && total > 0) {
+			selectionSession = { ...selectionSession, totalCount: total };
+		}
+		return { bookId, index, total };
+	}
+
+	async function goToSelectionOffset(offset: number) {
 		if (!hasSelectionNavigation() || !selectionSession || !book?.id) return;
 		if (!confirmDiscardUnsavedChanges()) return;
 		const nextIndex = getSelectionIndex() + offset;
-		if (nextIndex < 0 || nextIndex >= selectionSession.bookIds.length) return;
-		const nextBookId = selectionSession.bookIds[nextIndex];
-		goto(getInlineMetadataEditUrl(nextBookId, selectionSession, nextIndex));
+		const total = getNavigationTotal();
+		if (nextIndex < 0 || nextIndex >= total) return;
+		let nextBookId = selectionSession.bookIds[nextIndex];
+		let resolvedIndex = nextIndex;
+		if (!nextBookId && selectionSession.kind === 'context') {
+			const resolved = await fetchContextNavigation(offset);
+			if (!resolved) return;
+			nextBookId = resolved.bookId;
+			resolvedIndex = resolved.index;
+		}
+		goto(getInlineMetadataEditUrl(nextBookId, selectionSession, resolvedIndex));
 	}
 
 	function openCoverModal() {
@@ -683,7 +726,7 @@
 				editing = stayEditing;
 				if (stayEditing) {
 					editForm = createMetadataEditForm(book);
-					authorsList = parseAuthors(book?.authors || '[]');
+					authorsList = prepareAuthorRows(parseAuthors(book?.authors || '[]'));
 				}
 				return true;
 			} else {
@@ -735,7 +778,7 @@
 	function goBackToPreviousContext(event: MouseEvent) {
 		event.preventDefault();
 		if (editing) {
-			if (selectionSession) {
+			if (isSelectionEditSession()) {
 				backToSelection();
 				return;
 			}
@@ -815,7 +858,11 @@
 	}
 
 	function removeAuthor(index: number) {
-		authorsList = authorsList.filter((_, i) => i !== index);
+		authorsList = removeAuthorRow(authorsList, index);
+	}
+
+	function updateAuthor(index: number, value: string) {
+		authorsList = setAuthorRowValue(authorsList, index, value);
 	}
 </script>
 
@@ -825,14 +872,14 @@
 				<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-surface-text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
 				</svg>
-				{editing ? (selectionSession ? 'Back to Selection' : 'Back to Book Details') : 'Back to Library'}
+				{editing ? (isSelectionEditSession() ? 'Back to Selection' : 'Back to Book Details') : 'Back to Library'}
 			</a>
 
 			{#if editing && hasSelectionNavigation()}
 				<div class="flex items-center gap-2">
 					<button
 						type="button"
-						onclick={() => goToSelectionOffset(-1)}
+						onclick={() => void goToSelectionOffset(-1)}
 						disabled={getSelectionIndex() <= 0 || saving}
 						class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-xs font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
 					>
@@ -841,8 +888,8 @@
 					<span class="min-w-12 text-center text-xs font-medium uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">{getPositionLabel()}</span>
 					<button
 						type="button"
-						onclick={() => goToSelectionOffset(1)}
-						disabled={!selectionSession || getSelectionIndex() >= selectionSession.bookIds.length - 1 || saving}
+						onclick={() => void goToSelectionOffset(1)}
+						disabled={!selectionSession || getSelectionIndex() >= getNavigationTotal() - 1 || saving}
 						class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-xs font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
 					>
 						Next
@@ -877,7 +924,7 @@
 												placeholder="Author name"
 												field="authors"
 												multiple={false}
-												onchange={(value) => authorsList[i] = value}
+												onchange={(value) => updateAuthor(i, value)}
 											/>
 										</div>
 										<button
@@ -932,13 +979,6 @@
 									class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50"
 								>
 									{saving ? 'Saving...' : 'Apply'}
-								</button>
-								<button
-									onclick={() => saveMetadata(!!selectionSession)}
-									disabled={saving}
-									class="rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50"
-								>
-									{saving ? 'Saving...' : 'Save'}
 								</button>
 							{:else}
 								<button
@@ -1357,8 +1397,8 @@
 						{#if getPrimaryFilePath()}
 							<div class="flex items-start gap-2 sm:col-span-2">
 								<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Path</dt>
-								<dd class="min-w-0 break-all font-mono text-xs text-[var(--color-surface-text)]">
-									{getPrimaryFilePath()}
+								<dd class="min-w-0 flex-1">
+									<PathDisplay path={getPrimaryFilePath()} libraryPaths={book.library_paths || []} />
 								</dd>
 							</div>
 						{/if}

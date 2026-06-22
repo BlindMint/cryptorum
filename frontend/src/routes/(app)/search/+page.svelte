@@ -3,7 +3,13 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
-	import { getInlineMetadataEditUrl, startMetadataEditSession } from '$lib/utils/metadata-edit-session';
+	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
+	import {
+		getBookDetailContextUrl,
+		getInlineMetadataEditUrl,
+		startMetadataEditContextSession,
+		startMetadataEditSession
+	} from '$lib/utils/metadata-edit-session';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
 	import BulkMetadataEditModal from '$lib/components/BulkMetadataEditModal.svelte';
@@ -384,6 +390,21 @@
 		return results.map((book) => book.id);
 	}
 
+	function openBookDetailFromList(event: MouseEvent, bookId: number) {
+		saveRouteScrollPosition();
+		if (bulkSelectMode || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+		event.preventDefault();
+		const visibleIds = getVisibleBookIds();
+		const session = startMetadataEditContextSession(visibleIds, `${$page.url.pathname}${$page.url.search}`, {
+			totalCount: visibleIds.length
+		});
+		if (!session) {
+			goto(`/book/${bookId}`);
+			return;
+		}
+		goto(getBookDetailContextUrl(bookId, session, Math.max(0, visibleIds.indexOf(bookId))));
+	}
+
 	function toggleBookSelection(bookId: number, event?: MouseEvent) {
 		if (event) {
 			event.preventDefault();
@@ -506,6 +527,7 @@
 	}
 
 	async function addToShelf(shelfId: number) {
+		if (!confirmBulkAction({ action: 'add {count} books to this shelf', count: selectedBooks.size })) return;
 		actionInProgress = true;
 		try {
 			const res = await fetch(`/api/shelves/${shelfId}/books/bulk`, {
@@ -529,7 +551,7 @@
 
 	async function deleteSelectedBooks() {
 		if (selectedBooks.size === 0) return;
-		if (!confirm(`Delete ${selectedBooks.size} book(s)? This cannot be undone.`)) return;
+		if (!confirmBulkAction({ action: 'delete', count: selectedBooks.size, destructive: true, alwaysConfirm: true })) return;
 
 		actionInProgress = true;
 		try {
@@ -581,6 +603,7 @@
 
 	async function queueBulkMetadataLookup() {
 		if (selectedBooks.size === 0 || metadataLookupQueueing) return;
+		if (!confirmBulkAction({ action: 'queue metadata lookup for', count: selectedBooks.size })) return;
 		showMetadataMenu = false;
 		showBulkMetadataLookupConfirm = false;
 		metadataLookupQueueing = true;
@@ -1008,7 +1031,7 @@
 							role="button"
 							tabindex="0"
 						>
-							<a href="/book/{book.id}" class="block" onclick={saveRouteScrollPosition}>
+							<a href="/book/{book.id}" class="block" onclick={(event) => openBookDetailFromList(event, book.id)}>
 								<div class="relative mb-2 overflow-hidden rounded-lg">
 									<BookCoverFrame
 										src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
@@ -1061,7 +1084,7 @@
 							role="button"
 							tabindex="0"
 						>
-							<a href="/book/{book.id}" class="block bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] {selectedBooks.has(book.id) ? 'border-[var(--color-primary-500)]' : ''} p-4 hover:border-[var(--color-primary-500)]/50 transition-colors" onclick={saveRouteScrollPosition}>
+							<a href="/book/{book.id}" class="block bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] {selectedBooks.has(book.id) ? 'border-[var(--color-primary-500)]' : ''} p-4 hover:border-[var(--color-primary-500)]/50 transition-colors" onclick={(event) => openBookDetailFromList(event, book.id)}>
 								<div class="flex items-center space-x-4">
 									<BookCoverFrame
 										src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}

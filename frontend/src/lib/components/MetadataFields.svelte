@@ -1,7 +1,7 @@
 <script lang="ts">
 	import AutocompleteInput from '$lib/components/AutocompleteInput.svelte';
 	import type { MetadataEditForm } from '$lib/utils/metadata-edit';
-	import { metadataStatusOptions, ratingStars } from '$lib/utils/metadata-edit';
+	import { metadataStatusOptions, prepareAuthorRows, ratingStars, removeAuthorRow, setAuthorRowValue } from '$lib/utils/metadata-edit';
 
 	interface Props {
 		editForm: MetadataEditForm;
@@ -26,7 +26,11 @@
 	}
 
 	function removeAuthor(index: number) {
-		authorsList = authorsList.filter((_, i) => i !== index);
+		authorsList = removeAuthorRow(authorsList, index);
+	}
+
+	function updateAuthor(index: number, value: string) {
+		authorsList = setAuthorRowValue(authorsList, index, value);
 	}
 
 	function setRating(value: number) {
@@ -37,6 +41,10 @@
 		const activeRating = hoveredRating || editForm.rating;
 		return star <= activeRating;
 	}
+
+	$effect(() => {
+		authorsList = prepareAuthorRows(authorsList);
+	});
 </script>
 
 <div class={columns ? 'grid grid-cols-1 gap-4 md:grid-cols-2' : 'space-y-4'}>
@@ -93,7 +101,7 @@
 							placeholder="Author name"
 							field="authors"
 							multiple={false}
-							onchange={(value) => authorsList[i] = value}
+							onchange={(value) => updateAuthor(i, value)}
 						/>
 					</div>
 					<button
