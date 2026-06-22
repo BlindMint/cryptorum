@@ -7,7 +7,13 @@
 	import BulkMetadataEditModal from '$lib/components/BulkMetadataEditModal.svelte';
 	import BulkMetadataLookupConfirmModal from '$lib/components/BulkMetadataLookupConfirmModal.svelte';
 	import { appActivity, showFormatOnCover, getFormatColor } from '$lib/stores';
-	import { getInlineMetadataEditUrl, startMetadataEditSession } from '$lib/utils/metadata-edit-session';
+	import {
+		getBookDetailContextUrl,
+		getInlineMetadataEditUrl,
+		startMetadataEditContextSession,
+		startMetadataEditSession
+	} from '$lib/utils/metadata-edit-session';
+	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 
 	let shelf = $state<any>(null);
@@ -72,6 +78,21 @@
 
 	function getVisibleBookIds(): number[] {
 		return books.map((book) => book.id);
+	}
+
+	function openBookDetailFromList(event: MouseEvent, bookId: number) {
+		saveRouteScrollPosition();
+		if (bulkSelectMode || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+		event.preventDefault();
+		const visibleIds = getVisibleBookIds();
+		const session = startMetadataEditContextSession(visibleIds, `${$page.url.pathname}${$page.url.search}`, {
+			totalCount: visibleIds.length
+		});
+		if (!session) {
+			goto(`/book/${bookId}`);
+			return;
+		}
+		goto(getBookDetailContextUrl(bookId, session, Math.max(0, visibleIds.indexOf(bookId))));
 	}
 
 	function toggleBookSelection(bookId: number, event?: MouseEvent) {
@@ -186,6 +207,7 @@
 
 	async function queueBulkMetadataLookup() {
 		if (selectedBooks.size === 0 || metadataLookupQueueing) return;
+		if (!confirmBulkAction({ action: 'queue metadata lookup for', count: selectedBooks.size })) return;
 		showMetadataMenu = false;
 		showBulkMetadataLookupConfirm = false;
 		metadataLookupQueueing = true;
@@ -240,7 +262,7 @@
 
 	async function removeSelectedFromShelf() {
 		if (selectedBooks.size === 0 || !shelf) return;
-		if (!confirm(`Remove ${selectedBooks.size} book(s) from this shelf?`)) return;
+		if (!confirmBulkAction({ action: 'remove {count} books from this shelf', count: selectedBooks.size, destructive: true, alwaysConfirm: true })) return;
 
 		actionInProgress = true;
 		try {
@@ -308,7 +330,7 @@
 						role="button"
 						tabindex="0"
 					>
-						<a href="/book/{book.id}" class="block" onclick={saveRouteScrollPosition}>
+						<a href="/book/{book.id}" class="block" onclick={(event) => openBookDetailFromList(event, book.id)}>
 							<div class="relative mb-2 overflow-hidden rounded-lg">
 								<BookCoverFrame
 									src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}

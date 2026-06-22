@@ -1,6 +1,7 @@
 <script lang="ts">
 	import AutocompleteInput from '$lib/components/AutocompleteInput.svelte';
 	import { appActivity } from '$lib/stores';
+	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { metadataStatusOptions, ratingStars, starsToRating } from '$lib/utils/metadata-edit';
 
 	interface Props {
@@ -56,6 +57,7 @@
 
 	async function save(closeAfter: boolean) {
 		if (saving || (bookIds.length === 0 && !filterParams)) return;
+		if (!confirmBulkAction({ action: 'update metadata for', count: selectionCount })) return;
 		saving = true;
 		error = '';
 		queuedMessage = '';

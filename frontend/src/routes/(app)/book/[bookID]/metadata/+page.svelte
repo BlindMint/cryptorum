@@ -9,6 +9,7 @@
 		comicSpreadFallbackOptions,
 		createMetadataEditForm,
 		parseAuthors,
+		prepareAuthorRows,
 		type MetadataEditForm
 	} from '$lib/utils/metadata-edit';
 	import {
@@ -66,7 +67,7 @@
 
 	function initializeForm() {
 		editForm = createMetadataEditForm(book);
-		authorsList = parseAuthors(book?.authors || '[]');
+		authorsList = prepareAuthorRows(parseAuthors(book?.authors || '[]'));
 	}
 
 	async function fetchBook() {

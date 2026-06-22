@@ -210,6 +210,7 @@ func initRoutes(r *chi.Mux) {
 		r.Route("/books", func(r chi.Router) {
 			r.Get("/", getBooksHandler)
 			r.Get("/discover", getDiscoverBooksHandler)
+			r.Get("/navigation", getBookNavigationHandler)
 			r.Post("/bulk-delete", bulkDeleteBooksHandler)
 			r.Post("/bulk-delete-by-filter", bulkDeleteByFilterHandler)
 			r.Post("/bulk-metadata", bulkUpdateMetadataHandler)
@@ -741,6 +742,264 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type bookListQuery struct {
+	baseQuery string
+	args      []interface{}
+	orderBy   string
+}
+
+func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
+	libraryID := r.URL.Query().Get("library_id")
+	status := r.URL.Query().Get("status")
+	searchQuery := strings.TrimSpace(r.URL.Query().Get("q"))
+	author := r.URL.Query().Get("author")
+	series := r.URL.Query().Get("series")
+	genre := r.URL.Query().Get("genre")
+	tags := r.URL.Query().Get("tags")
+	format := r.URL.Query().Get("format")
+	publisher := r.URL.Query().Get("publisher")
+	language := r.URL.Query().Get("language")
+	pubDate := r.URL.Query().Get("pub_date")
+	filterMode := strings.ToUpper(r.URL.Query().Get("filter_mode"))
+	sortBy := r.URL.Query().Get("sort")
+	sortDir := strings.ToLower(r.URL.Query().Get("sort_dir"))
+	discoveryOnly := r.URL.Query().Get("discovery") == "true"
+	if filterMode != "OR" && filterMode != "NOT" {
+		filterMode = "AND"
+	}
+
+	baseQuery := `
+		FROM book b
+		LEFT JOIN library l ON b.library_id = l.id
+		LEFT JOIN book_metadata bm ON b.id = bm.book_id
+		LEFT JOIN reading_progress rp ON b.id = rp.book_id
+		LEFT JOIN (
+			SELECT book_id, MIN(format) AS format
+			FROM book_file
+			WHERE missing_at IS NULL
+			GROUP BY book_id
+		) bf ON b.id = bf.book_id`
+
+	var args []interface{}
+	var conditions []string
+	var filterConditions []string
+	var filterArgs []interface{}
+
+	queryValues := func(key string, splitComma bool) []string {
+		values := r.URL.Query()[key]
+		if len(values) == 0 {
+			values = []string{r.URL.Query().Get(key)}
+		}
+		var cleaned []string
+		for _, raw := range values {
+			if splitComma {
+				for _, value := range strings.Split(raw, ",") {
+					if trimmed := strings.TrimSpace(value); trimmed != "" {
+						cleaned = append(cleaned, trimmed)
+					}
+				}
+				continue
+			}
+			if trimmed := strings.TrimSpace(raw); trimmed != "" {
+				cleaned = append(cleaned, trimmed)
+			}
+		}
+		return cleaned
+	}
+
+	addFilterCondition := func(condition string, values ...interface{}) {
+		filterConditions = append(filterConditions, condition)
+		filterArgs = append(filterArgs, values...)
+	}
+
+	if libraryID != "" {
+		conditions = append(conditions, "b.library_id = ?")
+		args = append(args, libraryID)
+	}
+
+	if current != nil && !userCanAccessAllData(current) {
+		conditions = append(conditions, "l.owner_user_id = ?")
+		args = append(args, current.ID)
+	}
+	conditions = append(conditions, "EXISTS (SELECT 1 FROM book_file active_bf WHERE active_bf.book_id = b.id AND active_bf.missing_at IS NULL)")
+	if discoveryOnly {
+		conditions = append(conditions, "COALESCE(l.exclude_from_suggestions, 0) = 0")
+	}
+
+	if status != "" {
+		for _, value := range queryValues("status", false) {
+			addFilterCondition("COALESCE(rp.status, 'unread') = ?", value)
+		}
+	}
+
+	if searchQuery != "" {
+		searchText := `LOWER(
+			COALESCE(bm.title, '') || ' ' ||
+			COALESCE(bm.authors, '') || ' ' ||
+			REPLACE(REPLACE(COALESCE(bm.authors, ''), '.', ''), ' ', '') || ' ' ||
+			COALESCE(bm.description, '') || ' ' ||
+			COALESCE(bm.series, '') || ' ' ||
+			COALESCE(bm.series_number_display, '') || ' ' ||
+			CASE WHEN COALESCE(bm.series_number, 0) != 0 THEN CAST(bm.series_number AS TEXT) ELSE '' END || ' ' ||
+			COALESCE(bm.isbn, '') || ' ' ||
+			COALESCE(bm.asin, '') || ' ' ||
+			` + activeFileSearchTextSQL + `
+		)`
+		for _, token := range searchTokens(searchQuery) {
+			addFilterCondition(searchText+" LIKE ?", "%"+token+"%")
+		}
+	}
+
+	if author != "" {
+		for _, value := range queryValues("author", false) {
+			addAuthorFilterCondition(addFilterCondition, "bm.authors", value)
+		}
+	}
+
+	if series != "" {
+		for _, value := range queryValues("series", false) {
+			addFilterCondition("COALESCE(bm.series, '') = ?", value)
+		}
+	}
+
+	if genre != "" {
+		for _, value := range queryValues("genre", true) {
+			addHierarchicalJSONFilterCondition(addFilterCondition, "bm.genres", value)
+		}
+	}
+
+	if tags != "" {
+		for _, value := range queryValues("tags", true) {
+			addHierarchicalJSONFilterCondition(addFilterCondition, "bm.tags", value)
+		}
+	}
+
+	if format != "" {
+		for _, value := range queryValues("format", false) {
+			addFilterCondition("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", strings.ToLower(value))
+		}
+	}
+
+	if publisher != "" {
+		addFilterCondition("COALESCE(bm.publisher, '') = ?", publisher)
+	}
+
+	if language != "" {
+		addFilterCondition("COALESCE(bm.language, '') = ?", language)
+	}
+
+	if pubDate != "" {
+		addFilterCondition("COALESCE(bm.pub_date, '') = ?", pubDate)
+	}
+
+	if len(filterConditions) > 0 {
+		switch filterMode {
+		case "OR":
+			conditions = append(conditions, "("+strings.Join(filterConditions, " OR ")+")")
+			args = append(args, filterArgs...)
+		case "NOT":
+			conditions = append(conditions, "NOT ("+strings.Join(filterConditions, " OR ")+")")
+			args = append(args, filterArgs...)
+		default:
+			conditions = append(conditions, filterConditions...)
+			args = append(args, filterArgs...)
+		}
+	}
+
+	if len(conditions) > 0 {
+		baseQuery += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	dir := "ASC"
+	if sortDir == "desc" {
+		dir = "DESC"
+	}
+	orderBy := "LOWER(COALESCE(bm.title, '')) " + dir + ", b.id " + dir
+	if sortBy == "random" {
+		orderBy = "RANDOM()"
+	} else if sortBy == "authors" {
+		orderBy = "LOWER(COALESCE(bm.authors, '')) " + dir + ", LOWER(COALESCE(bm.title, '')) ASC"
+	} else if sortBy == "added_at" {
+		orderBy = "b.added_at " + dir + ", b.id " + dir
+	} else if sortBy == "last_read" {
+		orderBy = "COALESCE(rp.updated_at, 0) " + dir + ", LOWER(COALESCE(bm.title, '')) ASC"
+	} else if sortBy == "series" {
+		orderBy = "CASE WHEN COALESCE(bm.series, '') = '' THEN 1 ELSE 0 END ASC, LOWER(COALESCE(bm.series, '')) " + dir + ", CASE WHEN COALESCE(bm.series_number, 0) = 0 THEN 1 ELSE 0 END ASC, bm.series_number " + dir + ", LOWER(COALESCE(bm.title, '')) ASC"
+	}
+
+	return bookListQuery{baseQuery: baseQuery, args: args, orderBy: orderBy}
+}
+
+func getBookNavigationHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	currentID, err := strconv.ParseInt(r.URL.Query().Get("current_id"), 10, 64)
+	if err != nil || currentID <= 0 {
+		errorResponse(w, http.StatusBadRequest, "Invalid current book ID")
+		return
+	}
+
+	direction := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("direction")))
+	if direction != "previous" && direction != "next" {
+		errorResponse(w, http.StatusBadRequest, "Invalid navigation direction")
+		return
+	}
+	if strings.EqualFold(r.URL.Query().Get("sort"), "random") {
+		errorResponse(w, http.StatusBadRequest, "Random order cannot be navigated beyond the loaded snapshot")
+		return
+	}
+
+	listQuery := buildBookListQuery(r, current)
+	rows, err := appDB.Query("SELECT b.id "+listQuery.baseQuery+" ORDER BY "+listQuery.orderBy, listQuery.args...)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to resolve book navigation")
+		return
+	}
+	defer rows.Close()
+
+	bookIDs := make([]int64, 0)
+	currentIndex := -1
+	for rows.Next() {
+		var bookID int64
+		if err := rows.Scan(&bookID); err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to read book navigation")
+			return
+		}
+		if bookID == currentID {
+			currentIndex = len(bookIDs)
+		}
+		bookIDs = append(bookIDs, bookID)
+	}
+	if err := rows.Err(); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to read book navigation")
+		return
+	}
+	if currentIndex < 0 {
+		errorResponse(w, http.StatusNotFound, "Current book is not in this navigation context")
+		return
+	}
+
+	targetIndex := currentIndex
+	if direction == "previous" {
+		targetIndex--
+	} else {
+		targetIndex++
+	}
+
+	type navigationResponse struct {
+		BookID *int64 `json:"book_id"`
+		Index  int    `json:"index"`
+		Total  int    `json:"total"`
+	}
+
+	if targetIndex < 0 || targetIndex >= len(bookIDs) {
+		jsonResponse(w, http.StatusOK, navigationResponse{BookID: nil, Index: currentIndex, Total: len(bookIDs)})
+		return
+	}
+
+	targetID := bookIDs[targetIndex]
+	jsonResponse(w, http.StatusOK, navigationResponse{BookID: &targetID, Index: targetIndex, Total: len(bookIDs)})
+}
+
 func getBookHandler(w http.ResponseWriter, r *http.Request) {
 	bookID := chi.URLParam(r, "bookID")
 	current := getUserFromContext(r.Context())
@@ -760,33 +1019,34 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type BookDetail struct {
-		ID                  int64   `json:"id"`
-		LibraryID           int64   `json:"library_id"`
-		LibraryName         string  `json:"library_name"`
-		AddedAt             int64   `json:"added_at"`
-		Title               string  `json:"title"`
-		Authors             string  `json:"authors"`
-		Series              string  `json:"series"`
-		SeriesNumber        float64 `json:"series_number"`
-		SeriesNumberDisplay string  `json:"series_number_display"`
-		Publisher           string  `json:"publisher"`
-		PubDate             string  `json:"pub_date"`
-		Description         string  `json:"description"`
-		CoverPath           string  `json:"cover_path"`
-		CoverSource         string  `json:"cover_source"`
-		CoverUpdatedOn      int64   `json:"cover_updated_on"`
-		Rating              float64 `json:"rating"`
-		Genres              string  `json:"genres"`
-		Tags                string  `json:"tags"`
-		ISBN                string  `json:"isbn"`
-		ASIN                string  `json:"asin"`
-		Language            string  `json:"language"`
-		PageCount           int     `json:"page_count"`
-		ComicSpreadFallback string  `json:"comic_spread_fallback"`
-		Status              string  `json:"status"`
-		Percent             float64 `json:"percent"`
-		SpeedReaderPercent  float64 `json:"speed_reader_percent"`
-		Opened              bool    `json:"opened"`
+		ID                  int64    `json:"id"`
+		LibraryID           int64    `json:"library_id"`
+		LibraryName         string   `json:"library_name"`
+		AddedAt             int64    `json:"added_at"`
+		Title               string   `json:"title"`
+		Authors             string   `json:"authors"`
+		Series              string   `json:"series"`
+		SeriesNumber        float64  `json:"series_number"`
+		SeriesNumberDisplay string   `json:"series_number_display"`
+		Publisher           string   `json:"publisher"`
+		PubDate             string   `json:"pub_date"`
+		Description         string   `json:"description"`
+		CoverPath           string   `json:"cover_path"`
+		CoverSource         string   `json:"cover_source"`
+		CoverUpdatedOn      int64    `json:"cover_updated_on"`
+		Rating              float64  `json:"rating"`
+		Genres              string   `json:"genres"`
+		Tags                string   `json:"tags"`
+		ISBN                string   `json:"isbn"`
+		ASIN                string   `json:"asin"`
+		Language            string   `json:"language"`
+		PageCount           int      `json:"page_count"`
+		ComicSpreadFallback string   `json:"comic_spread_fallback"`
+		Status              string   `json:"status"`
+		Percent             float64  `json:"percent"`
+		SpeedReaderPercent  float64  `json:"speed_reader_percent"`
+		Opened              bool     `json:"opened"`
+		LibraryPaths        []string `json:"library_paths"`
 	}
 
 	var book BookDetail
@@ -833,6 +1093,19 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Book not found")
 		return
+	}
+
+	pathRows, err := appDB.Query(`SELECT path FROM library_path WHERE library_id = ? ORDER BY length(path) DESC`, book.LibraryID)
+	if err == nil {
+		defer pathRows.Close()
+		for pathRows.Next() {
+			var libraryPath string
+			if scanErr := pathRows.Scan(&libraryPath); scanErr == nil && strings.TrimSpace(libraryPath) != "" {
+				book.LibraryPaths = append(book.LibraryPaths, libraryPath)
+			}
+		}
+	} else {
+		slog.Warn("Failed to fetch library paths for book detail", "book_id", bookIDInt, "library_id", book.LibraryID, "error", err)
 	}
 
 	jsonResponse(w, http.StatusOK, book)

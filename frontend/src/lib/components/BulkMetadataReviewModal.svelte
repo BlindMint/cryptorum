@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { appActivity, reviewedMetadataLookupJobs } from '$lib/stores';
+	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 	type MetadataCandidate = {
 		provider: string;
@@ -147,6 +148,7 @@
 	async function applyItems(itemsToApply: LookupItem[]) {
 		const validItems = itemsToApply.filter((item) => item.match);
 		if (validItems.length === 0) return;
+		if (!confirmBulkAction({ action: 'apply metadata to', count: validItems.length })) return;
 
 		applying = true;
 		applyMessage = '';

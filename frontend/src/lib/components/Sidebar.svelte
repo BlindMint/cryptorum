@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { appActivity, desktopSidebarCollapsed, mobileMenuOpen } from '$lib/stores';
 	import LibraryIconPicker from '$lib/components/LibraryIconPicker.svelte';
+	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { parseLibraryIcon } from '$lib/utils/library-icons';
 
 	interface Library {
@@ -356,6 +357,10 @@
 
 	async function regenerateLibraryCovers(library: Library | null, mode: 'all' | 'missing' = 'all') {
 		if (!library) return;
+		if (!confirmBulkAction({
+			action: mode === 'all' ? 'regenerate covers for' : 'regenerate missing covers for',
+			count: library.book_count
+		})) return;
 		closeLibraryMenu();
 		const pendingJob = appActivity.startPendingJob({
 			job_type: 'cover_regenerate',
