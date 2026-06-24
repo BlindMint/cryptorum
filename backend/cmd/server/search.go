@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	searchLimit             = 50
-	searchCandidateLimit    = 250
+	searchMaxResults        = 1000
+	searchDefaultPageLimit  = 50
+	searchCandidateLimit    = 1000
 	searchFallbackScanLimit = 5000
 	minBookSearchScore      = 1.45
 )
@@ -32,6 +33,14 @@ type SearchResult struct {
 	Opened              bool    `json:"opened"`
 	AddedAt             int64   `json:"added_at"`
 	LastReadAt          int64   `json:"last_read_at"`
+}
+
+type SearchResultsPage struct {
+	Results []SearchResult `json:"results"`
+	Total   int            `json:"total"`
+	Offset  int            `json:"offset"`
+	Limit   int            `json:"limit"`
+	HasMore bool           `json:"has_more"`
 }
 
 type bookSearchCandidate struct {
@@ -75,10 +84,15 @@ const activeFileSearchTextSQL = `COALESCE((
 	WHERE bf.book_id = b.id AND bf.missing_at IS NULL
 ), '')`
 
-func searchBooks(query string, libraryID string, current *AppUser, filters BookSearchFilters) ([]SearchResult, error) {
+func searchBooks(query string, libraryID string, current *AppUser, filters BookSearchFilters, offset int, limit int) (SearchResultsPage, error) {
+	offset, limit = normalizeSearchPagination(offset, limit)
 	queryTokens := searchTokens(query)
 	if len(queryTokens) == 0 {
-		return []SearchResult{}, nil
+		return SearchResultsPage{
+			Results: []SearchResult{},
+			Offset:  offset,
+			Limit:   limit,
+		}, nil
 	}
 
 	candidates := make(map[int64]bookSearchCandidate)
@@ -95,7 +109,7 @@ func searchBooks(query string, libraryID string, current *AppUser, filters BookS
 
 	tokenCandidates, err := queryTokenLikeBookCandidates(queryTokens, libraryID, current, filters)
 	if err != nil {
-		return nil, err
+		return SearchResultsPage{}, err
 	}
 	for _, candidate := range tokenCandidates {
 		if existing, exists := candidates[candidate.result.ID]; exists {
@@ -109,7 +123,7 @@ func searchBooks(query string, libraryID string, current *AppUser, filters BookS
 	if len(candidates) < searchCandidateLimit {
 		fallbackCandidates, err := queryFallbackBookCandidates(libraryID, current, filters)
 		if err != nil {
-			return nil, err
+			return SearchResultsPage{}, err
 		}
 		for _, candidate := range fallbackCandidates {
 			if _, exists := candidates[candidate.result.ID]; !exists {
@@ -131,15 +145,44 @@ func searchBooks(query string, libraryID string, current *AppUser, filters BookS
 
 	sortScoredBookSearchResults(scored, filters.Sort, filters.SortDir)
 
-	if len(scored) > searchLimit {
-		scored = scored[:searchLimit]
+	if len(scored) > searchMaxResults {
+		scored = scored[:searchMaxResults]
 	}
 
-	results := make([]SearchResult, len(scored))
-	for i, item := range scored {
+	total := len(scored)
+	if offset > total {
+		offset = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+
+	page := scored[offset:end]
+	results := make([]SearchResult, len(page))
+	for i, item := range page {
 		results[i] = item.result
 	}
-	return results, nil
+	return SearchResultsPage{
+		Results: results,
+		Total:   total,
+		Offset:  offset,
+		Limit:   limit,
+		HasMore: end < total,
+	}, nil
+}
+
+func normalizeSearchPagination(offset int, limit int) (int, int) {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > searchMaxResults {
+		offset = searchMaxResults
+	}
+	if limit <= 0 || limit > searchDefaultPageLimit {
+		limit = searchDefaultPageLimit
+	}
+	return offset, limit
 }
 
 func queryFTSBookCandidates(ftsQuery string, libraryID string, current *AppUser, filters BookSearchFilters) ([]bookSearchCandidate, error) {
@@ -427,7 +470,7 @@ func sortScoredBookSearchResults(scored []scoredBookSearchResult, sortBy, sortDi
 	desc := strings.EqualFold(sortDir, "desc")
 	sortBy = strings.TrimSpace(sortBy)
 	if sortBy == "" {
-		sortBy = "title"
+		sortBy = "relevance"
 	}
 
 	sort.Slice(scored, func(i, j int) bool {
@@ -705,7 +748,7 @@ func searchTokens(value string) []string {
 func normalizeSearchText(value string) string {
 	var builder strings.Builder
 	lastSpace := true
-	for _, r := range strings.ToLower(value) {
+	for _, r := range strings.ToLower(stripDiacritics(value)) {
 		switch {
 		case unicode.IsLetter(r) || unicode.IsDigit(r):
 			builder.WriteRune(r)

@@ -12,6 +12,14 @@ func TestNormalizedAuthorMatchKeyTreatsInitialVariantsAsEquivalent(t *testing.T)
 	}
 }
 
+func TestNormalizedAuthorMatchKeyRemovesDiacritics(t *testing.T) {
+	left := normalizedAuthorMatchKey("A. Freitas-Magalhães")
+	right := normalizedAuthorMatchKey("A. Freitas-Magalhaes")
+	if left == "" || left != right {
+		t.Fatalf("expected accented and unaccented author keys to match, got %q and %q", left, right)
+	}
+}
+
 func TestCanonicalAuthorDisplayFormatsInitials(t *testing.T) {
 	tests := map[string]string{
 		"J. P. Cooper": "J. P. Cooper",

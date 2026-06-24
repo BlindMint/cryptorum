@@ -44,6 +44,75 @@ func TestScoreBookSearchCandidateTypos(t *testing.T) {
 	}
 }
 
+func TestSearchTokensNormalizeDiacritics(t *testing.T) {
+	tests := map[string][]string{
+		"A. Freitas-Magalhães": {"freitas", "magalhaes"},
+		"São Paulo Stories":    {"sao", "paulo", "stories"},
+	}
+
+	for input, want := range tests {
+		t.Run(input, func(t *testing.T) {
+			got := searchTokens(input)
+			if len(got) != len(want) {
+				t.Fatalf("searchTokens(%q) = %#v, want %#v", input, got, want)
+			}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("searchTokens(%q) = %#v, want %#v", input, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestScoreBookSearchCandidateMatchesUnaccentedQueryAcrossFields(t *testing.T) {
+	tokens := searchTokens("freitas magalhaes ciencia")
+	candidate := bookSearchCandidate{
+		result: SearchResult{
+			ID:      1,
+			Title:   "Ciência Emocional",
+			Authors: `["A. Freitas-Magalhães"]`,
+		},
+	}
+
+	score := scoreBookSearchCandidate(tokens, candidate)
+	if score < minBookSearchScore {
+		t.Fatalf("expected unaccented query to match accented metadata, score %.2f below threshold %.2f", score, minBookSearchScore)
+	}
+}
+
+func TestScoreBookSearchCandidateMatchesOffensiveExamples(t *testing.T) {
+	candidate := bookSearchCandidate{
+		result: SearchResult{
+			ID:       1,
+			Title:    "Offensive",
+			Authors:  `["Will Crudge"]`,
+			Series:   "Starfleet Nemesis",
+			Format:   "epub",
+			FilePath: "Will Crudge/Offensive/Starfleet Nemesis Offensive Book 1 - Will Crudge.epub",
+		},
+	}
+
+	tests := []string{
+		"offensive",
+		"offensive starfleet nemesis",
+		"offensive will",
+		"offensive starfleet",
+		"offensive crudge",
+		"starfleet nemesis",
+	}
+
+	for _, query := range tests {
+		t.Run(query, func(t *testing.T) {
+			tokens := searchTokens(query)
+			score := scoreBookSearchCandidate(tokens, candidate)
+			if score < minBookSearchScore {
+				t.Fatalf("expected %q to match, score %.2f below threshold %.2f", query, score, minBookSearchScore)
+			}
+		})
+	}
+}
+
 func TestScoreBookSearchCandidateRejectsUnrelatedPartialCoverage(t *testing.T) {
 	candidate := bookSearchCandidate{
 		result: SearchResult{
@@ -57,6 +126,49 @@ func TestScoreBookSearchCandidateRejectsUnrelatedPartialCoverage(t *testing.T) {
 	score := scoreBookSearchCandidate(tokens, candidate)
 	if score != 0 {
 		t.Fatalf("expected partial unrelated two-token query to be rejected, got score %.2f", score)
+	}
+}
+
+func TestDefaultSearchSortIsRelevance(t *testing.T) {
+	scored := []scoredBookSearchResult{
+		{
+			result: SearchResult{ID: 1, Title: "A Broad Match"},
+			score:  1.6,
+		},
+		{
+			result: SearchResult{ID: 2, Title: "Offensive"},
+			score:  8.0,
+		},
+	}
+
+	sortScoredBookSearchResults(scored, "", "")
+	if got := scored[0].result.ID; got != 2 {
+		t.Fatalf("expected highest relevance result first, got ID %d", got)
+	}
+}
+
+func TestNormalizeSearchPagination(t *testing.T) {
+	tests := []struct {
+		name       string
+		offset     int
+		limit      int
+		wantOffset int
+		wantLimit  int
+	}{
+		{name: "defaults bad values", offset: -10, limit: 0, wantOffset: 0, wantLimit: searchDefaultPageLimit},
+		{name: "keeps smaller page", offset: 75, limit: 25, wantOffset: 75, wantLimit: 25},
+		{name: "caps page size", offset: 50, limit: 500, wantOffset: 50, wantLimit: searchDefaultPageLimit},
+		{name: "caps offset", offset: searchMaxResults + 25, limit: 50, wantOffset: searchMaxResults, wantLimit: 50},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotOffset, gotLimit := normalizeSearchPagination(tt.offset, tt.limit)
+			if gotOffset != tt.wantOffset || gotLimit != tt.wantLimit {
+				t.Fatalf("normalizeSearchPagination(%d, %d) = (%d, %d), want (%d, %d)",
+					tt.offset, tt.limit, gotOffset, gotLimit, tt.wantOffset, tt.wantLimit)
+			}
+		})
 	}
 }
 
