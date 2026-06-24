@@ -2870,8 +2870,28 @@ func searchBooksHandler(w http.ResponseWriter, r *http.Request) {
 	current := getUserFromContext(r.Context())
 	query := r.URL.Query().Get("q")
 	libraryID := r.URL.Query().Get("library_id")
+
+	limit := searchDefaultPageLimit
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	offset := 0
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
+			offset = parsedOffset
+		}
+	}
+	offset, limit = normalizeSearchPagination(offset, limit)
+
 	if strings.TrimSpace(query) == "" {
-		jsonResponse(w, http.StatusOK, []interface{}{})
+		jsonResponse(w, http.StatusOK, SearchResultsPage{
+			Results: []SearchResult{},
+			Offset:  offset,
+			Limit:   limit,
+		})
 		return
 	}
 
@@ -2886,7 +2906,7 @@ func searchBooksHandler(w http.ResponseWriter, r *http.Request) {
 		Sort:       r.URL.Query().Get("sort"),
 		SortDir:    r.URL.Query().Get("sort_dir"),
 	}
-	results, err := searchBooks(query, libraryID, current, filters)
+	results, err := searchBooks(query, libraryID, current, filters, offset, limit)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Search failed")
 		return

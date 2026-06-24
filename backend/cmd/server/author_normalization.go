@@ -73,7 +73,7 @@ var authorTitlePrefixes = map[string]string{
 func normalizedAuthorMatchKey(author string) string {
 	author = canonicalAuthorDisplay(author)
 	var builder strings.Builder
-	for _, r := range strings.ToLower(strings.TrimSpace(author)) {
+	for _, r := range strings.ToLower(stripDiacritics(strings.TrimSpace(author))) {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			builder.WriteRune(r)
 		}

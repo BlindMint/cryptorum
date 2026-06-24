@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import {
@@ -17,8 +17,18 @@
 	import { appActivity } from '$lib/stores';
 
 	type FilterMode = 'AND' | 'OR' | 'NOT';
+	type SearchResponse = {
+		results?: any[];
+		total?: number;
+		offset?: number;
+		limit?: number;
+		has_more?: boolean;
+	};
+
 	const FILTER_MODES: FilterMode[] = ['AND', 'OR', 'NOT'];
+	const BATCH_SIZE = 50;
 	const sortOptions = [
+		{ value: 'relevance', label: 'Relevance' },
 		{ value: 'title', label: 'Title' },
 		{ value: 'authors', label: 'Author' },
 		{ value: 'series', label: 'Series' },
@@ -31,9 +41,13 @@
 	let libraryName = $state('');
 	let results = $state<any[]>([]);
 	let loading = $state(false);
+	let loadingMore = $state(false);
+	let totalResults = $state(0);
+	let serverHasMore = $state(false);
+	let currentOffset = $state(0);
 	let viewMode = $state('grid');
 	let gridSize = $state(6);
-	let sortBy = $state($page.url.searchParams.get('sort') || 'title');
+	let sortBy = $state($page.url.searchParams.get('sort') || 'relevance');
 	let sortDir = $state<'asc' | 'desc'>($page.url.searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc');
 	let showSortMenu = $state(false);
 	let showFilterPanel = $state(false);
@@ -66,8 +80,11 @@
 	const LONG_PRESS_MOVE_TOLERANCE = 10;
 	let lastUrlSearch = '';
 	let bulkSelectionAnchorId = $state<number | null>(null);
+	let loadMoreTrigger = $state<HTMLDivElement | null>(null);
+	let observer: IntersectionObserver | null = null;
 
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
+	let hasMore = $derived(serverHasMore);
 	let gridStyle = $derived(viewMode === 'grid'
 		? `grid-template-columns: repeat(${gridSize}, minmax(0, 1fr))`
 		: '');
@@ -132,9 +149,11 @@
 		}
 	}
 
-	function buildSearchUrl(): string {
+	function buildSearchUrl(offset: number = 0, limit: number = BATCH_SIZE): string {
 		const params = new URLSearchParams();
 		params.set('q', query.trim());
+		params.set('offset', String(offset));
+		params.set('limit', String(limit));
 		if (libraryFilter) params.set('library_id', libraryFilter);
 		for (const author of getQueryValues($page.url.searchParams, 'author')) params.append('author', author);
 		for (const seriesName of getQueryValues($page.url.searchParams, 'series')) params.append('series', seriesName);
@@ -157,7 +176,7 @@
 
 		query = $page.url.searchParams.get('q') || '';
 		libraryFilter = $page.url.searchParams.get('library') || '';
-		sortBy = $page.url.searchParams.get('sort') || 'title';
+		sortBy = $page.url.searchParams.get('sort') || 'relevance';
 		sortDir = $page.url.searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc';
 		if (libraryFilter) {
 			fetchLibraryName();
@@ -166,9 +185,13 @@
 		}
 
 		if (query) {
-			search();
+			search(true);
 		} else {
 			results = [];
+			totalResults = 0;
+			currentOffset = 0;
+			serverHasMore = false;
+			if (observer) observer.disconnect();
 			deselectAll();
 		}
 	});
@@ -177,29 +200,98 @@
 		void fetchFilterOptions();
 	});
 
-	async function search() {
+	$effect(() => {
+		if (loadMoreTrigger && results.length > 0 && hasMore) {
+			setTimeout(() => setupObserver(), 100);
+		}
+	});
+
+	onDestroy(() => {
+		if (observer) {
+			observer.disconnect();
+			observer = null;
+		}
+	});
+
+	async function search(reset: boolean = true) {
 		const trimmed = query.trim();
 		if (!trimmed) {
 			results = [];
+			totalResults = 0;
+			currentOffset = 0;
+			serverHasMore = false;
+			if (observer) observer.disconnect();
 			selectedBooks = new Set();
 			return;
 		}
 
-		loading = true;
-		selectedBooks = new Set();
-		showMetadataMenu = false;
+		if (reset) {
+			loading = true;
+			loadingMore = false;
+			currentOffset = 0;
+			selectedBooks = new Set();
+			showMetadataMenu = false;
+			if (observer) observer.disconnect();
+		} else {
+			if (loading || loadingMore || !hasMore) return;
+			loadingMore = true;
+		}
 		try {
-			const res = await fetch(buildSearchUrl());
+			const res = await fetch(buildSearchUrl(reset ? 0 : currentOffset));
 			if (res.ok) {
-				results = await res.json();
+				const data: SearchResponse | any[] = await res.json();
+				const pageResults = Array.isArray(data) ? data : data.results ?? [];
+				if (reset) {
+					results = pageResults;
+				} else {
+					results = [...results, ...pageResults];
+				}
+				totalResults = Array.isArray(data) ? results.length : data.total ?? results.length;
+				serverHasMore = Array.isArray(data)
+					? false
+					: typeof data.has_more === 'boolean'
+						? data.has_more
+						: results.length < totalResults;
+				currentOffset = results.length;
 			} else {
-				results = [];
+				if (reset) {
+					results = [];
+					totalResults = 0;
+					currentOffset = 0;
+					serverHasMore = false;
+				}
 			}
 		} catch (error) {
 			console.error('Search failed:', error);
 		} finally {
-			loading = false;
-			restoreRouteScrollPosition();
+			if (reset) {
+				loading = false;
+				restoreRouteScrollPosition();
+			} else {
+				loadingMore = false;
+			}
+			setTimeout(() => {
+				if (loadMoreTrigger && hasMore) setupObserver();
+			}, 200);
+		}
+	}
+
+	function loadMore() {
+		void search(false);
+	}
+
+	function setupObserver() {
+		if (observer) observer.disconnect();
+		if (loadMoreTrigger && hasMore) {
+			observer = new IntersectionObserver(
+				(entries) => {
+					if (entries[0].isIntersecting && !loadingMore && !loading) {
+						loadMore();
+					}
+				},
+				{ rootMargin: '200px' }
+			);
+			observer.observe(loadMoreTrigger);
 		}
 	}
 
@@ -214,7 +306,7 @@
 		url.searchParams.set('sort_dir', sortDir);
 		const nextSearch = url.search;
 		if (nextSearch === $page.url.search) {
-			void search();
+			void search(true);
 		} else {
 			navigateWithSearchParams(url);
 		}
@@ -242,7 +334,7 @@
 	}
 
 	function currentSortLabel() {
-		return sortOptions.find((option) => option.value === sortBy)?.label ?? 'Title';
+		return sortOptions.find((option) => option.value === sortBy)?.label ?? 'Relevance';
 	}
 
 	function sortDirectionLabel() {
@@ -562,7 +654,7 @@
 			});
 
 			if (res.ok) {
-				await search();
+				await search(true);
 				deselectAll();
 			} else {
 				console.error('Failed to delete books');
@@ -887,7 +979,11 @@
 			<div class="flex items-center justify-between mb-6 gap-4 flex-wrap">
 				<div>
 					<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">
-						{results.length} result{results.length === 1 ? '' : 's'} found
+						{#if totalResults > results.length}
+							{results.length} of {totalResults} result{totalResults === 1 ? '' : 's'} shown
+						{:else}
+							{results.length} result{results.length === 1 ? '' : 's'} found
+						{/if}
 					</h2>
 				</div>
 
@@ -1128,6 +1224,27 @@
 					{/if}
 				{/each}
 			</div>
+			{#if hasMore}
+				<div bind:this={loadMoreTrigger} class="flex justify-center py-8">
+					{#if loadingMore}
+						<div class="flex items-center gap-2 text-[var(--color-surface-text-muted)]">
+							<svg class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+							</svg>
+							<span>Loading more results...</span>
+						</div>
+					{:else}
+						<button
+							type="button"
+							onclick={loadMore}
+							class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-2 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)]"
+						>
+							Load more results
+						</button>
+					{/if}
+				</div>
+			{/if}
 		</div>
 	{:else if query && !loading}
 		<div class="text-center py-12">
@@ -1297,7 +1414,7 @@
 		bookIds={bulkMetadataEditBookIds}
 		selectionCount={bulkMetadataEditBookIds.length}
 		onClose={() => { showBulkMetadataEdit = false; bulkMetadataEditBookIds = []; }}
-		onSaved={() => search()}
+		onSaved={() => search(true)}
 	/>
 {/if}
 
@@ -1306,7 +1423,7 @@
 		jobId={metadataLookupJob.id}
 		initialJob={metadataLookupJob}
 		onClose={() => showBulkMetadataReview = false}
-		onApplied={async () => search()}
+		onApplied={async () => search(true)}
 	/>
 {/if}
 
