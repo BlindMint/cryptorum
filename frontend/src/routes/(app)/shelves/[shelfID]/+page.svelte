@@ -5,8 +5,7 @@
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
 	import BulkMetadataEditModal from '$lib/components/BulkMetadataEditModal.svelte';
-	import BulkMetadataLookupConfirmModal from '$lib/components/BulkMetadataLookupConfirmModal.svelte';
-	import { appActivity, showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { showFormatOnCover, getFormatColor } from '$lib/stores';
 	import {
 		getBookDetailContextUrl,
 		getInlineMetadataEditUrl,
@@ -23,9 +22,8 @@
 	let selectedBooks = $state<Set<number>>(new Set());
 	let showBulkMetadataEdit = $state(false);
 	let bulkMetadataEditBookIds = $state<number[]>([]);
+	let bulkMetadataLookupBookIds = $state<number[]>([]);
 	let showMetadataMenu = $state(false);
-	let showBulkMetadataLookupConfirm = $state(false);
-	let metadataLookupQueueing = $state(false);
 	let metadataLookupJob = $state<any | null>(null);
 	let showBulkMetadataReview = $state(false);
 	let actionInProgress = $state(false);
@@ -205,39 +203,6 @@
 		bulkSelectionAnchorId = null;
 	}
 
-	async function queueBulkMetadataLookup() {
-		if (selectedBooks.size === 0 || metadataLookupQueueing) return;
-		if (!confirmBulkAction({ action: 'queue metadata lookup for', count: selectedBooks.size })) return;
-		showMetadataMenu = false;
-		showBulkMetadataLookupConfirm = false;
-		metadataLookupQueueing = true;
-		const selectedCount = selectedBooks.size;
-		const pendingJob = appActivity.startPendingJob({
-			job_type: 'metadata_lookup',
-			title: `Bulk metadata lookup (${selectedCount} books)`,
-			total_items: selectedCount
-		});
-		try {
-			const res = await fetch('/api/jobs/metadata-lookup', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ book_ids: Array.from(selectedBooks) })
-			});
-			if (!res.ok) {
-				throw new Error(await res.text());
-			}
-			metadataLookupJob = await res.json();
-			appActivity.confirmPendingJob(pendingJob, metadataLookupJob);
-			await appActivity.refresh();
-			showBulkMetadataReview = true;
-		} catch (error) {
-			console.error('Failed to queue metadata lookup:', error);
-			appActivity.failPendingJob(pendingJob, 'Unable to queue metadata lookup.');
-		} finally {
-			metadataLookupQueueing = false;
-		}
-	}
-
 	function openSequentialMetadataEdit() {
 		if (selectedBooks.size === 0) return;
 		showMetadataMenu = false;
@@ -254,10 +219,12 @@
 		showBulkMetadataEdit = true;
 	}
 
-	function openBulkMetadataLookupConfirm() {
+	function openBulkMetadataLookup() {
 		if (selectedBooks.size === 0) return;
 		showMetadataMenu = false;
-		showBulkMetadataLookupConfirm = true;
+		metadataLookupJob = null;
+		bulkMetadataLookupBookIds = Array.from(selectedBooks);
+		showBulkMetadataReview = true;
 	}
 
 	async function removeSelectedFromShelf() {
@@ -404,13 +371,13 @@
 						<div class="relative">
 							<button
 								onclick={() => showMetadataMenu = !showMetadataMenu}
-								disabled={selectedBooks.size === 0 || metadataLookupQueueing}
+								disabled={selectedBooks.size === 0}
 								class="px-4 py-2 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none flex items-center gap-2"
 							>
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
 								</svg>
-								<span>{metadataLookupQueueing ? 'Queueing...' : 'Metadata'}</span>
+								<span>Metadata</span>
 							</button>
 							{#if showMetadataMenu}
 								<div class="absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
@@ -433,7 +400,7 @@
 									<button
 										type="button"
 										class="block w-full border-t border-[var(--color-surface-border)] px-4 py-3 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
-										onclick={openBulkMetadataLookupConfirm}
+										onclick={openBulkMetadataLookup}
 									>
 										<div class="font-medium">Bulk metadata lookup</div>
 										<div class="mt-0.5 text-xs text-[var(--color-surface-text-muted)]">Find top matches, then review before applying.</div>
@@ -465,15 +432,6 @@
 	</div>
 {/if}
 
-{#if showBulkMetadataLookupConfirm}
-	<BulkMetadataLookupConfirmModal
-		count={selectedBooks.size}
-		queueing={metadataLookupQueueing}
-		onCancel={() => showBulkMetadataLookupConfirm = false}
-		onProceed={queueBulkMetadataLookup}
-	/>
-{/if}
-
 {#if showBulkMetadataEdit}
 	<BulkMetadataEditModal
 		bookIds={bulkMetadataEditBookIds}
@@ -482,11 +440,12 @@
 	/>
 {/if}
 
-{#if showBulkMetadataReview && metadataLookupJob?.id}
+{#if showBulkMetadataReview && (metadataLookupJob?.id || bulkMetadataLookupBookIds.length > 0)}
 	<BulkMetadataReviewModal
-		jobId={metadataLookupJob.id}
+		jobId={metadataLookupJob?.id ?? null}
+		bookIds={bulkMetadataLookupBookIds}
 		initialJob={metadataLookupJob}
-		onClose={() => showBulkMetadataReview = false}
+		onClose={() => { showBulkMetadataReview = false; bulkMetadataLookupBookIds = []; metadataLookupJob = null; }}
 		onApplied={async () => fetchShelfBooks()}
 	/>
 {/if}

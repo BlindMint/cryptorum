@@ -25,8 +25,9 @@ type MetadataApplyJobRequest struct {
 }
 
 type MetadataLookupJobRequest struct {
-	BookIDs  []int64 `json:"book_ids"`
-	Provider string  `json:"provider,omitempty"`
+	BookIDs      []int64 `json:"book_ids"`
+	Provider     string  `json:"provider,omitempty"`
+	TopMatchOnly bool    `json:"top_match_only,omitempty"`
 }
 
 type AdminJob struct {
@@ -91,13 +92,17 @@ type MetadataLookupBookSnapshot struct {
 }
 
 type MetadataLookupJobResultItem struct {
-	BookID  int64                      `json:"book_id"`
-	Current MetadataLookupBookSnapshot `json:"current"`
-	Match   *MetadataCandidate         `json:"match,omitempty"`
-	Status  string                     `json:"status"`
-	Error   string                     `json:"error,omitempty"`
-	Query   string                     `json:"query,omitempty"`
+	BookID      int64                        `json:"book_id"`
+	Current     MetadataLookupBookSnapshot   `json:"current"`
+	Match       *MetadataCandidate           `json:"match,omitempty"`
+	Matches     []MetadataCandidate          `json:"matches,omitempty"`
+	Status      string                       `json:"status"`
+	Error       string                       `json:"error,omitempty"`
+	Query       string                       `json:"query,omitempty"`
+	Diagnostics []MetadataProviderDiagnostic `json:"diagnostics,omitempty"`
 }
+
+const metadataBulkLookupCandidateLimit = 6
 
 func recordAppLog(level, category, message string, data any) {
 	if appDB == nil {
@@ -687,6 +692,19 @@ func QueueMetadataLookupJobHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jobID, _ := res.LastInsertId()
+	initialResults, initialFailed, firstErr := initializeMetadataLookupJobResults(req.BookIDs)
+	initialPayload, _ := json.Marshal(map[string]any{
+		"items":     initialResults,
+		"completed": 0,
+		"failed":    initialFailed,
+		"total":     len(req.BookIDs),
+	})
+	_, _ = appDB.Exec(`
+		UPDATE metadata_job
+		SET failed_items = ?, error = ?, result_json = ?
+		WHERE id = ?
+	`, initialFailed, firstErr, nullString(initialPayload), jobID)
+
 	createAdminNotification(
 		"job_queued",
 		title,
@@ -698,7 +716,7 @@ func QueueMetadataLookupJobHandler(w http.ResponseWriter, r *http.Request) {
 		"count":  len(req.BookIDs),
 	})
 
-	go processMetadataLookupJob(jobID, req, title)
+	go processMetadataLookupJob(jobID, req, title, initialResults, initialFailed, firstErr)
 
 	job, err := loadAdminJob(jobID)
 	if err != nil {
@@ -731,33 +749,21 @@ func GetJobHandler(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, job)
 }
 
-func processMetadataLookupJob(jobID int64, req MetadataLookupJobRequest, title string) {
-	startedAt := time.Now().Unix()
-	_, _ = appDB.Exec(`
-		UPDATE metadata_job
-		SET status = ?, started_at = ?
-		WHERE id = ?
-	`, "running", startedAt, jobID)
-
-	results := make([]MetadataLookupJobResultItem, 0, len(req.BookIDs))
-	completed := 0
+func initializeMetadataLookupJobResults(bookIDs []int64) ([]MetadataLookupJobResultItem, int, string) {
+	results := make([]MetadataLookupJobResultItem, 0, len(bookIDs))
 	failed := 0
 	var firstErr string
 
-	for _, bookID := range req.BookIDs {
+	for _, bookID := range bookIDs {
 		item := MetadataLookupJobResultItem{
 			BookID: bookID,
-			Status: "no_match",
+			Status: "pending",
 		}
-
 		snapshot, err := loadMetadataLookupSnapshot(bookID)
 		if err != nil {
 			item.Status = "failed"
 			item.Error = err.Error()
 			failed++
-			if firstErr == "" {
-				firstErr = err.Error()
-			}
 		} else {
 			item.Current = snapshot
 			item.Query = metadataLookupQuery(snapshot)
@@ -765,32 +771,108 @@ func processMetadataLookupJob(jobID int64, req MetadataLookupJobRequest, title s
 				item.Status = "failed"
 				item.Error = "No searchable metadata"
 				failed++
-				if firstErr == "" {
-					firstErr = item.Error
-				}
-			} else {
-				candidates := searchMetadataCandidates(MetadataSearchFields{
-					Title:     snapshot.Title,
-					Author:    strings.Join(snapshot.Authors, " "),
-					ISBN:      snapshot.ISBN,
-					ASIN:      snapshot.ASIN,
-					Series:    snapshot.Series,
-					Publisher: snapshot.Publisher,
-					Provider:  req.Provider,
-				})
-				if len(candidates) > 0 {
-					best := candidates[0]
-					item.Match = &best
-					item.Status = "matched"
-					completed++
-				} else {
-					completed++
-				}
 			}
 		}
-
+		if firstErr == "" && item.Error != "" {
+			firstErr = item.Error
+		}
 		results = append(results, item)
+	}
+
+	return results, failed, firstErr
+}
+
+func metadataLookupCandidatesForJob(candidates []MetadataCandidate, topMatchOnly bool) []MetadataCandidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	limit := metadataBulkLookupCandidateLimit
+	if topMatchOnly {
+		limit = 1
+	}
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	return append([]MetadataCandidate(nil), candidates...)
+}
+
+func processMetadataLookupJob(jobID int64, req MetadataLookupJobRequest, title string, results []MetadataLookupJobResultItem, failed int, firstErr string) {
+	startedAt := time.Now().Unix()
+	res, _ := appDB.Exec(`
+		UPDATE metadata_job
+		SET status = ?, started_at = ?
+		WHERE id = ? AND status = 'queued'
+	`, "running", startedAt, jobID)
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return
+	}
+
+	completed := 0
+
+	for index := range results {
+		if isJobCancelRequested(jobID) {
+			finalizeMetadataLookupJobCancelled(jobID, title, req.BookIDs, results, completed, failed)
+			return
+		}
+
+		item := &results[index]
+		if item.Status == "failed" {
+			continue
+		}
+
+		item.Status = "searching"
 		partialJSON, _ := json.Marshal(map[string]any{
+			"items":     results,
+			"completed": completed,
+			"failed":    failed,
+			"total":     len(req.BookIDs),
+		})
+		_, _ = appDB.Exec(`
+			UPDATE metadata_job
+			SET completed_items = ?, failed_items = ?, result_json = ?
+			WHERE id = ?
+		`, completed, failed, nullString(partialJSON), jobID)
+
+		snapshot := item.Current
+		candidates, diagnostics := searchMetadataCandidatesWithDiagnostics(MetadataSearchFields{
+			Title:     snapshot.Title,
+			Author:    strings.Join(snapshot.Authors, " "),
+			ISBN:      snapshot.ISBN,
+			ASIN:      snapshot.ASIN,
+			Series:    snapshot.Series,
+			Publisher: snapshot.Publisher,
+			Provider:  req.Provider,
+		})
+
+		if isJobCancelRequested(jobID) {
+			item.Status = "cancelled"
+			finalizeMetadataLookupJobCancelled(jobID, title, req.BookIDs, results, completed, failed)
+			return
+		}
+
+		item.Diagnostics = diagnostics
+		if len(candidates) > 0 {
+			item.Matches = metadataLookupCandidatesForJob(candidates, req.TopMatchOnly)
+			item.Match = &item.Matches[0]
+			item.Status = "matched"
+			item.Error = ""
+			completed++
+		} else {
+			item.Status = "no_match"
+			item.Error = metadataDiagnosticsSummary(diagnostics)
+			if metadataDiagnosticsAllFailed(diagnostics) {
+				recordAppLog("warn", "metadata", "Metadata lookup providers failed for book", map[string]any{
+					"job_id":      jobID,
+					"book_id":     item.BookID,
+					"query":       item.Query,
+					"provider":    req.Provider,
+					"diagnostics": diagnostics,
+				})
+			}
+			completed++
+		}
+
+		partialJSON, _ = json.Marshal(map[string]any{
 			"items":     results,
 			"completed": completed,
 			"failed":    failed,
@@ -842,6 +924,41 @@ func processMetadataLookupJob(jobID int64, req MetadataLookupJobRequest, title s
 		"matched": matched,
 		"failed":  failed,
 		"error":   firstErr,
+	})
+}
+
+func finalizeMetadataLookupJobCancelled(jobID int64, title string, bookIDs []int64, results []MetadataLookupJobResultItem, completed int, failed int) {
+	for index := range results {
+		if results[index].Status == "pending" || results[index].Status == "searching" {
+			results[index].Status = "cancelled"
+		}
+	}
+
+	resultPayload := map[string]any{
+		"items":     results,
+		"completed": completed,
+		"failed":    failed,
+		"total":     len(bookIDs),
+	}
+	resultJSON, _ := json.Marshal(resultPayload)
+	completedAt := time.Now().Unix()
+
+	_, _ = appDB.Exec(`
+		UPDATE metadata_job
+		SET status = ?, result_json = ?, completed_items = ?, failed_items = ?, error = ?, completed_at = ?
+		WHERE id = ?
+	`, "cancelled", nullString(resultJSON), completed, failed, "Cancelled", completedAt, jobID)
+
+	createAdminNotification(
+		"job_cancelled",
+		title,
+		fmt.Sprintf("Metadata lookup cancelled: %d completed, %d failed.", completed, failed),
+		"/settings?tab=jobs",
+	)
+	recordAppLog("info", "jobs", "Cancelled metadata lookup job", map[string]any{
+		"job_id":    jobID,
+		"completed": completed,
+		"failed":    failed,
 	})
 }
 
@@ -993,11 +1110,6 @@ func ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 
 func CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 	current := getUserFromContext(r.Context())
-	if !requirePermission(current, PermissionManageJobs) {
-		errorResponse(w, http.StatusForbidden, "Permission denied")
-		return
-	}
-
 	jobID, err := strconv.ParseInt(chi.URLParam(r, "jobID"), 10, 64)
 	if err != nil {
 		errorResponse(w, http.StatusBadRequest, "Invalid job ID")
@@ -1009,11 +1121,15 @@ func CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusNotFound, "Job not found")
 		return
 	}
+	if !requirePermission(current, PermissionManageJobs) && !(job.JobType == "metadata_lookup" && requirePermission(current, PermissionManageMetadata)) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
 	if !isActiveJobStatus(job.Status) {
 		errorResponse(w, http.StatusConflict, "Job is not active")
 		return
 	}
-	if job.Status != "queued" && job.JobType != "library_scan" {
+	if job.Status != "queued" && job.JobType != "library_scan" && job.JobType != "metadata_lookup" {
 		errorResponse(w, http.StatusConflict, "This running job type cannot be cancelled yet")
 		return
 	}

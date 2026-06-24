@@ -21,6 +21,20 @@
 		match_score?: number;
 	};
 
+	type MetadataProviderDiagnostic = {
+		provider: string;
+		query?: string;
+		mode?: string;
+		status: string;
+		count: number;
+		error?: string;
+	};
+
+	type MetadataSearchResponse = {
+		results?: MetadataCandidate[];
+		diagnostics?: MetadataProviderDiagnostic[];
+	};
+
 	type BookSummary = {
 		id: number;
 		title?: string;
@@ -49,6 +63,7 @@
 		querySeries: string;
 		queryPublisher: string;
 		results: MetadataCandidate[];
+		diagnostics: MetadataProviderDiagnostic[];
 		selectedIndex: number;
 		loading: boolean;
 		error: string | null;
@@ -83,6 +98,7 @@
 	let applying = $state(false);
 	let pendingApply = $state<{ mode: 'single' | 'all'; bookId?: number } | null>(null);
 	let initialized = false;
+	let searchControllers = new Map<number, AbortController>();
 
 	function parseAuthors(value: string | undefined): string[] {
 		if (!value) return [];
@@ -166,6 +182,7 @@
 			querySeries: summary.series?.trim() || '',
 			queryPublisher: summary.publisher?.trim() || '',
 			results: [],
+			diagnostics: [],
 			selectedIndex: -1,
 			loading: false,
 			error: null
@@ -182,6 +199,35 @@
 
 	function isAnyTargetSearching(): boolean {
 		return targets.some((target) => target.loading);
+	}
+
+	function isAbortError(error: unknown): boolean {
+		return error instanceof DOMException && error.name === 'AbortError';
+	}
+
+	function cancelSearch(bookId: number, message = 'Search cancelled.') {
+		const controller = searchControllers.get(bookId);
+		if (controller) {
+			controller.abort();
+			searchControllers.delete(bookId);
+		}
+		updateTarget(bookId, (item) => ({
+			...item,
+			loading: false,
+			error: message
+		}));
+	}
+
+	function cancelAllSearches() {
+		const activeBookIds = Array.from(searchControllers.keys());
+		for (const bookId of activeBookIds) {
+			cancelSearch(bookId);
+		}
+	}
+
+	function closeLookup() {
+		cancelAllSearches();
+		onClose();
 	}
 
 	function goToTarget(offset: number) {
@@ -220,6 +266,22 @@
 		if (isbn) return `ISBN ${isbn}`;
 		if (asin) return `ASIN ${asin}`;
 		return `Book ${target.bookId}`;
+	}
+
+	function providerLabel(provider: string): string {
+		const displayName = providers.find((item) => item.id === provider)?.name;
+		return displayName ?? provider
+			.split('_')
+			.map((part) => part ? part[0].toUpperCase() + part.slice(1) : part)
+			.join(' ');
+	}
+
+	function diagnosticLabel(diagnostic: MetadataProviderDiagnostic): string {
+		const provider = providerLabel(diagnostic.provider);
+		if (diagnostic.status === 'ok') return `${provider}: ${diagnostic.count} result${diagnostic.count === 1 ? '' : 's'}`;
+		if (diagnostic.status === 'zero_results') return `${provider}: no results`;
+		if (diagnostic.status === 'failed') return `${provider}: ${diagnostic.error || 'failed'}`;
+		return `${provider}: ${diagnostic.status}`;
 	}
 
 	function hasEditedSearchFields(target: LookupTarget): boolean {
@@ -279,6 +341,9 @@
 			return;
 		}
 
+		searchControllers.get(bookId)?.abort();
+		const controller = new AbortController();
+		searchControllers.set(bookId, controller);
 		updateTarget(bookId, (item) => ({ ...item, loading: true, error: null }));
 
 		try {
@@ -291,30 +356,45 @@
 			if (target.queryPublisher.trim()) params.set('publisher', target.queryPublisher.trim());
 			if (selectedProvider) params.set('provider', selectedProvider);
 			if (hasEditedSearchFields(target)) params.set('strict', '1');
+			params.set('include_diagnostics', '1');
 			params.set('limit', '6');
 
-			const res = await fetch(`/api/metadata/search?${params.toString()}`);
+			const res = await fetch(`/api/metadata/search?${params.toString()}`, { signal: controller.signal });
 			if (!res.ok) {
 				const detail = await readErrorDetail(res);
 				throw new Error(formatSearchError(res.status, detail));
 			}
 
-			const results = await res.json();
-			const safeResults = Array.isArray(results) ? results : [];
+			const payload: MetadataCandidate[] | MetadataSearchResponse = await res.json();
+			const safeResults = Array.isArray(payload) ? payload : payload.results ?? [];
+			const diagnostics = Array.isArray(payload) ? [] : payload.diagnostics ?? [];
 			updateTarget(bookId, (item) => ({
 				...item,
 				results: safeResults,
+				diagnostics,
 				selectedIndex: safeResults.length > 0 ? 0 : -1,
 				loading: false,
 				error: null
 			}));
 		} catch (error) {
+			if (isAbortError(error)) {
+				updateTarget(bookId, (item) => ({
+					...item,
+					loading: false,
+					error: 'Search cancelled.'
+				}));
+				return;
+			}
 			console.error('Failed to search metadata:', error);
 			updateTarget(bookId, (item) => ({
 				...item,
 				loading: false,
 				error: error instanceof Error ? error.message : 'Search failed (E000): unable to reach the metadata service.'
 			}));
+		} finally {
+			if (searchControllers.get(bookId) === controller) {
+				searchControllers.delete(bookId);
+			}
 		}
 	}
 
@@ -464,6 +544,9 @@
 
 	onMount(() => {
 		void initialize();
+		return () => {
+			cancelAllSearches();
+		};
 	});
 </script>
 
@@ -472,9 +555,9 @@
 		type="button"
 		aria-label="Close metadata lookup modal"
 		class="absolute inset-0 z-0 bg-black/70"
-		onclick={onClose}
+		onclick={closeLookup}
 	></button>
-	<div class="relative z-10 w-full max-w-6xl max-h-[92vh] overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
+	<div class="relative z-10 flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
 		<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-6 py-4">
 			<div>
 				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">{title}</h2>
@@ -495,9 +578,18 @@
 						</span>
 						{isAnyTargetSearching() ? 'Searching All...' : 'Search All'}
 					</button>
+					{#if isAnyTargetSearching()}
+						<button
+							type="button"
+							class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200 transition-colors hover:bg-amber-500/20"
+							onclick={cancelAllSearches}
+						>
+							Cancel Search
+						</button>
+					{/if}
 				<button
 					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)]"
-					onclick={onClose}
+					onclick={closeLookup}
 				>
 					Close
 				</button>
@@ -532,7 +624,7 @@
 						</div>
 					</div>
 
-					<div class="min-h-0 overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
+					<div class="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
 						<div class="border-b border-[var(--color-surface-border)] px-4 py-3">
 							<div class="flex items-center justify-between gap-3">
 								<div>
@@ -542,7 +634,7 @@
 								<div class="h-4 w-16 animate-pulse rounded bg-[var(--color-surface-700)]/70"></div>
 							</div>
 						</div>
-						<div class="min-h-0 overflow-y-auto p-4">
+						<div class="min-h-0 flex-1 overflow-y-auto p-4">
 							<div class="flex h-full min-h-56 items-center justify-center rounded-2xl border border-dashed border-[var(--color-surface-border)] text-center">
 								<div>
 									<div class="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-[var(--color-surface-border)] border-t-[var(--color-primary-500)]"></div>
@@ -698,7 +790,7 @@
 							</div>
 						</div>
 
-						<div class="min-h-0 overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
+						<div class="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
 							<div class="border-b border-[var(--color-surface-border)] px-4 py-3">
 								<div class="flex items-center justify-between gap-3">
 									<div>
@@ -713,16 +805,32 @@
 												<span class="h-3 w-3 animate-spin rounded-full border-2 border-[var(--color-surface-border)] border-t-[var(--color-primary-500)]" aria-hidden="true"></span>
 												Searching providers...
 											</span>
+											<button
+												type="button"
+												class="rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-200 transition-colors hover:bg-amber-500/20"
+												onclick={() => cancelSearch(target.bookId)}
+											>
+												Cancel
+											</button>
 										{/if}
 										<span>Book ID {target.bookId}</span>
 									</div>
 								</div>
 							</div>
 
-							<div class="min-h-0 overflow-y-auto p-4">
+							<div class="min-h-0 flex-1 overflow-y-auto p-4">
 								{#if target.results.length === 0}
-									<div class="flex h-56 items-center justify-center rounded-2xl border border-dashed border-[var(--color-surface-border)] text-sm text-[var(--color-surface-text-muted)]">
-										No results yet. Search this book to begin.
+									<div class="flex min-h-56 flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--color-surface-border)] px-4 py-6 text-center text-sm text-[var(--color-surface-text-muted)]">
+										<p>{target.diagnostics.length > 0 ? 'No metadata matches were found.' : 'No results yet. Search this book to begin.'}</p>
+										{#if target.diagnostics.length > 0}
+											<div class="mt-4 w-full max-w-xl space-y-1 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3 text-left text-xs">
+												{#each target.diagnostics as diagnostic}
+													<div class={diagnostic.status === 'failed' ? 'text-red-300' : 'text-[var(--color-surface-text-muted)]'}>
+														{diagnosticLabel(diagnostic)}
+													</div>
+												{/each}
+											</div>
+										{/if}
 									</div>
 								{:else}
 									<div class="space-y-3">

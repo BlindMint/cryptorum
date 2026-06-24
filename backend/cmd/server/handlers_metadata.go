@@ -60,6 +60,20 @@ type MetadataSearchFields struct {
 	Strict    bool
 }
 
+type MetadataProviderDiagnostic struct {
+	Provider string `json:"provider"`
+	Query    string `json:"query,omitempty"`
+	Mode     string `json:"mode,omitempty"`
+	Status   string `json:"status"`
+	Count    int    `json:"count"`
+	Error    string `json:"error,omitempty"`
+}
+
+type MetadataSearchResponse struct {
+	Results     []MetadataCandidate          `json:"results"`
+	Diagnostics []MetadataProviderDiagnostic `json:"diagnostics,omitempty"`
+}
+
 type metadataSearchVariant struct {
 	Fields MetadataSearchFields
 	Query  string
@@ -169,6 +183,7 @@ func SearchMetadataHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	values := r.URL.Query()
+	includeDiagnostics := parseBoolQuery(values.Get("include_diagnostics")) || parseBoolQuery(values.Get("diagnostics"))
 	fields := MetadataSearchFields{
 		Query:     strings.TrimSpace(values.Get("q")),
 		Title:     strings.TrimSpace(values.Get("title")),
@@ -187,15 +202,45 @@ func SearchMetadataHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	candidates := searchMetadataCandidates(fields)
+	candidates, diagnostics := searchMetadataCandidatesWithDiagnostics(fields)
 	if candidates == nil {
 		candidates = []MetadataCandidate{}
+	}
+	if len(candidates) == 0 && metadataDiagnosticsAllFailed(diagnostics) {
+		message := metadataDiagnosticsSummary(diagnostics)
+		recordAppLog("warn", "metadata", "Metadata lookup providers failed", map[string]any{
+			"query":       query,
+			"provider":    fields.Provider,
+			"diagnostics": diagnostics,
+		})
+		jsonResponse(w, http.StatusServiceUnavailable, map[string]any{
+			"error":       message,
+			"diagnostics": diagnostics,
+		})
+		return
 	}
 
 	if limitValue := strings.TrimSpace(values.Get("limit")); limitValue != "" {
 		if limit, err := strconv.Atoi(limitValue); err == nil && limit > 0 && len(candidates) > limit {
 			candidates = candidates[:limit]
 		}
+	}
+
+	writeMetadataSearchResponse(w, candidates, diagnostics, includeDiagnostics)
+}
+
+func writeMetadataSearchResponse(
+	w http.ResponseWriter,
+	candidates []MetadataCandidate,
+	diagnostics []MetadataProviderDiagnostic,
+	includeDiagnostics bool,
+) {
+	if includeDiagnostics {
+		jsonResponse(w, http.StatusOK, MetadataSearchResponse{
+			Results:     candidates,
+			Diagnostics: diagnostics,
+		})
+		return
 	}
 
 	jsonResponse(w, http.StatusOK, candidates)
@@ -217,20 +262,28 @@ func metadataFieldsQuery(fields MetadataSearchFields) string {
 }
 
 func searchMetadataCandidates(fields MetadataSearchFields) []MetadataCandidate {
+	candidates, _ := searchMetadataCandidatesWithDiagnostics(fields)
+	return candidates
+}
+
+func searchMetadataCandidatesWithDiagnostics(fields MetadataSearchFields) ([]MetadataCandidate, []MetadataProviderDiagnostic) {
 	variants := metadataSearchVariants(fields)
 	if len(variants) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	bestByKey := map[string]MetadataCandidate{}
 	resultsByQuery := map[string][]MetadataCandidate{}
+	diagnosticsByQuery := map[string][]MetadataProviderDiagnostic{}
+	var diagnostics []MetadataProviderDiagnostic
 	for _, variant := range variants {
 		resultKey := metadataSearchVariantKey(variant)
 		results, ok := resultsByQuery[resultKey]
 		if !ok {
-			results = fetchMetadataCandidates(variant.Query, fields.Provider, variant.Mode)
+			results, diagnosticsByQuery[resultKey] = fetchMetadataCandidatesWithDiagnostics(variant.Query, fields.Provider, variant.Mode)
 			resultsByQuery[resultKey] = results
 		}
+		diagnostics = append(diagnostics, diagnosticsByQuery[resultKey]...)
 		for _, candidate := range results {
 			candidate.MatchScore = scoreMetadataCandidateForFields(variant.Fields, candidate) + variant.Bonus + providerMatchBonus(candidate.Provider)
 			key := metadataCandidateKey(candidate)
@@ -266,7 +319,7 @@ func searchMetadataCandidates(fields MetadataSearchFields) []MetadataCandidate {
 		return candidates[i].MatchScore > candidates[j].MatchScore
 	})
 
-	return candidates
+	return candidates, diagnostics
 }
 
 func metadataSearchVariants(fields MetadataSearchFields) []metadataSearchVariant {
@@ -399,23 +452,54 @@ func parseBoolQuery(value string) bool {
 }
 
 func fetchMetadataCandidates(query, provider, mode string) []MetadataCandidate {
-	cacheKey := metadataSearchCacheKey(query, provider, mode)
-	if cached, ok := getCachedMetadataCandidates(cacheKey); ok {
-		return cached
-	}
-
-	candidates, cacheable := fetchMetadataCandidatesUncached(query, provider, mode)
-	if cacheable {
-		setCachedMetadataCandidates(cacheKey, candidates)
-	}
+	candidates, _ := fetchMetadataCandidatesWithDiagnostics(query, provider, mode)
 	return candidates
 }
 
-func fetchMetadataCandidatesUncached(query, provider, mode string) ([]MetadataCandidate, bool) {
+func fetchMetadataCandidatesWithDiagnostics(query, provider, mode string) ([]MetadataCandidate, []MetadataProviderDiagnostic) {
+	cacheKey := metadataSearchCacheKey(query, provider, mode)
+	if cached, ok := getCachedMetadataCandidates(cacheKey); ok {
+		return cached, []MetadataProviderDiagnostic{{
+			Provider: "cache",
+			Query:    query,
+			Mode:     normalizedMetadataSearchMode(mode),
+			Status:   "ok",
+			Count:    len(cached),
+		}}
+	}
+
+	candidates, cacheable, diagnostics := fetchMetadataCandidatesUncached(query, provider, mode)
+	if cacheable {
+		setCachedMetadataCandidates(cacheKey, candidates)
+	}
+	return candidates, diagnostics
+}
+
+func fetchMetadataCandidatesUncached(query, provider, mode string) ([]MetadataCandidate, bool, []MetadataProviderDiagnostic) {
 	var candidates []MetadataCandidate
 	successfulRequests := 0
+	var diagnostics []MetadataProviderDiagnostic
 	mode = normalizedMetadataSearchMode(mode)
 	isbnQuery := normalizeISBN(query)
+	recordProviderResult := func(providerName string, requestQuery string, results []MetadataCandidate, err error) {
+		diagnostic := MetadataProviderDiagnostic{
+			Provider: providerName,
+			Query:    requestQuery,
+			Mode:     mode,
+			Count:    len(results),
+		}
+		if err != nil {
+			diagnostic.Status = "failed"
+			diagnostic.Error = err.Error()
+		} else if len(results) == 0 {
+			diagnostic.Status = "zero_results"
+			successfulRequests++
+		} else {
+			diagnostic.Status = "ok"
+			successfulRequests++
+		}
+		diagnostics = append(diagnostics, diagnostic)
+	}
 
 	// Search from specified provider or all providers
 	if provider == "" || provider == "google_books" {
@@ -424,8 +508,8 @@ func fetchMetadataCandidatesUncached(query, provider, mode string) ([]MetadataCa
 			googleQuery = "isbn:" + isbnQuery
 		}
 		googleResults, err := searchGoogleBooks(googleQuery)
+		recordProviderResult("google_books", googleQuery, googleResults, err)
 		if err == nil {
-			successfulRequests++
 			candidates = append(candidates, googleResults...)
 		}
 	}
@@ -438,45 +522,111 @@ func fetchMetadataCandidatesUncached(query, provider, mode string) ([]MetadataCa
 		} else {
 			openLibResults, err = searchOpenLibrary(query)
 		}
+		recordProviderResult("open_library", query, openLibResults, err)
 		if err == nil {
-			successfulRequests++
 			candidates = append(candidates, openLibResults...)
 		}
 	}
 
 	if provider == "" || provider == "bookbrainz" {
 		bookBrainzResults, err := searchBookBrainz(query)
+		recordProviderResult("bookbrainz", query, bookBrainzResults, err)
 		if err == nil {
-			successfulRequests++
 			candidates = append(candidates, bookBrainzResults...)
 		}
 	}
 
 	if provider == "" || provider == "library_of_congress" {
 		locResults, err := searchLibraryOfCongress(query)
+		recordProviderResult("library_of_congress", query, locResults, err)
 		if err == nil {
-			successfulRequests++
 			candidates = append(candidates, locResults...)
 		}
 	}
 
 	if provider == "" || provider == "wikidata" {
 		wikidataResults, err := searchWikidata(query)
+		recordProviderResult("wikidata", query, wikidataResults, err)
 		if err == nil {
-			successfulRequests++
 			candidates = append(candidates, wikidataResults...)
 		}
 	}
 
 	if provider == "" || provider == "internet_archive" {
 		archiveResults, err := searchInternetArchive(query)
+		recordProviderResult("internet_archive", query, archiveResults, err)
 		if err == nil {
-			successfulRequests++
 			candidates = append(candidates, archiveResults...)
 		}
 	}
 
-	return candidates, successfulRequests > 0
+	return candidates, successfulRequests > 0, diagnostics
+}
+
+func metadataDiagnosticsAllFailed(diagnostics []MetadataProviderDiagnostic) bool {
+	if len(diagnostics) == 0 {
+		return false
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Status != "failed" {
+			return false
+		}
+	}
+	return true
+}
+
+func metadataDiagnosticsSummary(diagnostics []MetadataProviderDiagnostic) string {
+	if len(diagnostics) == 0 {
+		return "Metadata lookup returned no provider diagnostics."
+	}
+
+	failures := make([]string, 0, len(diagnostics))
+	zeroResults := 0
+	for _, diagnostic := range diagnostics {
+		switch diagnostic.Status {
+		case "failed":
+			name := metadataProviderDisplayName(diagnostic.Provider)
+			if diagnostic.Error != "" {
+				failures = append(failures, fmt.Sprintf("%s: %s", name, diagnostic.Error))
+			} else {
+				failures = append(failures, fmt.Sprintf("%s failed", name))
+			}
+		case "zero_results":
+			zeroResults++
+		}
+	}
+
+	if len(failures) > 0 {
+		if len(failures) > 3 {
+			failures = append(failures[:3], fmt.Sprintf("%d more provider failures", len(failures)-3))
+		}
+		return "Metadata providers failed: " + strings.Join(failures, "; ")
+	}
+	if zeroResults == len(diagnostics) {
+		return "Metadata providers responded but returned no results."
+	}
+	return "Metadata lookup returned no candidates."
+}
+
+func metadataProviderDisplayName(provider string) string {
+	switch provider {
+	case "google_books":
+		return "Google Books"
+	case "open_library":
+		return "Open Library"
+	case "bookbrainz":
+		return "BookBrainz"
+	case "library_of_congress":
+		return "Library of Congress"
+	case "wikidata":
+		return "Wikidata"
+	case "internet_archive":
+		return "Internet Archive"
+	case "cache":
+		return "Cache"
+	default:
+		return humanizeKey(provider)
+	}
 }
 
 func metadataSearchCacheKey(query, provider, mode string) string {
