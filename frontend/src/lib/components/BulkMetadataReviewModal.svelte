@@ -96,7 +96,7 @@
 	let showLookupConfirm = $state(false);
 	let topMatchOnly = $state(false);
 	let applyMessage = $state('');
-	let includeCover = $state(true);
+	let coverSelections = $state<Record<string, boolean>>({});
 	let appliedBookIds = $state<Set<number>>(new Set());
 	let pollTimer: number | null = null;
 	let selectionTouched = false;
@@ -109,9 +109,9 @@
 			const candidates = candidatesForItem(item);
 			const selectedIndex = selectedMatchIndexes[item.book_id];
 			const metadata = selectedIndex >= 0 ? candidates[selectedIndex] : undefined;
-			return metadata ? { item, metadata } : null;
+			return metadata ? { item, metadata, selectedIndex } : null;
 		})
-		.filter((entry): entry is { item: LookupItem; metadata: MetadataCandidate } => entry !== null));
+		.filter((entry): entry is { item: LookupItem; metadata: MetadataCandidate; selectedIndex: number } => entry !== null));
 
 	function authors(value: string[] | undefined): string {
 		return value?.filter(Boolean).join(', ') || '-';
@@ -140,6 +140,53 @@
 	function candidatesForItem(item: LookupItem): MetadataCandidate[] {
 		if (item.matches?.length) return item.matches;
 		return item.match ? [item.match] : [];
+	}
+
+	function candidateCoverKey(bookId: number, index: number): string {
+		return `${bookId}:${index}`;
+	}
+
+	function shouldUpdateCover(bookId: number, index: number, candidate: MetadataCandidate): boolean {
+		if (!candidate.cover_url) return false;
+		return coverSelections[candidateCoverKey(bookId, index)] ?? true;
+	}
+
+	function setCandidateCover(bookId: number, index: number, value: boolean) {
+		coverSelections = {
+			...coverSelections,
+			[candidateCoverKey(bookId, index)]: value
+		};
+	}
+
+	function metadataWithSelectedCover(bookId: number, index: number, candidate: MetadataCandidate): MetadataCandidate {
+		return {
+			...candidate,
+			cover_url: shouldUpdateCover(bookId, index, candidate) ? candidate.cover_url : ''
+		};
+	}
+
+	function selectAllCovers() {
+		const next = { ...coverSelections };
+		for (const item of matchedItems) {
+			for (const [index, candidate] of candidatesForItem(item).entries()) {
+				if (candidate.cover_url) {
+					next[candidateCoverKey(item.book_id, index)] = true;
+				}
+			}
+		}
+		coverSelections = next;
+	}
+
+	function clearAllCovers() {
+		const next = { ...coverSelections };
+		for (const item of matchedItems) {
+			for (const [index, candidate] of candidatesForItem(item).entries()) {
+				if (candidate.cover_url) {
+					next[candidateCoverKey(item.book_id, index)] = false;
+				}
+			}
+		}
+		coverSelections = next;
 	}
 
 	function parseAuthors(value: string | string[] | undefined): string[] {
@@ -351,7 +398,7 @@
 		}
 	}
 
-	async function applySelections(entriesToApply: { item: LookupItem; metadata: MetadataCandidate }[]) {
+	async function applySelections(entriesToApply: { item: LookupItem; metadata: MetadataCandidate; selectedIndex: number }[]) {
 		const validItems = entriesToApply.filter((entry) => entry.metadata);
 		if (validItems.length === 0) return;
 		if (!confirmBulkAction({ action: 'apply metadata to', count: validItems.length })) return;
@@ -360,13 +407,11 @@
 		applyMessage = '';
 		let pendingJob: string | null = null;
 		try {
-			const payload = validItems.map(({ item, metadata }) => ({
+			const payload = validItems.map(({ item, metadata, selectedIndex }) => ({
 				book_id: item.book_id,
-				metadata: {
-					...metadata,
-					cover_url: includeCover ? metadata.cover_url : ''
-				}
+				metadata: metadataWithSelectedCover(item.book_id, selectedIndex, metadata)
 			}));
+			const includeCover = payload.some((entry) => !!entry.metadata.cover_url);
 
 			const endpoint = payload.length === 1 ? '/api/metadata/apply' : '/api/jobs/metadata-apply';
 			const body = payload.length === 1
@@ -477,7 +522,7 @@
 			<div class="flex h-72 items-center justify-center">
 				<div class="h-10 w-10 animate-spin rounded-full border-b-2 border-[var(--color-primary-500)]"></div>
 			</div>
-		{:else if !job}
+		{:else if !job && bookIds.length === 0 && pendingItems.length === 0}
 			<div class="px-6 py-12 text-center text-sm text-[var(--color-surface-text-muted)]">Unable to load this job.</div>
 		{:else}
 			<div class="border-b border-[var(--color-surface-border)] px-6 py-3">
@@ -490,10 +535,12 @@
 							<input type="checkbox" bind:checked={topMatchOnly} disabled={!!job || queueingLookup} class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)] disabled:opacity-50" />
 							Top match only
 						</label>
-						<label class="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)]">
-							<input type="checkbox" bind:checked={includeCover} class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]" />
-							Update covers
-						</label>
+						<button type="button" class="rounded-md border border-[var(--color-surface-border)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-base)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]" onclick={selectAllCovers}>
+							Select covers
+						</button>
+						<button type="button" class="rounded-md border border-[var(--color-surface-border)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-base)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]" onclick={clearAllCovers}>
+							Clear covers
+						</button>
 						{#if !job}
 							<button
 								type="button"
@@ -566,7 +613,7 @@
 												const candidates = candidatesForItem(item);
 												const selectedIndex = selectedMatchIndexes[item.book_id];
 												const metadata = selectedIndex >= 0 ? candidates[selectedIndex] : undefined;
-												if (metadata) applySelections([{ item, metadata }]);
+												if (metadata) applySelections([{ item, metadata, selectedIndex }]);
 											}}
 											disabled={applying || selectedMatchIndexes[item.book_id] === undefined}
 										>
@@ -605,10 +652,17 @@
 										{#if candidatesForItem(item).length > 0}
 											<div class="space-y-3">
 												{#each candidatesForItem(item) as candidate, index}
-													<button
-														type="button"
+													<div
+														role="button"
+														tabindex="0"
 														class="flex w-full gap-4 rounded-lg border p-3 text-left transition-colors {selectedMatchIndexes[item.book_id] === index ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10' : 'border-[var(--color-surface-border)] bg-[var(--color-surface-base)] hover:border-[var(--color-primary-500)]/60 hover:bg-[var(--color-surface-700)]'}"
 														onclick={() => selectCandidate(item.book_id, index)}
+														onkeydown={(event) => {
+															if (event.key === 'Enter' || event.key === ' ') {
+																event.preventDefault();
+																selectCandidate(item.book_id, index);
+															}
+														}}
 													>
 														<div class="h-28 w-20 shrink-0 overflow-hidden rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
 															{#if candidate.cover_url}
@@ -636,8 +690,20 @@
 																<div>Provider: {candidate.provider || '-'}</div>
 																<div>Pages: {candidate.page_count || '-'}</div>
 															</div>
+															<div class="mt-3 inline-flex items-center gap-2 text-sm text-[var(--color-surface-text)] {candidate.cover_url ? '' : 'opacity-50'}">
+																<input
+																	type="checkbox"
+																	checked={shouldUpdateCover(item.book_id, index, candidate)}
+																	disabled={!candidate.cover_url}
+																	onclick={(event) => event.stopPropagation()}
+																	onkeydown={(event) => event.stopPropagation()}
+																	onchange={(event) => setCandidateCover(item.book_id, index, (event.currentTarget as HTMLInputElement).checked)}
+																	class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)] disabled:opacity-50"
+																/>
+																<span>Update cover</span>
+															</div>
 														</div>
-													</button>
+													</div>
 												{/each}
 											</div>
 										{:else}

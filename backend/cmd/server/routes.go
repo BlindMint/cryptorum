@@ -651,23 +651,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Handle sorting
-	dir := "ASC"
-	if sortDir == "desc" {
-		dir = "DESC"
-	}
-	orderBy := "LOWER(COALESCE(bm.title, '')) " + dir + ", b.id " + dir
-	if sortBy == "random" {
-		orderBy = "RANDOM()"
-	} else if sortBy == "authors" {
-		orderBy = "LOWER(COALESCE(bm.authors, '')) " + dir + ", LOWER(COALESCE(bm.title, '')) ASC"
-	} else if sortBy == "added_at" {
-		orderBy = "b.added_at " + dir + ", b.id " + dir
-	} else if sortBy == "last_read" {
-		orderBy = "COALESCE(rp.updated_at, 0) " + dir + ", LOWER(COALESCE(bm.title, '')) ASC"
-	} else if sortBy == "series" {
-		orderBy = "CASE WHEN COALESCE(bm.series, '') = '' THEN 1 ELSE 0 END ASC, LOWER(COALESCE(bm.series, '')) " + dir + ", CASE WHEN COALESCE(bm.series_number, 0) = 0 THEN 1 ELSE 0 END ASC, bm.series_number " + dir + ", LOWER(COALESCE(bm.title, '')) ASC"
-	}
+	orderBy := bookListOrderBy(sortBy, sortDir)
 
 	queryLimit := limit
 	if !includeTotal {
@@ -910,24 +894,35 @@ func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
 		baseQuery += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	dir := "ASC"
-	if sortDir == "desc" {
-		dir = "DESC"
-	}
-	orderBy := "LOWER(COALESCE(bm.title, '')) " + dir + ", b.id " + dir
-	if sortBy == "random" {
-		orderBy = "RANDOM()"
-	} else if sortBy == "authors" {
-		orderBy = "LOWER(COALESCE(bm.authors, '')) " + dir + ", LOWER(COALESCE(bm.title, '')) ASC"
-	} else if sortBy == "added_at" {
-		orderBy = "b.added_at " + dir + ", b.id " + dir
-	} else if sortBy == "last_read" {
-		orderBy = "COALESCE(rp.updated_at, 0) " + dir + ", LOWER(COALESCE(bm.title, '')) ASC"
-	} else if sortBy == "series" {
-		orderBy = "CASE WHEN COALESCE(bm.series, '') = '' THEN 1 ELSE 0 END ASC, LOWER(COALESCE(bm.series, '')) " + dir + ", CASE WHEN COALESCE(bm.series_number, 0) = 0 THEN 1 ELSE 0 END ASC, bm.series_number " + dir + ", LOWER(COALESCE(bm.title, '')) ASC"
-	}
+	orderBy := bookListOrderBy(sortBy, sortDir)
 
 	return bookListQuery{baseQuery: baseQuery, args: args, orderBy: orderBy}
+}
+
+func bookListOrderBy(sortBy, sortDir string) string {
+	dir := "ASC"
+	if strings.EqualFold(sortDir, "desc") {
+		dir = "DESC"
+	}
+
+	titleSort := titleSortSQL()
+	orderBy := titleSort + " " + dir + ", b.id " + dir
+	switch sortBy {
+	case "random":
+		orderBy = "RANDOM()"
+	case "authors":
+		orderBy = authorsSortSQL() + " " + dir + ", " + titleSort + " ASC, b.id ASC"
+	case "added_at":
+		orderBy = "b.added_at " + dir + ", b.id " + dir
+	case "last_read":
+		orderBy = "COALESCE(rp.updated_at, 0) " + dir + ", " + titleSort + " ASC, b.id ASC"
+	case "series":
+		orderBy = "CASE WHEN COALESCE(bm.series, '') = '' THEN 1 ELSE 0 END ASC, " +
+			seriesSortSQL() + " " + dir + ", " +
+			"CASE WHEN COALESCE(bm.series_number, 0) = 0 THEN 1 ELSE 0 END ASC, " +
+			"bm.series_number " + dir + ", " + titleSort + " ASC, b.id ASC"
+	}
+	return orderBy
 }
 
 func getBookNavigationHandler(w http.ResponseWriter, r *http.Request) {

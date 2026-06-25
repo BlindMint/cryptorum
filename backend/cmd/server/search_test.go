@@ -147,6 +147,41 @@ func TestDefaultSearchSortIsRelevance(t *testing.T) {
 	}
 }
 
+func TestSearchTitleSortIgnoresLeadingPunctuation(t *testing.T) {
+	scored := []scoredBookSearchResult{
+		{result: SearchResult{ID: 1, Title: "Zoo"}},
+		{result: SearchResult{ID: 2, Title: "'Salem's Lot"}},
+		{result: SearchResult{ID: 3, Title: `"Trickle Down Theory" and "Tax Cuts for the Rich"`}},
+		{result: SearchResult{ID: 4, Title: "Apple"}},
+	}
+
+	sortScoredBookSearchResults(scored, "title", "asc")
+
+	got := []int64{scored[0].result.ID, scored[1].result.ID, scored[2].result.ID, scored[3].result.ID}
+	want := []int64{4, 2, 3, 1}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("title sort order = %#v, want %#v", got, want)
+		}
+	}
+}
+
+func TestNormalizedSortKeyIgnoresLeadingPunctuationOnly(t *testing.T) {
+	tests := map[string]string{
+		"'Salem's Lot": "salem's lot",
+		`"Trickle Down Theory" and "Tax Cuts for the Rich"`: `trickle down theory" and "tax cuts for the rich"`,
+		"  --Alpha": "alpha",
+		"Εxample":   "example",
+		"Нacking":   "hacking",
+	}
+
+	for input, want := range tests {
+		if got := normalizedSortKey(input); got != want {
+			t.Fatalf("normalizedSortKey(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestNormalizeSearchPagination(t *testing.T) {
 	tests := []struct {
 		name       string
