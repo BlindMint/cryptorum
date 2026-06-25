@@ -134,7 +134,15 @@ func canonicalAuthorOptionName(author string) string {
 }
 
 func normalizedAuthorSQLExpression(valueExpression string) string {
-	return "LOWER(REPLACE(REPLACE(" + valueExpression + ", '.', ''), ' ', ''))"
+	normalized := "LOWER(" + valueExpression + ")"
+	for _, char := range []string{
+		" ", ".", ",", "'", "\"", "`", "’", "‘", "“", "”",
+		"(", ")", "[", "]", "{", "}", "-", "–", "—", "_",
+		"/", "\\", ":", ";", "&", "+", "!",
+	} {
+		normalized = "REPLACE(" + normalized + ", " + sqlStringLiteral(char) + ", '')"
+	}
+	return normalized
 }
 
 func addAuthorFilterCondition(addFilterCondition func(string, ...interface{}), column string, author string) {

@@ -37,6 +37,11 @@
 		cover_updated_on?: number;
 	};
 
+	type MetadataSaveResponse = {
+		status?: string;
+		book?: any;
+	};
+
 	$effect(() => {
 		const bookId = $page.params.bookID;
 		if (bookId) {
@@ -116,7 +121,13 @@
 				saveError = `Failed to save: ${res.status} ${await res.text()}`;
 				return false;
 			}
-			await fetchBook();
+			const data = (await res.json()) as MetadataSaveResponse;
+			if (data.book) {
+				book = data.book;
+				initializeForm();
+			} else {
+				await fetchBook();
+			}
 			return true;
 		} catch (error) {
 			console.error('Failed to save metadata:', error);

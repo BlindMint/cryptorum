@@ -48,15 +48,16 @@ func (f *filterList) UnmarshalJSON(data []byte) error {
 }
 
 type bulkFilterRequest struct {
-	LibraryID  string     `json:"library_id"`
-	Author     filterList `json:"author"`
-	Series     filterList `json:"series"`
-	Genre      filterList `json:"genre"`
-	Tags       filterList `json:"tags"`
-	Format     filterList `json:"format"`
-	Status     filterList `json:"status"`
-	Query      string     `json:"q"`
-	FilterMode string     `json:"filter_mode"`
+	LibraryID       string     `json:"library_id"`
+	Author          filterList `json:"author"`
+	Series          filterList `json:"series"`
+	Genre           filterList `json:"genre"`
+	Tags            filterList `json:"tags"`
+	Format          filterList `json:"format"`
+	Status          filterList `json:"status"`
+	Query           string     `json:"q"`
+	FilterMode      string     `json:"filter_mode"`
+	ValueFilterMode string     `json:"value_filter_mode"`
 }
 
 func cleanFilterValues(values []string, splitComma bool) []string {
@@ -96,6 +97,74 @@ func addHierarchicalJSONFilterCondition(
 	)
 }
 
+type sqlFilterGroup struct {
+	condition string
+	args      []interface{}
+}
+
+func normalizeAcrossFilterMode(mode string) string {
+	mode = strings.ToUpper(strings.TrimSpace(mode))
+	if mode == "OR" || mode == "NOT" {
+		return mode
+	}
+	return "AND"
+}
+
+func normalizeValueFilterMode(mode string) string {
+	mode = strings.ToUpper(strings.TrimSpace(mode))
+	if mode == "AND" || mode == "NOT" {
+		return mode
+	}
+	return "OR"
+}
+
+func buildFilterGroup(valueFilterMode string, build func(add func(string, ...interface{}))) (sqlFilterGroup, bool) {
+	var conditions []string
+	var args []interface{}
+	add := func(condition string, values ...interface{}) {
+		conditions = append(conditions, condition)
+		args = append(args, values...)
+	}
+
+	build(add)
+	if len(conditions) == 0 {
+		return sqlFilterGroup{}, false
+	}
+
+	mode := normalizeValueFilterMode(valueFilterMode)
+	switch mode {
+	case "AND":
+		return sqlFilterGroup{condition: "(" + strings.Join(conditions, " AND ") + ")", args: args}, true
+	case "NOT":
+		return sqlFilterGroup{condition: "NOT (" + strings.Join(conditions, " OR ") + ")", args: args}, true
+	default:
+		return sqlFilterGroup{condition: "(" + strings.Join(conditions, " OR ") + ")", args: args}, true
+	}
+}
+
+func combineFilterGroups(groups []sqlFilterGroup, filterMode string) (string, []interface{}) {
+	if len(groups) == 0 {
+		return "", nil
+	}
+
+	conditions := make([]string, 0, len(groups))
+	args := make([]interface{}, 0)
+	for _, group := range groups {
+		conditions = append(conditions, group.condition)
+		args = append(args, group.args...)
+	}
+
+	mode := normalizeAcrossFilterMode(filterMode)
+	switch mode {
+	case "OR":
+		return "(" + strings.Join(conditions, " OR ") + ")", args
+	case "NOT":
+		return "NOT (" + strings.Join(conditions, " OR ") + ")", args
+	default:
+		return "(" + strings.Join(conditions, " AND ") + ")", args
+	}
+}
+
 func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []interface{}) {
 	query := `
 		SELECT b.id
@@ -105,12 +174,12 @@ func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []inter
 		LEFT JOIN reading_progress rp ON b.id = rp.book_id`
 	var args []interface{}
 	var conditions []string
-	var filterConditions []string
-	var filterArgs []interface{}
+	var filterGroups []sqlFilterGroup
 
-	addFilterCondition := func(condition string, values ...interface{}) {
-		filterConditions = append(filterConditions, condition)
-		filterArgs = append(filterArgs, values...)
+	addFilterGroup := func(build func(add func(string, ...interface{}))) {
+		if group, ok := buildFilterGroup(req.ValueFilterMode, build); ok {
+			filterGroups = append(filterGroups, group)
+		}
 	}
 
 	if req.LibraryID != "" {
@@ -121,27 +190,39 @@ func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []inter
 		conditions = append(conditions, "l.owner_user_id = ?")
 		args = append(args, user.ID)
 	}
-	for _, value := range req.Author {
-		addAuthorFilterCondition(addFilterCondition, "bm.authors", value)
-	}
-	for _, value := range req.Series {
-		addFilterCondition("COALESCE(bm.series, '') = ?", value)
-	}
-	for _, value := range cleanFilterValues(req.Genre, true) {
-		addHierarchicalJSONFilterCondition(addFilterCondition, "bm.genres", value)
-	}
-	for _, value := range cleanFilterValues(req.Tags, true) {
-		addHierarchicalJSONFilterCondition(addFilterCondition, "bm.tags", value)
-	}
-	for _, value := range req.Format {
-		format := strings.ToLower(strings.TrimSpace(value))
-		if format != "" {
-			addFilterCondition("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", format)
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range req.Author {
+			addAuthorFilterCondition(add, "bm.authors", value)
 		}
-	}
-	for _, value := range req.Status {
-		addFilterCondition("COALESCE(rp.status, 'unread') = ?", value)
-	}
+	})
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range req.Series {
+			add("COALESCE(bm.series, '') = ?", value)
+		}
+	})
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range cleanFilterValues(req.Genre, true) {
+			addHierarchicalJSONFilterCondition(add, "bm.genres", value)
+		}
+	})
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range cleanFilterValues(req.Tags, true) {
+			addHierarchicalJSONFilterCondition(add, "bm.tags", value)
+		}
+	})
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range req.Format {
+			format := strings.ToLower(strings.TrimSpace(value))
+			if format != "" {
+				add("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", format)
+			}
+		}
+	})
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range req.Status {
+			add("COALESCE(rp.status, 'unread') = ?", value)
+		}
+	})
 	if strings.TrimSpace(req.Query) != "" {
 		searchText := `LOWER(
 			COALESCE(bm.title, '') || ' ' ||
@@ -156,26 +237,14 @@ func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []inter
 			` + activeFileSearchTextSQL + `
 		)`
 		for _, token := range searchTokens(req.Query) {
-			addFilterCondition(searchText+" LIKE ?", "%"+token+"%")
+			conditions = append(conditions, searchText+" LIKE ?")
+			args = append(args, "%"+token+"%")
 		}
 	}
 
-	filterMode := strings.ToUpper(req.FilterMode)
-	if filterMode != "OR" && filterMode != "NOT" {
-		filterMode = "AND"
-	}
-	if len(filterConditions) > 0 {
-		switch filterMode {
-		case "OR":
-			conditions = append(conditions, "("+strings.Join(filterConditions, " OR ")+")")
-			args = append(args, filterArgs...)
-		case "NOT":
-			conditions = append(conditions, "NOT ("+strings.Join(filterConditions, " OR ")+")")
-			args = append(args, filterArgs...)
-		default:
-			conditions = append(conditions, filterConditions...)
-			args = append(args, filterArgs...)
-		}
+	if filterCondition, filterArgs := combineFilterGroups(filterGroups, req.FilterMode); filterCondition != "" {
+		conditions = append(conditions, filterCondition)
+		args = append(args, filterArgs...)
 	}
 
 	if len(conditions) > 0 {
@@ -449,15 +518,14 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	language := r.URL.Query().Get("language")
 	pubDate := r.URL.Query().Get("pub_date")
 	filterMode := strings.ToUpper(r.URL.Query().Get("filter_mode"))
+	valueFilterMode := r.URL.Query().Get("value_filter_mode")
 	sortBy := r.URL.Query().Get("sort")
 	sortDir := strings.ToLower(r.URL.Query().Get("sort_dir"))
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 	discoveryOnly := r.URL.Query().Get("discovery") == "true"
 	includeTotal := r.URL.Query().Get("include_total") != "false"
-	if filterMode != "OR" && filterMode != "NOT" {
-		filterMode = "AND"
-	}
+	filterMode = normalizeAcrossFilterMode(filterMode)
 
 	// Default limit of 50 for lazy loading
 	limit := 50
@@ -488,8 +556,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 
 	var args []interface{}
 	var conditions []string
-	var filterConditions []string
-	var filterArgs []interface{}
+	var filterGroups []sqlFilterGroup
 
 	queryValues := func(key string, splitComma bool) []string {
 		values := r.URL.Query()[key]
@@ -513,9 +580,10 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		return cleaned
 	}
 
-	addFilterCondition := func(condition string, values ...interface{}) {
-		filterConditions = append(filterConditions, condition)
-		filterArgs = append(filterArgs, values...)
+	addFilterGroup := func(build func(add func(string, ...interface{}))) {
+		if group, ok := buildFilterGroup(valueFilterMode, build); ok {
+			filterGroups = append(filterGroups, group)
+		}
 	}
 
 	if libraryID != "" {
@@ -533,9 +601,11 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if status != "" {
-		for _, value := range queryValues("status", false) {
-			addFilterCondition("COALESCE(rp.status, 'unread') = ?", value)
-		}
+		addFilterGroup(func(add func(string, ...interface{})) {
+			for _, value := range queryValues("status", false) {
+				add("COALESCE(rp.status, 'unread') = ?", value)
+			}
+		})
 	}
 
 	if searchQuery != "" {
@@ -552,71 +622,79 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 			` + activeFileSearchTextSQL + `
 		)`
 		for _, token := range searchTokens(searchQuery) {
-			addFilterCondition(searchText+" LIKE ?", "%"+token+"%")
+			conditions = append(conditions, searchText+" LIKE ?")
+			args = append(args, "%"+token+"%")
 		}
 	}
 
 	// Author filter - searches in JSON authors array
 	if author != "" {
-		for _, value := range queryValues("author", false) {
-			addAuthorFilterCondition(addFilterCondition, "bm.authors", value)
-		}
+		addFilterGroup(func(add func(string, ...interface{})) {
+			for _, value := range queryValues("author", false) {
+				addAuthorFilterCondition(add, "bm.authors", value)
+			}
+		})
 	}
 
 	// Series filter
 	if series != "" {
-		for _, value := range queryValues("series", false) {
-			addFilterCondition("COALESCE(bm.series, '') = ?", value)
-		}
+		addFilterGroup(func(add func(string, ...interface{})) {
+			for _, value := range queryValues("series", false) {
+				add("COALESCE(bm.series, '') = ?", value)
+			}
+		})
 	}
 
 	// Genre filter
 	if genre != "" {
-		for _, value := range queryValues("genre", true) {
-			addHierarchicalJSONFilterCondition(addFilterCondition, "bm.genres", value)
-		}
+		addFilterGroup(func(add func(string, ...interface{})) {
+			for _, value := range queryValues("genre", true) {
+				addHierarchicalJSONFilterCondition(add, "bm.genres", value)
+			}
+		})
 	}
 
 	// Tags filter
 	if tags != "" {
-		for _, value := range queryValues("tags", true) {
-			addHierarchicalJSONFilterCondition(addFilterCondition, "bm.tags", value)
-		}
+		addFilterGroup(func(add func(string, ...interface{})) {
+			for _, value := range queryValues("tags", true) {
+				addHierarchicalJSONFilterCondition(add, "bm.tags", value)
+			}
+		})
 	}
 
 	if format != "" {
-		for _, value := range queryValues("format", false) {
-			addFilterCondition("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", strings.ToLower(value))
-		}
+		addFilterGroup(func(add func(string, ...interface{})) {
+			for _, value := range queryValues("format", false) {
+				add("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", strings.ToLower(value))
+			}
+		})
 	}
 
 	// Publisher filter
 	if publisher != "" {
-		addFilterCondition("COALESCE(bm.publisher, '') = ?", publisher)
+		addFilterGroup(func(add func(string, ...interface{})) {
+			add("COALESCE(bm.publisher, '') = ?", publisher)
+		})
 	}
 
 	// Language filter
 	if language != "" {
-		addFilterCondition("COALESCE(bm.language, '') = ?", language)
+		addFilterGroup(func(add func(string, ...interface{})) {
+			add("COALESCE(bm.language, '') = ?", language)
+		})
 	}
 
 	// Publication date filter (exact match on pub_date field)
 	if pubDate != "" {
-		addFilterCondition("COALESCE(bm.pub_date, '') = ?", pubDate)
+		addFilterGroup(func(add func(string, ...interface{})) {
+			add("COALESCE(bm.pub_date, '') = ?", pubDate)
+		})
 	}
 
-	if len(filterConditions) > 0 {
-		switch filterMode {
-		case "OR":
-			conditions = append(conditions, "("+strings.Join(filterConditions, " OR ")+")")
-			args = append(args, filterArgs...)
-		case "NOT":
-			conditions = append(conditions, "NOT ("+strings.Join(filterConditions, " OR ")+")")
-			args = append(args, filterArgs...)
-		default:
-			conditions = append(conditions, filterConditions...)
-			args = append(args, filterArgs...)
-		}
+	if filterCondition, filterArgs := combineFilterGroups(filterGroups, filterMode); filterCondition != "" {
+		conditions = append(conditions, filterCondition)
+		args = append(args, filterArgs...)
 	}
 
 	if len(conditions) > 0 {
@@ -745,12 +823,11 @@ func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
 	language := r.URL.Query().Get("language")
 	pubDate := r.URL.Query().Get("pub_date")
 	filterMode := strings.ToUpper(r.URL.Query().Get("filter_mode"))
+	valueFilterMode := r.URL.Query().Get("value_filter_mode")
 	sortBy := r.URL.Query().Get("sort")
 	sortDir := strings.ToLower(r.URL.Query().Get("sort_dir"))
 	discoveryOnly := r.URL.Query().Get("discovery") == "true"
-	if filterMode != "OR" && filterMode != "NOT" {
-		filterMode = "AND"
-	}
+	filterMode = normalizeAcrossFilterMode(filterMode)
 
 	baseQuery := `
 		FROM book b
@@ -766,8 +843,7 @@ func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
 
 	var args []interface{}
 	var conditions []string
-	var filterConditions []string
-	var filterArgs []interface{}
+	var filterGroups []sqlFilterGroup
 
 	queryValues := func(key string, splitComma bool) []string {
 		values := r.URL.Query()[key]
@@ -791,9 +867,10 @@ func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
 		return cleaned
 	}
 
-	addFilterCondition := func(condition string, values ...interface{}) {
-		filterConditions = append(filterConditions, condition)
-		filterArgs = append(filterArgs, values...)
+	addFilterGroup := func(build func(add func(string, ...interface{}))) {
+		if group, ok := buildFilterGroup(valueFilterMode, build); ok {
+			filterGroups = append(filterGroups, group)
+		}
 	}
 
 	if libraryID != "" {
@@ -811,9 +888,11 @@ func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
 	}
 
 	if status != "" {
-		for _, value := range queryValues("status", false) {
-			addFilterCondition("COALESCE(rp.status, 'unread') = ?", value)
-		}
+		addFilterGroup(func(add func(string, ...interface{})) {
+			for _, value := range queryValues("status", false) {
+				add("COALESCE(rp.status, 'unread') = ?", value)
+			}
+		})
 	}
 
 	if searchQuery != "" {
@@ -830,64 +909,72 @@ func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
 			` + activeFileSearchTextSQL + `
 		)`
 		for _, token := range searchTokens(searchQuery) {
-			addFilterCondition(searchText+" LIKE ?", "%"+token+"%")
+			conditions = append(conditions, searchText+" LIKE ?")
+			args = append(args, "%"+token+"%")
 		}
 	}
 
 	if author != "" {
-		for _, value := range queryValues("author", false) {
-			addAuthorFilterCondition(addFilterCondition, "bm.authors", value)
-		}
+		addFilterGroup(func(add func(string, ...interface{})) {
+			for _, value := range queryValues("author", false) {
+				addAuthorFilterCondition(add, "bm.authors", value)
+			}
+		})
 	}
 
 	if series != "" {
-		for _, value := range queryValues("series", false) {
-			addFilterCondition("COALESCE(bm.series, '') = ?", value)
-		}
+		addFilterGroup(func(add func(string, ...interface{})) {
+			for _, value := range queryValues("series", false) {
+				add("COALESCE(bm.series, '') = ?", value)
+			}
+		})
 	}
 
 	if genre != "" {
-		for _, value := range queryValues("genre", true) {
-			addHierarchicalJSONFilterCondition(addFilterCondition, "bm.genres", value)
-		}
+		addFilterGroup(func(add func(string, ...interface{})) {
+			for _, value := range queryValues("genre", true) {
+				addHierarchicalJSONFilterCondition(add, "bm.genres", value)
+			}
+		})
 	}
 
 	if tags != "" {
-		for _, value := range queryValues("tags", true) {
-			addHierarchicalJSONFilterCondition(addFilterCondition, "bm.tags", value)
-		}
+		addFilterGroup(func(add func(string, ...interface{})) {
+			for _, value := range queryValues("tags", true) {
+				addHierarchicalJSONFilterCondition(add, "bm.tags", value)
+			}
+		})
 	}
 
 	if format != "" {
-		for _, value := range queryValues("format", false) {
-			addFilterCondition("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", strings.ToLower(value))
-		}
+		addFilterGroup(func(add func(string, ...interface{})) {
+			for _, value := range queryValues("format", false) {
+				add("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", strings.ToLower(value))
+			}
+		})
 	}
 
 	if publisher != "" {
-		addFilterCondition("COALESCE(bm.publisher, '') = ?", publisher)
+		addFilterGroup(func(add func(string, ...interface{})) {
+			add("COALESCE(bm.publisher, '') = ?", publisher)
+		})
 	}
 
 	if language != "" {
-		addFilterCondition("COALESCE(bm.language, '') = ?", language)
+		addFilterGroup(func(add func(string, ...interface{})) {
+			add("COALESCE(bm.language, '') = ?", language)
+		})
 	}
 
 	if pubDate != "" {
-		addFilterCondition("COALESCE(bm.pub_date, '') = ?", pubDate)
+		addFilterGroup(func(add func(string, ...interface{})) {
+			add("COALESCE(bm.pub_date, '') = ?", pubDate)
+		})
 	}
 
-	if len(filterConditions) > 0 {
-		switch filterMode {
-		case "OR":
-			conditions = append(conditions, "("+strings.Join(filterConditions, " OR ")+")")
-			args = append(args, filterArgs...)
-		case "NOT":
-			conditions = append(conditions, "NOT ("+strings.Join(filterConditions, " OR ")+")")
-			args = append(args, filterArgs...)
-		default:
-			conditions = append(conditions, filterConditions...)
-			args = append(args, filterArgs...)
-		}
+	if filterCondition, filterArgs := combineFilterGroups(filterGroups, filterMode); filterCondition != "" {
+		conditions = append(conditions, filterCondition)
+		args = append(args, filterArgs...)
 	}
 
 	if len(conditions) > 0 {
@@ -995,58 +1082,41 @@ func getBookNavigationHandler(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, navigationResponse{BookID: &targetID, Index: targetIndex, Total: len(bookIDs)})
 }
 
-func getBookHandler(w http.ResponseWriter, r *http.Request) {
-	bookID := chi.URLParam(r, "bookID")
-	current := getUserFromContext(r.Context())
-	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
-	if err != nil {
-		errorResponse(w, http.StatusBadRequest, "Invalid book ID")
-		return
-	}
-	allowed, err := canAccessBook(current, bookIDInt)
-	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
-		return
-	}
-	if !allowed {
-		errorResponse(w, http.StatusForbidden, "Permission denied")
-		return
-	}
+type BookDetail struct {
+	ID                  int64    `json:"id"`
+	LibraryID           int64    `json:"library_id"`
+	LibraryName         string   `json:"library_name"`
+	AddedAt             int64    `json:"added_at"`
+	Title               string   `json:"title"`
+	Authors             string   `json:"authors"`
+	Series              string   `json:"series"`
+	SeriesNumber        float64  `json:"series_number"`
+	SeriesNumberDisplay string   `json:"series_number_display"`
+	Publisher           string   `json:"publisher"`
+	PubDate             string   `json:"pub_date"`
+	Description         string   `json:"description"`
+	CoverPath           string   `json:"cover_path"`
+	CoverSource         string   `json:"cover_source"`
+	CoverUpdatedOn      int64    `json:"cover_updated_on"`
+	Rating              float64  `json:"rating"`
+	Genres              string   `json:"genres"`
+	Tags                string   `json:"tags"`
+	ISBN                string   `json:"isbn"`
+	ASIN                string   `json:"asin"`
+	Language            string   `json:"language"`
+	PageCount           int      `json:"page_count"`
+	ComicSpreadFallback string   `json:"comic_spread_fallback"`
+	Status              string   `json:"status"`
+	Percent             float64  `json:"percent"`
+	SpeedReaderPercent  float64  `json:"speed_reader_percent"`
+	Opened              bool     `json:"opened"`
+	LibraryPaths        []string `json:"library_paths"`
+}
 
-	type BookDetail struct {
-		ID                  int64    `json:"id"`
-		LibraryID           int64    `json:"library_id"`
-		LibraryName         string   `json:"library_name"`
-		AddedAt             int64    `json:"added_at"`
-		Title               string   `json:"title"`
-		Authors             string   `json:"authors"`
-		Series              string   `json:"series"`
-		SeriesNumber        float64  `json:"series_number"`
-		SeriesNumberDisplay string   `json:"series_number_display"`
-		Publisher           string   `json:"publisher"`
-		PubDate             string   `json:"pub_date"`
-		Description         string   `json:"description"`
-		CoverPath           string   `json:"cover_path"`
-		CoverSource         string   `json:"cover_source"`
-		CoverUpdatedOn      int64    `json:"cover_updated_on"`
-		Rating              float64  `json:"rating"`
-		Genres              string   `json:"genres"`
-		Tags                string   `json:"tags"`
-		ISBN                string   `json:"isbn"`
-		ASIN                string   `json:"asin"`
-		Language            string   `json:"language"`
-		PageCount           int      `json:"page_count"`
-		ComicSpreadFallback string   `json:"comic_spread_fallback"`
-		Status              string   `json:"status"`
-		Percent             float64  `json:"percent"`
-		SpeedReaderPercent  float64  `json:"speed_reader_percent"`
-		Opened              bool     `json:"opened"`
-		LibraryPaths        []string `json:"library_paths"`
-	}
-
+func fetchBookDetail(bookID int64) (BookDetail, error) {
 	var book BookDetail
 	var opened int
-	err = appDB.QueryRow(`
+	err := appDB.QueryRow(`
 		SELECT b.id, b.library_id, b.added_at,
 		       COALESCE(l.name, '') as library_name,
 		       COALESCE(bm.title, '') as title,
@@ -1086,8 +1156,7 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if err != nil {
-		errorResponse(w, http.StatusNotFound, "Book not found")
-		return
+		return book, err
 	}
 
 	pathRows, err := appDB.Query(`SELECT path FROM library_path WHERE library_id = ? ORDER BY length(path) DESC`, book.LibraryID)
@@ -1100,7 +1169,34 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else {
-		slog.Warn("Failed to fetch library paths for book detail", "book_id", bookIDInt, "library_id", book.LibraryID, "error", err)
+		slog.Warn("Failed to fetch library paths for book detail", "book_id", bookID, "library_id", book.LibraryID, "error", err)
+	}
+
+	return book, nil
+}
+
+func getBookHandler(w http.ResponseWriter, r *http.Request) {
+	bookID := chi.URLParam(r, "bookID")
+	current := getUserFromContext(r.Context())
+	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid book ID")
+		return
+	}
+	allowed, err := canAccessBook(current, bookIDInt)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
+		return
+	}
+	if !allowed {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
+	book, err := fetchBookDetail(bookIDInt)
+	if err != nil {
+		errorResponse(w, http.StatusNotFound, "Book not found")
+		return
 	}
 
 	jsonResponse(w, http.StatusOK, book)
@@ -1153,6 +1249,9 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
+	req.Genres = uniqueMetadataStringList(req.Genres)
+	req.Tags = uniqueMetadataStringList(req.Tags)
 
 	authorsJSON, _ := json.Marshal(req.Authors)
 	genresJSON, _ := json.Marshal(req.Genres)
@@ -1210,7 +1309,13 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+	updatedBook, err := fetchBookDetail(bookIDInt)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to load updated book metadata")
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]any{"status": "ok", "book": updatedBook})
 }
 
 func updateBookStatusHandler(w http.ResponseWriter, r *http.Request) {
@@ -2891,15 +2996,16 @@ func searchBooksHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filters := BookSearchFilters{
-		Author:     searchQueryValues(r, "author", false),
-		Series:     searchQueryValues(r, "series", false),
-		Genre:      searchQueryValues(r, "genre", true),
-		Tags:       searchQueryValues(r, "tags", true),
-		Status:     searchQueryValues(r, "status", false),
-		Format:     searchQueryValues(r, "format", false),
-		FilterMode: r.URL.Query().Get("filter_mode"),
-		Sort:       r.URL.Query().Get("sort"),
-		SortDir:    r.URL.Query().Get("sort_dir"),
+		Author:          searchQueryValues(r, "author", false),
+		Series:          searchQueryValues(r, "series", false),
+		Genre:           searchQueryValues(r, "genre", true),
+		Tags:            searchQueryValues(r, "tags", true),
+		Status:          searchQueryValues(r, "status", false),
+		Format:          searchQueryValues(r, "format", false),
+		FilterMode:      r.URL.Query().Get("filter_mode"),
+		ValueFilterMode: r.URL.Query().Get("value_filter_mode"),
+		Sort:            r.URL.Query().Get("sort"),
+		SortDir:         r.URL.Query().Get("sort_dir"),
 	}
 	results, err := searchBooks(query, libraryID, current, filters, offset, limit)
 	if err != nil {
@@ -3071,40 +3177,157 @@ func getFormatMetadataOptions(current *AppUser) ([]metadataOption, error) {
 	return sortedMetadataOptions(counts), rows.Err()
 }
 
+func buildScopedBookIDSubquery(r *http.Request, current *AppUser) (string, []interface{}) {
+	listQuery := buildBookListQuery(r, current)
+	return "SELECT DISTINCT b.id " + listQuery.baseQuery, listQuery.args
+}
+
+func getJSONMetadataOptionsForScope(column string, hierarchical bool, scopedBookIDsSQL string, scopedArgs []interface{}) ([]metadataOption, error) {
+	rows, err := appDB.Query(fmt.Sprintf(`
+		SELECT bm.%s, COUNT(*) as book_count
+		FROM book_metadata bm
+		JOIN (%s) scoped_books ON scoped_books.id = bm.book_id
+		WHERE bm.%s IS NOT NULL AND bm.%s != '[]' AND bm.%s != ''
+		GROUP BY bm.%s
+	`, column, scopedBookIDsSQL, column, column, column, column), scopedArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var jsonStr string
+		var bookCount int64
+		if err := rows.Scan(&jsonStr, &bookCount); err != nil {
+			continue
+		}
+
+		var values []string
+		if err := json.Unmarshal([]byte(jsonStr), &values); err != nil {
+			continue
+		}
+
+		prefixesInRow := make(map[string]bool)
+		for _, value := range values {
+			if !hierarchical {
+				value = strings.TrimSpace(value)
+				key := normalizedAuthorMatchKey(value)
+				if key != "" && !prefixesInRow[key] {
+					prefixesInRow[key] = true
+					counts[canonicalAuthorOptionName(value)] += bookCount
+				}
+				continue
+			}
+
+			parts := strings.Split(value, ".")
+			for i := range parts {
+				prefix := strings.TrimSpace(strings.Join(parts[:i+1], "."))
+				if prefix == "" || prefixesInRow[prefix] {
+					continue
+				}
+				prefixesInRow[prefix] = true
+				counts[prefix] += bookCount
+			}
+		}
+	}
+
+	return sortedMetadataOptions(counts), rows.Err()
+}
+
+func getScalarMetadataOptionsForScope(column string, scopedBookIDsSQL string, scopedArgs []interface{}) ([]metadataOption, error) {
+	rows, err := appDB.Query(fmt.Sprintf(`
+		SELECT bm.%s, COUNT(*) as book_count
+		FROM book_metadata bm
+		JOIN (%s) scoped_books ON scoped_books.id = bm.book_id
+		WHERE bm.%s IS NOT NULL AND bm.%s != ''
+		GROUP BY bm.%s
+	`, column, scopedBookIDsSQL, column, column, column), scopedArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var name string
+		var bookCount int64
+		if err := rows.Scan(&name, &bookCount); err != nil {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if name != "" {
+			counts[name] += bookCount
+		}
+	}
+
+	return sortedMetadataOptions(counts), rows.Err()
+}
+
+func getFormatMetadataOptionsForScope(scopedBookIDsSQL string, scopedArgs []interface{}) ([]metadataOption, error) {
+	rows, err := appDB.Query(`
+		SELECT LOWER(bf.format), COUNT(DISTINCT bf.book_id) as book_count
+		FROM book_file bf
+		JOIN (`+scopedBookIDsSQL+`) scoped_books ON scoped_books.id = bf.book_id
+		WHERE bf.missing_at IS NULL AND bf.format IS NOT NULL AND bf.format != ''
+		GROUP BY LOWER(bf.format)
+	`, scopedArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var name string
+		var bookCount int64
+		if err := rows.Scan(&name, &bookCount); err != nil {
+			continue
+		}
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" {
+			counts[name] += bookCount
+		}
+	}
+
+	return sortedMetadataOptions(counts), rows.Err()
+}
+
 func getFilterOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	current := getUserFromContext(r.Context())
+	scopedBookIDsSQL, scopedArgs := buildScopedBookIDSubquery(r, current)
 
-	authors, err := getJSONMetadataOptions("authors", false, current)
+	authors, err := getJSONMetadataOptionsForScope("authors", false, scopedBookIDsSQL, scopedArgs)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch authors")
 		return
 	}
-	series, err := getScalarMetadataOptions("series", current)
+	series, err := getScalarMetadataOptionsForScope("series", scopedBookIDsSQL, scopedArgs)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch series")
 		return
 	}
-	genres, err := getJSONMetadataOptions("genres", true, current)
+	genres, err := getJSONMetadataOptionsForScope("genres", true, scopedBookIDsSQL, scopedArgs)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch genres")
 		return
 	}
-	tags, err := getJSONMetadataOptions("tags", true, current)
+	tags, err := getJSONMetadataOptionsForScope("tags", true, scopedBookIDsSQL, scopedArgs)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch tags")
 		return
 	}
-	publishers, err := getScalarMetadataOptions("publisher", current)
+	publishers, err := getScalarMetadataOptionsForScope("publisher", scopedBookIDsSQL, scopedArgs)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch publishers")
 		return
 	}
-	languages, err := getScalarMetadataOptions("language", current)
+	languages, err := getScalarMetadataOptionsForScope("language", scopedBookIDsSQL, scopedArgs)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch languages")
 		return
 	}
-	formats, err := getFormatMetadataOptions(current)
+	formats, err := getFormatMetadataOptionsForScope(scopedBookIDsSQL, scopedArgs)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch formats")
 		return
