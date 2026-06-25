@@ -281,6 +281,18 @@ function splitCommaList(value: unknown): string[] {
 	return Array.isArray(value) ? value : [];
 }
 
+function uniqueMetadataList(values: string[]): string[] {
+	const unique: string[] = [];
+	const seen = new Set<string>();
+	for (const value of values) {
+		const key = value.toLowerCase();
+		if (seen.has(key)) continue;
+		seen.add(key);
+		unique.push(value);
+	}
+	return unique;
+}
+
 export function buildMetadataPayload(editForm: MetadataEditForm, authorsList: string[]) {
 	return {
 		title: editForm.title,
@@ -292,8 +304,8 @@ export function buildMetadataPayload(editForm: MetadataEditForm, authorsList: st
 		description: editForm.description,
 		rating: starsToRating(editForm.rating),
 		status: editForm.status,
-		genres: splitCommaList(editForm.genres),
-		tags: splitCommaList(editForm.tags),
+		genres: uniqueMetadataList(splitCommaList(editForm.genres)),
+		tags: uniqueMetadataList(splitCommaList(editForm.tags)),
 		isbn: editForm.isbn,
 		asin: editForm.asin,
 		language: editForm.language,

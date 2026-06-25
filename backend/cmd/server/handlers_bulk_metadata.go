@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -388,21 +387,10 @@ func bulkUpdateBookJSONList(tx sqlExecer, bookID int64, column string, addValues
 		}
 	}
 	for _, value := range cleanedStringList(addValues) {
-		if !slices.ContainsFunc(next, func(existing string) bool { return strings.EqualFold(existing, value) }) {
-			next = append(next, value)
-		}
+		next = uniqueMetadataStringList(append(next, value))
 	}
+	next = uniqueMetadataStringList(next)
 	valuesJSON, _ := json.Marshal(next)
 	_, err := tx.Exec(`UPDATE book_metadata SET `+column+` = ? WHERE book_id = ?`, string(valuesJSON), bookID)
 	return err
-}
-
-func cleanedStringList(values []string) []string {
-	cleaned := make([]string, 0, len(values))
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			cleaned = append(cleaned, trimmed)
-		}
-	}
-	return cleaned
 }

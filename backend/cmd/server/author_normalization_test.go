@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"cryptorum/internal/db"
+)
 
 func TestNormalizedAuthorMatchKeyTreatsInitialVariantsAsEquivalent(t *testing.T) {
 	inputs := []string{"J. P. Cooper", "J.P. Cooper", "JP Cooper", "J P Cooper"}
@@ -96,5 +100,27 @@ func TestAuthorNamesMatch(t *testing.T) {
 	}
 	if authorNamesMatch("J.P. Cooper", "Jane Cooper") {
 		t.Fatal("expected distinct names not to match")
+	}
+}
+
+func TestNormalizedAuthorSQLExpressionRemovesDisplayPunctuation(t *testing.T) {
+	previousDB := appDB
+	testDB, err := db.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create test db: %v", err)
+	}
+	appDB = testDB
+	t.Cleanup(func() {
+		_ = testDB.Close()
+		appDB = previousDB
+	})
+
+	expression := normalizedAuthorSQLExpression(sqlStringLiteral("Advanced Web Attacks and Exploitation (AWAE)"))
+	var got string
+	if err := appDB.QueryRow("SELECT " + expression).Scan(&got); err != nil {
+		t.Fatalf("evaluate normalized author SQL expression: %v", err)
+	}
+	if want := normalizedAuthorMatchKey("Advanced Web Attacks and Exploitation (AWAE)"); got != want {
+		t.Fatalf("SQL normalized author = %q, want %q", got, want)
 	}
 }

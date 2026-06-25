@@ -2,8 +2,10 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { onDestroy, onMount } from 'svelte';
+	import { showFormatOnCover, getFormatColor } from '$lib/stores';
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
+	import { getBookReaderHref, isAudioFormat } from '$lib/utils/book-formats';
 	import {
 		getBookDetailContextUrl,
 		getInlineMetadataEditUrl,
@@ -11,6 +13,7 @@
 		startMetadataEditSession
 	} from '$lib/utils/metadata-edit-session';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
+	import FilterPanel from '$lib/components/FilterPanel.svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
 	import BulkMetadataEditModal from '$lib/components/BulkMetadataEditModal.svelte';
 
@@ -23,8 +26,8 @@
 		has_more?: boolean;
 	};
 
-	const FILTER_MODES: FilterMode[] = ['AND', 'OR', 'NOT'];
 	const BATCH_SIZE = 50;
+	const FILTER_PANEL_PARAM_KEYS = ['author', 'series', 'genre', 'genre_mode', 'tags', 'tag_mode', 'format', 'status', 'filter_mode', 'value_filter_mode'];
 	const sortOptions = [
 		{ value: 'relevance', label: 'Relevance' },
 		{ value: 'title', label: 'Title' },
@@ -49,12 +52,6 @@
 	let sortDir = $state<'asc' | 'desc'>($page.url.searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc');
 	let showSortMenu = $state(false);
 	let showFilterPanel = $state(false);
-	let filterAuthorsOpen = $state(true);
-	let filterSeriesOpen = $state(true);
-	let filterGenresOpen = $state(true);
-	let filterTagsOpen = $state(true);
-	let filterFormatsOpen = $state(true);
-	let filterStatusOpen = $state(true);
 	let availableAuthors = $state<any[]>([]);
 	let availableSeries = $state<any[]>([]);
 	let availableGenres = $state<any[]>([]);
@@ -79,6 +76,8 @@
 	let bulkSelectionAnchorId = $state<number | null>(null);
 	let loadMoreTrigger = $state<HTMLDivElement | null>(null);
 	let observer: IntersectionObserver | null = null;
+	let formatOnCover = $state(true);
+	let activeBookActions = $state<number | null>(null);
 
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
 	let hasMore = $derived(serverHasMore);
@@ -117,8 +116,9 @@
 		return mode === 'OR' || mode === 'NOT' ? mode : 'AND';
 	}
 
-	function getFilterModeIndex(): number {
-		return FILTER_MODES.indexOf(getFilterMode());
+	function getValueFilterMode(): FilterMode {
+		const mode = ($page.url.searchParams.get('value_filter_mode') || 'OR').toUpperCase();
+		return mode === 'AND' || mode === 'NOT' ? mode : 'OR';
 	}
 
 	function navigateWithSearchParams(url: URL, replaceState: boolean = false) {
@@ -161,9 +161,20 @@
 		for (const format of getQueryValues($page.url.searchParams, 'format')) params.append('format', format);
 		for (const status of getQueryValues($page.url.searchParams, 'status')) params.append('status', status);
 		if (getFilterMode() !== 'AND') params.set('filter_mode', getFilterMode());
+		if (getValueFilterMode() !== 'OR') params.set('value_filter_mode', getValueFilterMode());
 		params.set('sort', sortBy);
 		params.set('sort_dir', sortDir);
 		return `/api/search?${params.toString()}`;
+	}
+
+	function buildFilterOptionsUrl(): string {
+		const params = $page.url.searchParams;
+		const queryParams = new URLSearchParams();
+		if (libraryFilter) queryParams.set('library_id', libraryFilter);
+		const q = params.get('q')?.trim();
+		if (q) queryParams.set('q', q);
+		const query = queryParams.toString();
+		return query ? `/api/filter-options?${query}` : '/api/filter-options';
 	}
 
 	$effect(() => {
@@ -180,6 +191,7 @@
 		} else {
 			libraryName = '';
 		}
+		void fetchFilterOptions();
 
 		if (query) {
 			search(true);
@@ -194,7 +206,13 @@
 	});
 
 	onMount(() => {
+		showFormatOnCover.init();
 		void fetchFilterOptions();
+	});
+
+	$effect(() => {
+		const unsub = showFormatOnCover.subscribe((value: boolean) => formatOnCover = value);
+		return unsub;
 	});
 
 	$effect(() => {
@@ -317,7 +335,7 @@
 
 	async function fetchFilterOptions() {
 		try {
-			const res = await fetch('/api/filter-options');
+			const res = await fetch(buildFilterOptionsUrl());
 			if (!res.ok) return;
 			const data = await res.json();
 			availableAuthors = data.authors ?? [];
@@ -391,16 +409,18 @@
 
 	function clearAllFilters() {
 		const url = new URL($page.url);
-		url.searchParams.delete('author');
-		url.searchParams.delete('series');
-		url.searchParams.delete('genre');
-		url.searchParams.delete('genre_mode');
-		url.searchParams.delete('tags');
-		url.searchParams.delete('tag_mode');
-		url.searchParams.delete('format');
-		url.searchParams.delete('status');
-		url.searchParams.delete('filter_mode');
+		for (const key of FILTER_PANEL_PARAM_KEYS) url.searchParams.delete(key);
 		navigateWithSearchParams(url);
+	}
+
+	function hasFilterPanelFilters(): boolean {
+		return FILTER_PANEL_PARAM_KEYS.some((key) => $page.url.searchParams.has(key));
+	}
+
+	function clearFilterPanelFilters() {
+		const url = new URL($page.url);
+		for (const key of FILTER_PANEL_PARAM_KEYS) url.searchParams.delete(key);
+		navigateWithSearchParams(url, true);
 	}
 
 	function toggleRepeatedFilter(key: string, value: string) {
@@ -421,6 +441,16 @@
 			url.searchParams.delete('filter_mode');
 		} else {
 			url.searchParams.set('filter_mode', mode);
+		}
+		navigateWithSearchParams(url, true);
+	}
+
+	function setValueFilterMode(mode: FilterMode) {
+		const url = new URL($page.url);
+		if (mode === 'OR') {
+			url.searchParams.delete('value_filter_mode');
+		} else {
+			url.searchParams.set('value_filter_mode', mode);
 		}
 		navigateWithSearchParams(url, true);
 	}
@@ -481,7 +511,8 @@
 
 	function openBookDetailFromList(event: MouseEvent, bookId: number) {
 		saveRouteScrollPosition();
-		if (bulkSelectMode || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+		event.stopPropagation();
+		if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
 		event.preventDefault();
 		const visibleIds = getVisibleBookIds();
 		const session = startMetadataEditContextSession(visibleIds, `${$page.url.pathname}${$page.url.search}`, {
@@ -538,6 +569,40 @@
 			event.stopPropagation();
 			toggleBookSelection(bookId, event);
 		}
+	}
+
+	function getReaderUrl(book: any): string {
+		return getBookReaderHref(book.id, book.format, '/search');
+	}
+
+	function getReaderActionLabel(book: any): string {
+		const title = book.title || 'book';
+		return isAudioFormat(book.format) ? `Play audio for ${title}` : `Read ${title}`;
+	}
+
+	function statusDot(status: string) {
+		switch (status) {
+			case 'reading': return 'bg-blue-500';
+			case 'finished': return 'bg-emerald-500';
+			default: return '';
+		}
+	}
+
+	function isTouchLike(): boolean {
+		return typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
+	}
+
+	function handleCoverTap(event: MouseEvent, bookId: number) {
+		if (!isTouchLike() || bulkSelectMode) return;
+		event.preventDefault();
+		event.stopPropagation();
+		activeBookActions = activeBookActions === bookId ? null : bookId;
+	}
+
+	function handleCoverKeydown(event: KeyboardEvent, bookId: number) {
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+		event.preventDefault();
+		activeBookActions = activeBookActions === bookId ? null : bookId;
 	}
 
 	function handleBookKeydown(event: KeyboardEvent) {
@@ -719,225 +784,33 @@
 	</div>
 
 	{#if showFilterPanel}
-		<button
-			type="button"
-			class="fixed inset-x-0 bottom-0 top-16 z-[35] bg-black/80 lg:bg-black/50"
-			aria-label="Close filters"
-			onclick={() => showFilterPanel = false}
-		></button>
-		<div class="fixed right-0 top-16 z-40 h-[calc(100dvh-4rem)] w-full max-w-80 translate-x-0 overflow-y-auto border-l border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-xl transition-transform duration-300 ease-out">
-			<div class="sticky top-0 z-10 flex h-[73px] items-center justify-between gap-3 border-b border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4">
-				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Filters</h2>
-				<div class="relative grid max-w-40 flex-1 grid-cols-3 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
-					<span
-						class="absolute bottom-1 left-1 top-1 rounded-lg bg-[var(--color-primary-500)] shadow-sm transition-transform duration-200 ease-out"
-						style="width: calc((100% - 0.5rem) / 3); transform: translateX({getFilterModeIndex() * 100}%);"
-					></span>
-					{#each FILTER_MODES as mode}
-						<button
-							onclick={() => setFilterMode(mode)}
-							class="relative z-10 rounded-lg px-2 py-1.5 text-[11px] font-semibold tracking-wide transition-colors {getFilterMode() === mode ? 'text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
-						>
-							{mode}
-						</button>
-					{/each}
-				</div>
-				<button
-					onclick={() => showFilterPanel = false}
-					aria-label="Close filters"
-					class="rounded p-1 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]"
-				>
-					<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-					</svg>
-				</button>
-			</div>
-
-			<div class="space-y-2 p-4">
-				<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-					<button onclick={() => filterAuthorsOpen = !filterAuthorsOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-700)]">
-						<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Author</span>
-						<div class="flex items-center space-x-2">
-							<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{availableAuthors.length}</span>
-							<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {filterAuthorsOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-							</svg>
-						</div>
-					</button>
-					{#if filterAuthorsOpen}
-						<div class="max-h-48 overflow-y-auto">
-							{#each availableAuthors.slice(0, 15) as author}
-								<button onclick={() => toggleRepeatedFilter('author', author.name)} class="flex w-full items-center justify-between px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {isAuthorSelected(author.name) ? 'bg-[var(--color-primary-500)]/20' : ''}">
-									<span class="flex truncate items-center">
-										{#if isAuthorSelected(author.name)}
-											<svg class="mr-2 h-4 w-4 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-											</svg>
-										{/if}
-										{author.name}
-									</span>
-									<span class="ml-2 text-xs text-[var(--color-surface-text-muted)]">{author.book_count}</span>
-								</button>
-							{/each}
-							{#if availableAuthors.length === 0}
-								<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No authors found</p>
-							{/if}
-						</div>
-					{/if}
-				</div>
-
-				<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-					<button onclick={() => filterSeriesOpen = !filterSeriesOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-700)]">
-						<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Series</span>
-						<div class="flex items-center space-x-2">
-							<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{availableSeries.length}</span>
-							<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {filterSeriesOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-							</svg>
-						</div>
-					</button>
-					{#if filterSeriesOpen}
-						<div class="max-h-48 overflow-y-auto">
-							{#each availableSeries.slice(0, 15) as serie}
-								<button onclick={() => toggleRepeatedFilter('series', serie.name)} class="flex w-full items-center justify-between px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {isSeriesSelected(serie.name) ? 'bg-[var(--color-primary-500)]/20' : ''}">
-									<span class="flex truncate items-center">
-										{#if isSeriesSelected(serie.name)}
-											<svg class="mr-2 h-4 w-4 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-											</svg>
-										{/if}
-										{serie.name}
-									</span>
-									<span class="ml-2 text-xs text-[var(--color-surface-text-muted)]">{serie.book_count}</span>
-								</button>
-							{/each}
-							{#if availableSeries.length === 0}
-								<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No series found</p>
-							{/if}
-						</div>
-					{/if}
-				</div>
-
-				<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-					<button onclick={() => filterGenresOpen = !filterGenresOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-700)]">
-						<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Genre</span>
-						<div class="flex items-center space-x-2">
-							<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{availableGenres.length}</span>
-							<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {filterGenresOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-							</svg>
-						</div>
-					</button>
-					{#if filterGenresOpen}
-						<div class="max-h-48 overflow-y-auto">
-							{#each availableGenres.slice(0, 15) as genre}
-								<button onclick={() => toggleGenreSelection(genre.name)} class="flex w-full items-center justify-between px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {isGenreSelected(genre.name) ? 'bg-[var(--color-primary-500)]/20' : ''}">
-									<span class="flex truncate items-center">
-										{#if isGenreSelected(genre.name)}
-											<svg class="mr-2 h-4 w-4 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-											</svg>
-										{/if}
-										{genre.name}
-									</span>
-									<span class="ml-2 text-xs text-[var(--color-surface-text-muted)]">{genre.book_count}</span>
-								</button>
-							{/each}
-							{#if availableGenres.length === 0}
-								<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No genres found</p>
-							{/if}
-						</div>
-					{/if}
-				</div>
-
-				<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-					<button onclick={() => filterTagsOpen = !filterTagsOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-700)]">
-						<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Tags</span>
-						<div class="flex items-center space-x-2">
-							<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{availableTags.length}</span>
-							<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {filterTagsOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-							</svg>
-						</div>
-					</button>
-					{#if filterTagsOpen}
-						<div class="max-h-48 overflow-y-auto">
-							{#each availableTags.slice(0, 15) as tag}
-								<button onclick={() => toggleTagSelection(tag.name)} class="flex w-full items-center justify-between px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {isTagSelected(tag.name) ? 'bg-[var(--color-primary-500)]/20' : ''}">
-									<span class="flex truncate items-center">
-										{#if isTagSelected(tag.name)}
-											<svg class="mr-2 h-4 w-4 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-											</svg>
-										{/if}
-										{tag.name}
-									</span>
-									<span class="ml-2 text-xs text-[var(--color-surface-text-muted)]">{tag.book_count}</span>
-								</button>
-							{/each}
-							{#if availableTags.length === 0}
-								<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No tags found</p>
-							{/if}
-						</div>
-					{/if}
-				</div>
-
-				<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-					<button onclick={() => filterFormatsOpen = !filterFormatsOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-700)]">
-						<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Format</span>
-						<div class="flex items-center space-x-2">
-							<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{availableFormats.length}</span>
-							<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {filterFormatsOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-							</svg>
-						</div>
-					</button>
-					{#if filterFormatsOpen}
-						<div class="max-h-48 overflow-y-auto">
-							{#each availableFormats as format}
-								<button onclick={() => toggleRepeatedFilter('format', format.name)} class="flex w-full items-center justify-between px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {isFormatSelected(format.name) ? 'bg-[var(--color-primary-500)]/20' : ''}">
-									<span class="flex truncate items-center uppercase">
-										{#if isFormatSelected(format.name)}
-											<svg class="mr-2 h-4 w-4 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-											</svg>
-										{/if}
-										{format.name}
-									</span>
-									<span class="ml-2 text-xs text-[var(--color-surface-text-muted)]">{format.book_count}</span>
-								</button>
-							{/each}
-							{#if availableFormats.length === 0}
-								<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No formats found</p>
-							{/if}
-						</div>
-					{/if}
-				</div>
-
-				<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-					<button onclick={() => filterStatusOpen = !filterStatusOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-700)]">
-						<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Reading Status</span>
-						<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {filterStatusOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-						</svg>
-					</button>
-					{#if filterStatusOpen}
-						<div class="py-1">
-							{#each [{ value: 'unread', label: 'Unread' }, { value: 'reading', label: 'Reading' }, { value: 'finished', label: 'Finished' }] as statusOption}
-								<button onclick={() => toggleRepeatedFilter('status', statusOption.value)} class="flex w-full items-center px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {isStatusSelected(statusOption.value) ? 'bg-[var(--color-primary-500)]/20' : ''}">
-									{#if isStatusSelected(statusOption.value)}
-										<svg class="mr-2 h-4 w-4 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-										</svg>
-									{/if}
-									{statusOption.label}
-								</button>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			</div>
-		</div>
+		<FilterPanel
+			authors={availableAuthors}
+			series={availableSeries}
+			genres={availableGenres}
+			tags={availableTags}
+			formats={availableFormats}
+			filterMode={getFilterMode()}
+			valueFilterMode={getValueFilterMode()}
+			hasActiveFilters={hasFilterPanelFilters()}
+			onClose={() => showFilterPanel = false}
+			onClear={clearFilterPanelFilters}
+			onSetFilterMode={setFilterMode}
+			onSetValueFilterMode={setValueFilterMode}
+			onToggleAuthor={(value) => toggleRepeatedFilter('author', value)}
+			onToggleSeries={(value) => toggleRepeatedFilter('series', value)}
+			onToggleGenre={toggleGenreSelection}
+			onToggleTag={toggleTagSelection}
+			onToggleFormat={(value) => toggleRepeatedFilter('format', value)}
+			onToggleStatus={(value) => toggleRepeatedFilter('status', value)}
+			isAuthorSelected={isAuthorSelected}
+			isSeriesSelected={isSeriesSelected}
+			isGenreSelected={isGenreSelected}
+			isTagSelected={isTagSelected}
+			isFormatSelected={isFormatSelected}
+			isStatusSelected={isStatusSelected}
+			showBackdrop
+		/>
 	{/if}
 
 	{#if results.length > 0}
@@ -1093,8 +966,8 @@
 							role="button"
 							tabindex="0"
 						>
-							<a href="/book/{book.id}" class="block" onclick={(event) => openBookDetailFromList(event, book.id)}>
-								<div class="relative mb-2 overflow-hidden rounded-lg">
+							<div class="block">
+								<div class="relative mb-2 overflow-hidden rounded-lg" role="button" tabindex="0" onclick={(event) => handleCoverTap(event, book.id)} onkeydown={(event) => handleCoverKeydown(event, book.id)}>
 									<BookCoverFrame
 										src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
 										alt={book.title}
@@ -1105,19 +978,50 @@
 										placeholderSize="md"
 									/>
 									{#if book.status === 'reading' || book.status === 'finished'}
-										<span class="absolute bottom-2 right-2 z-10 h-2.5 w-2.5 rounded-full border border-black/30 bg-[var(--color-primary-500)] shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></span>
+										<span class="absolute bottom-2 right-2 z-20 h-3 w-3 rounded-full border border-black/30 {statusDot(book.status)} shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></span>
 									{/if}
 									{#if book.opened && book.percent > 0}
 										<div class="absolute bottom-0 left-0 right-0 z-10 h-1 bg-slate-700">
 											<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
 										</div>
 									{/if}
+									{#if formatOnCover && book.format}
+										{@const formatColor = getFormatColor(book.format)}
+										<div
+											class="absolute right-2 top-2 z-10 rounded border border-black/20 px-1.5 py-0.5 text-[10px] font-medium uppercase shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+											style="background-color: {formatColor.bg}; color: {formatColor.text};"
+										>
+											{book.format}
+										</div>
+									{/if}
+									<div class="cover-action-overlay {activeBookActions === book.id ? 'is-active' : ''}">
+										<a href="/book/{book.id}" class="cover-action-button top-action" aria-label="View details for {book.title || 'book'}" onclick={(event) => openBookDetailFromList(event, book.id)}>
+											<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11v5m0-8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+											</svg>
+										</a>
+										{#if bulkSelectMode}
+											<button type="button" class="cover-action-button bottom-action cursor-not-allowed opacity-45" aria-label="Opening is disabled during bulk selection" onclick={(event) => event.stopPropagation()}>
+												<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+													<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
+												</svg>
+											</button>
+										{:else}
+											<a href={getReaderUrl(book)} class="cover-action-button bottom-action" aria-label={getReaderActionLabel(book)} onclick={(event) => event.stopPropagation()}>
+												<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+													<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
+												</svg>
+											</a>
+										{/if}
+									</div>
 								</div>
-								<h3 class="text-sm font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
-								{#if book.authors && book.authors !== '[]'}
-									<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{parseAuthors(book.authors)}</p>
-								{/if}
-							</a>
+								<a href="/book/{book.id}" class="block" onclick={(event) => openBookDetailFromList(event, book.id)}>
+									<h3 class="truncate text-sm font-medium text-[var(--color-surface-text)]">{book.title || 'Untitled'}</h3>
+									{#if book.authors && book.authors !== '[]'}
+										<p class="truncate text-xs text-[var(--color-surface-text-muted)]">{parseAuthors(book.authors)}</p>
+									{/if}
+								</a>
+							</div>
 							<button
 								onclick={(event) => toggleBookSelection(book.id, event)}
 								class="absolute top-2 left-2 z-20 w-6 h-6 rounded border-2 transition-all opacity-0 group-hover:opacity-100 {bulkSelectMode ? 'opacity-100' : ''} {selectedBooks.has(book.id) ? 'bg-[var(--color-primary-500)] border-[var(--color-primary-500)]' : 'bg-[var(--color-surface-800)]/90 border-[var(--color-surface-400)]'} flex items-center justify-center"
@@ -1158,12 +1062,12 @@
 										placeholderSize="sm"
 									/>
 									<div class="flex-1 min-w-0">
-										<div class="flex items-center space-x-2 mb-1">
-											<h3 class="text-lg font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
-											{#if book.status === 'reading' || book.status === 'finished'}
-												<span class="w-2.5 h-2.5 rounded-full bg-[var(--color-primary-500)] flex-shrink-0"></span>
-											{/if}
-										</div>
+											<div class="flex items-center space-x-2 mb-1">
+												<h3 class="text-lg font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
+												{#if book.status === 'reading' || book.status === 'finished'}
+													<span class="h-2.5 w-2.5 flex-shrink-0 rounded-full {statusDot(book.status)}"></span>
+												{/if}
+											</div>
 										{#if book.authors && book.authors !== '[]'}
 											<p class="text-sm text-[var(--color-surface-text-muted)] mb-1">{parseAuthors(book.authors)}</p>
 										{/if}
@@ -1397,5 +1301,62 @@
 
 	.animate-slide-up {
 		animation: slide-up 0.2s ease-out;
+	}
+
+	.cover-action-overlay {
+		position: absolute;
+		inset: 0;
+		z-index: 20;
+		opacity: 0;
+		pointer-events: none;
+		transition: opacity 160ms ease;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.group:hover .cover-action-overlay {
+			opacity: 1;
+			pointer-events: auto;
+		}
+	}
+
+	.cover-action-overlay.is-active {
+		opacity: 1;
+		pointer-events: auto;
+	}
+
+	.cover-action-button {
+		position: absolute;
+		left: 50%;
+		display: inline-flex;
+		width: 2.5rem !important;
+		height: 2.5rem;
+		min-width: 2.5rem;
+		padding: 0;
+		transform: translateX(-50%);
+		align-items: center;
+		justify-content: center;
+		border-radius: 9999px;
+		border: 1px solid var(--color-surface-text-muted);
+		background: color-mix(in srgb, var(--color-surface-base) 88%, transparent);
+		color: var(--color-surface-text-muted);
+		box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+		backdrop-filter: blur(8px);
+		line-height: 1;
+		transition: transform 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+	}
+
+	.cover-action-button:hover {
+		transform: translateX(-50%) scale(1.06);
+		border-color: var(--color-surface-text);
+		color: var(--color-surface-text);
+		box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-surface-text) 28%, transparent), 0 0 18px color-mix(in srgb, var(--color-surface-text) 32%, transparent), 0 10px 28px rgba(0, 0, 0, 0.38);
+	}
+
+	.cover-action-button.top-action {
+		top: 18%;
+	}
+
+	.cover-action-button.bottom-action {
+		bottom: 18%;
 	}
 </style>

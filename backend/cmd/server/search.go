@@ -56,15 +56,16 @@ type scoredBookSearchResult struct {
 }
 
 type BookSearchFilters struct {
-	Author     []string
-	Series     []string
-	Genre      []string
-	Tags       []string
-	Status     []string
-	Format     []string
-	FilterMode string
-	Sort       string
-	SortDir    string
+	Author          []string
+	Series          []string
+	Genre           []string
+	Tags            []string
+	Status          []string
+	Format          []string
+	FilterMode      string
+	ValueFilterMode string
+	Sort            string
+	SortDir         string
 }
 
 const activeFileSearchTextSQL = `COALESCE((
@@ -421,49 +422,53 @@ func queryFallbackBookCandidates(libraryID string, current *AppUser, filters Boo
 }
 
 func buildBookSearchFilterClause(filters BookSearchFilters) (string, []interface{}) {
-	var filterConditions []string
-	var filterArgs []interface{}
+	var filterGroups []sqlFilterGroup
 
-	addFilterCondition := func(condition string, values ...interface{}) {
-		filterConditions = append(filterConditions, condition)
-		filterArgs = append(filterArgs, values...)
-	}
-
-	for _, value := range filters.Status {
-		addFilterCondition("COALESCE(rp.status, 'unread') = ?", value)
-	}
-	for _, value := range filters.Author {
-		addAuthorFilterCondition(addFilterCondition, "bm.authors", value)
-	}
-	for _, value := range filters.Series {
-		addFilterCondition("COALESCE(bm.series, '') = ?", value)
-	}
-	for _, value := range filters.Genre {
-		addHierarchicalJSONFilterCondition(addFilterCondition, "bm.genres", value)
-	}
-	for _, value := range filters.Tags {
-		addHierarchicalJSONFilterCondition(addFilterCondition, "bm.tags", value)
-	}
-	for _, value := range filters.Format {
-		format := strings.ToLower(strings.TrimSpace(value))
-		if format != "" {
-			addFilterCondition("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", format)
+	addFilterGroup := func(build func(add func(string, ...interface{}))) {
+		if group, ok := buildFilterGroup(filters.ValueFilterMode, build); ok {
+			filterGroups = append(filterGroups, group)
 		}
 	}
 
-	if len(filterConditions) == 0 {
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range filters.Status {
+			add("COALESCE(rp.status, 'unread') = ?", value)
+		}
+	})
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range filters.Author {
+			addAuthorFilterCondition(add, "bm.authors", value)
+		}
+	})
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range filters.Series {
+			add("COALESCE(bm.series, '') = ?", value)
+		}
+	})
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range filters.Genre {
+			addHierarchicalJSONFilterCondition(add, "bm.genres", value)
+		}
+	})
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range filters.Tags {
+			addHierarchicalJSONFilterCondition(add, "bm.tags", value)
+		}
+	})
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range filters.Format {
+			format := strings.ToLower(strings.TrimSpace(value))
+			if format != "" {
+				add("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", format)
+			}
+		}
+	})
+
+	condition, args := combineFilterGroups(filterGroups, filters.FilterMode)
+	if condition == "" {
 		return "", nil
 	}
-
-	filterMode := strings.ToUpper(filters.FilterMode)
-	switch filterMode {
-	case "OR":
-		return " AND (" + strings.Join(filterConditions, " OR ") + ")", filterArgs
-	case "NOT":
-		return " AND NOT (" + strings.Join(filterConditions, " OR ") + ")", filterArgs
-	default:
-		return " AND " + strings.Join(filterConditions, " AND "), filterArgs
-	}
+	return " AND " + condition, args
 }
 
 func sortScoredBookSearchResults(scored []scoredBookSearchResult, sortBy, sortDir string) {
