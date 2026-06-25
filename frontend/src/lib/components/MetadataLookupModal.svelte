@@ -93,7 +93,7 @@
 	let activeBookId = $state<number | null>(null);
 	let providers = $state<{ id: string; name: string }[]>([]);
 	let selectedProvider = $state('');
-	let includeCover = $state(true);
+	let coverSelections = $state<Record<string, boolean>>({});
 	let loading = $state(true);
 	let applying = $state(false);
 	let pendingApply = $state<{ mode: 'single' | 'all'; bookId?: number } | null>(null);
@@ -407,10 +407,7 @@
 		if (!target || target.selectedIndex < 0 || target.selectedIndex >= target.results.length) return;
 
 		const selected = target.results[target.selectedIndex];
-		const metadata = {
-			...selected,
-			cover_url: includeCover ? selected.cover_url : ''
-		};
+		const metadata = metadataWithSelectedCover(bookId, target.selectedIndex, selected);
 
 		updateTarget(bookId, (item) => ({ ...item, loading: true, error: null }));
 		try {
@@ -447,10 +444,7 @@
 			.filter((target) => target.selectedIndex >= 0 && target.results[target.selectedIndex])
 			.map((target) => ({
 				book_id: target.bookId,
-				metadata: {
-					...target.results[target.selectedIndex],
-					cover_url: includeCover ? target.results[target.selectedIndex].cover_url : ''
-				}
+				metadata: metadataWithSelectedCover(target.bookId, target.selectedIndex, target.results[target.selectedIndex])
 			}));
 
 		if (selectedItems.length === 0) {
@@ -479,7 +473,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					items: selectedItems,
-					include_cover: includeCover
+					include_cover: selectedItems.some((item) => !!item.metadata.cover_url)
 				})
 			});
 
@@ -542,6 +536,29 @@
 		return target.selectedIndex >= 0 ? target.results[target.selectedIndex] ?? null : null;
 	}
 
+	function candidateCoverKey(bookId: number, index: number): string {
+		return `${bookId}:${index}`;
+	}
+
+	function shouldUpdateCover(bookId: number, index: number, candidate: MetadataCandidate): boolean {
+		if (!candidate.cover_url) return false;
+		return coverSelections[candidateCoverKey(bookId, index)] ?? true;
+	}
+
+	function setCandidateCover(bookId: number, index: number, value: boolean) {
+		coverSelections = {
+			...coverSelections,
+			[candidateCoverKey(bookId, index)]: value
+		};
+	}
+
+	function metadataWithSelectedCover(bookId: number, index: number, candidate: MetadataCandidate): MetadataCandidate {
+		return {
+			...candidate,
+			cover_url: shouldUpdateCover(bookId, index, candidate) ? candidate.cover_url : ''
+		};
+	}
+
 	onMount(() => {
 		void initialize();
 		return () => {
@@ -571,11 +588,11 @@
 						onclick={searchAllTargets}
 						disabled={loading || applying}
 					>
-						<span class="inline-flex h-3.5 w-3.5 items-center justify-center" aria-hidden="true">
-							{#if isAnyTargetSearching()}
+						{#if isAnyTargetSearching()}
+							<span class="inline-flex h-3.5 w-3.5 items-center justify-center" aria-hidden="true">
 								<span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--color-surface-border)] border-t-[var(--color-primary-500)]"></span>
-							{/if}
-						</span>
+							</span>
+						{/if}
 						{isAnyTargetSearching() ? 'Searching All...' : 'Search All'}
 					</button>
 					{#if isAnyTargetSearching()}
@@ -748,21 +765,17 @@
 										{/each}
 									</select>
 								</div>
-								<div class="flex items-center gap-3">
-									<input id="include-cover" type="checkbox" bind:checked={includeCover} class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]" />
-									<label for="include-cover" class="text-sm text-[var(--color-surface-text)]">Update cover when available</label>
-								</div>
 									<div class="grid grid-cols-2 gap-2 pt-2">
 										<button
 											class="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-primary-600)] disabled:opacity-50"
 											onclick={() => searchTarget(target.bookId)}
 											disabled={target.loading || applying}
 										>
-											<span class="inline-flex h-3.5 w-3.5 items-center justify-center" aria-hidden="true">
-												{#if target.loading}
+											{#if target.loading}
+												<span class="inline-flex h-3.5 w-3.5 items-center justify-center" aria-hidden="true">
 													<span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/35 border-t-white"></span>
-												{/if}
-											</span>
+												</span>
+											{/if}
 											{target.loading ? 'Searching...' : 'Search'}
 										</button>
 									<button
@@ -835,9 +848,17 @@
 								{:else}
 									<div class="space-y-3">
 										{#each target.results as result, index}
-											<button
+											<div
+												role="button"
+												tabindex="0"
 												class="flex w-full gap-4 rounded-2xl border p-4 text-left transition-colors {target.selectedIndex === index ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10' : 'border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] hover:border-[var(--color-primary-500)]/60 hover:bg-[var(--color-surface-overlay)]'}"
 												onclick={() => updateTarget(target.bookId, (item) => ({ ...item, selectedIndex: index }))}
+												onkeydown={(event) => {
+													if (event.key === 'Enter' || event.key === ' ') {
+														event.preventDefault();
+														updateTarget(target.bookId, (item) => ({ ...item, selectedIndex: index }));
+													}
+												}}
 											>
 												<div class="h-28 w-20 flex-shrink-0 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
 													{#if result.cover_url}
@@ -874,8 +895,20 @@
 													{#if result.description}
 														<p class="mt-3 line-clamp-3 text-sm text-[var(--color-surface-text-muted)]">{result.description}</p>
 													{/if}
+													<div class="mt-3 inline-flex items-center gap-2 text-sm text-[var(--color-surface-text)] {result.cover_url ? '' : 'opacity-50'}">
+														<input
+															type="checkbox"
+															checked={shouldUpdateCover(target.bookId, index, result)}
+															disabled={!result.cover_url}
+															onclick={(event) => event.stopPropagation()}
+															onkeydown={(event) => event.stopPropagation()}
+															onchange={(event) => setCandidateCover(target.bookId, index, (event.currentTarget as HTMLInputElement).checked)}
+															class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)] disabled:opacity-50"
+														/>
+														<span>Update cover</span>
+													</div>
 												</div>
-											</button>
+											</div>
 										{/each}
 									</div>
 								{/if}

@@ -109,6 +109,17 @@
 	const BACKGROUND_REFRESH_IDLE_INTERVAL_MS = 30000;
 	const MAX_REFRESH_LIMIT = 200;
 	const BULK_SELECTION_STORAGE_KEY = 'cryptorumLibraryBulkSelection';
+	const LATIN_CONFUSABLE_SORT_MAP: Record<string, string> = {
+		'Α': 'A', 'А': 'A', 'Β': 'B', 'В': 'B', 'Ε': 'E', 'Е': 'E', 'Ζ': 'Z',
+		'Η': 'H', 'Н': 'H', 'Ι': 'I', 'І': 'I', 'Κ': 'K', 'К': 'K', 'Μ': 'M',
+		'М': 'M', 'Ν': 'N', 'Ο': 'O', 'О': 'O', 'Ρ': 'P', 'Р': 'P', 'Τ': 'T',
+		'Т': 'T', 'Υ': 'Y', 'У': 'Y', 'Χ': 'X', 'Х': 'X', 'Ϲ': 'C', 'С': 'C',
+		'α': 'a', 'а': 'a', 'β': 'b', 'в': 'b', 'ε': 'e', 'е': 'e', 'η': 'h',
+		'н': 'h', 'ι': 'i', 'і': 'i', 'κ': 'k', 'к': 'k', 'μ': 'm', 'м': 'm',
+		'ο': 'o', 'о': 'o', 'ρ': 'p', 'р': 'p', 'τ': 't', 'т': 't', 'υ': 'y',
+		'у': 'y', 'χ': 'x', 'х': 'x', 'ϲ': 'c', 'с': 'c'
+	};
+	const LATIN_CONFUSABLE_SORT_PATTERN = /[ΑАΒВΕЕΖΗНΙІΚКΜМΝΟОΡРΤТΥУΧХϹСαаβвεеηнιіκкμмοоρрτтυуχхϲс]/g;
 	let backgroundRefreshing = false;
 	let backgroundRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 	let searchUpdateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -586,15 +597,23 @@
   		}
   	}
 
+	function sortKey(value: string | undefined | null): string {
+		return String(value || '')
+			.trim()
+			.replace(/^[\s\p{P}\p{S}]+/u, '')
+			.replace(LATIN_CONFUSABLE_SORT_PATTERN, (char) => LATIN_CONFUSABLE_SORT_MAP[char] ?? char)
+			.toLocaleLowerCase();
+	}
+
   	function sortBooks() {
   		books.sort((a, b) => {
 			let comparison = 0;
 			switch (sortBy) {
 				case 'title':
-					comparison = (a.title || '').localeCompare(b.title || '');
+					comparison = sortKey(a.title).localeCompare(sortKey(b.title));
 					break;
 				case 'authors':
-					comparison = parseAuthors(a.authors).localeCompare(parseAuthors(b.authors));
+					comparison = sortKey(parseAuthors(a.authors)).localeCompare(sortKey(parseAuthors(b.authors)));
 					break;
 				case 'added_at':
 					comparison = (a.added_at || 0) - (b.added_at || 0);
@@ -612,8 +631,8 @@
  	}
 
 	function compareSeriesBooks(a: any, b: any) {
-		const aSeries = String(a.series || '').trim();
-		const bSeries = String(b.series || '').trim();
+		const aSeries = sortKey(a.series);
+		const bSeries = sortKey(b.series);
 		if (!aSeries && bSeries) return 1;
 		if (aSeries && !bSeries) return -1;
 
@@ -625,7 +644,7 @@
 		if (aNumber && !bNumber) return -1;
 		if (!aNumber && bNumber) return 1;
 		if (aNumber !== bNumber) return sortDir === 'desc' ? bNumber - aNumber : aNumber - bNumber;
-		return (a.title || '').localeCompare(b.title || '');
+		return sortKey(a.title).localeCompare(sortKey(b.title));
 	}
 
 	const sortOptions = [

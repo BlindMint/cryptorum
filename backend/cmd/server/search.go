@@ -479,7 +479,7 @@ func sortScoredBookSearchResults(scored []scoredBookSearchResult, sortBy, sortDi
 		compare := 0
 		switch sortBy {
 		case "authors":
-			compare = strings.Compare(authorsSearchText(left.Authors), authorsSearchText(right.Authors))
+			compare = strings.Compare(normalizedSortKey(authorsSearchText(left.Authors)), normalizedSortKey(authorsSearchText(right.Authors)))
 		case "added_at":
 			compare = compareInt64(left.AddedAt, right.AddedAt)
 		case "last_read":
@@ -489,17 +489,17 @@ func sortScoredBookSearchResults(scored []scoredBookSearchResult, sortBy, sortDi
 			return compare < 0
 		case "relevance":
 			if math.Abs(scored[i].score-scored[j].score) < 0.0001 {
-				compare = strings.Compare(left.Title, right.Title)
+				compare = strings.Compare(normalizedSortKey(left.Title), normalizedSortKey(right.Title))
 			} else if scored[i].score > scored[j].score {
 				compare = -1
 			} else {
 				compare = 1
 			}
 		default:
-			compare = strings.Compare(strings.ToLower(left.Title), strings.ToLower(right.Title))
+			compare = strings.Compare(normalizedSortKey(left.Title), normalizedSortKey(right.Title))
 		}
 		if compare == 0 {
-			compare = strings.Compare(strings.ToLower(left.Title), strings.ToLower(right.Title))
+			compare = strings.Compare(normalizedSortKey(left.Title), normalizedSortKey(right.Title))
 		}
 		if desc {
 			return compare > 0
@@ -535,8 +535,8 @@ func compareSeriesNumber(left, right float64) int {
 }
 
 func compareMissingLast(left, right string) int {
-	left = strings.ToLower(strings.TrimSpace(left))
-	right = strings.ToLower(strings.TrimSpace(right))
+	left = normalizedSortKey(left)
+	right = normalizedSortKey(right)
 	if left == "" && right != "" {
 		return 1
 	}
@@ -552,7 +552,7 @@ func compareSeriesSearchResults(left, right SearchResult, desc bool) int {
 		return seriesCompare
 	}
 
-	seriesCompare = strings.Compare(strings.ToLower(left.Series), strings.ToLower(right.Series))
+	seriesCompare = strings.Compare(normalizedSortKey(left.Series), normalizedSortKey(right.Series))
 	if desc {
 		seriesCompare = -seriesCompare
 	}
@@ -568,7 +568,7 @@ func compareSeriesSearchResults(left, right SearchResult, desc bool) int {
 		return numberCompare
 	}
 
-	return strings.Compare(strings.ToLower(left.Title), strings.ToLower(right.Title))
+	return strings.Compare(normalizedSortKey(left.Title), normalizedSortKey(right.Title))
 }
 
 func buildFTSQuery(tokens []string) string {
