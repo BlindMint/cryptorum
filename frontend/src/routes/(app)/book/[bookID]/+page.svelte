@@ -43,6 +43,8 @@
 	let book = $state<any>(null);
 	let files = $state<any[]>([]);
 	let loading = $state(true);
+	let navigatingBook = $state(false);
+	let refreshingBook = $state(false);
 	let editing = $state(false);
 	let saving = $state(false);
 	let activeTab = $state<'similar' | 'sessions' | 'files'>('similar');
@@ -77,6 +79,8 @@
 	let authorsList = $state<string[]>([]);
 	let statusOptions = metadataStatusOptions;
 	let selectionSession = $state<MetadataEditSelectionSession | null>(null);
+	let currentBookRouteId: string | null = null;
+	let bookRequestToken = 0;
 
 	type CoverMutationResponse = {
 		cover_path?: string;
@@ -111,14 +115,12 @@
 		const bookId = $page.params.bookID;
 		if (bookId) {
 			loadSelectionSession();
-			book = null;
-			sessions = [];
-			similarBooks = [];
-			similarBooksLoaded = false;
-			similarError = '';
-			files = [];
-			filesError = '';
-			void fetchBook();
+			if (bookId !== currentBookRouteId) {
+				currentBookRouteId = bookId;
+				void fetchBook({ bookId, mode: book ? 'navigate' : 'initial', resetRelated: true });
+			} else if (book && shouldOpenInlineMetadataEdit() && !editing) {
+				startEditing();
+			}
 		}
 	});
 
@@ -134,15 +136,23 @@
 		}
 	});
 
-	async function fetchBook() {
-		loading = true;
+	async function fetchBook(options: { bookId?: string; mode?: 'initial' | 'navigate' | 'quiet'; resetRelated?: boolean } = {}) {
+		const mode = options.mode || 'initial';
+		const resetRelated = options.resetRelated ?? mode !== 'quiet';
+		const requestToken = ++bookRequestToken;
+		const showFullLoading = mode === 'initial' && !book;
+		if (showFullLoading) loading = true;
+		if (mode === 'navigate') navigatingBook = true;
+		if (mode === 'quiet') refreshingBook = true;
 		formatMenuOpen = false;
-		const bookId = $page.params.bookID;
+		convertMenuFileId = null;
+		const bookId = options.bookId || $page.params.bookID;
 		try {
 			const [bookResult, filesResult] = await Promise.allSettled([
 				fetch(`/api/books/${bookId}`, { credentials: 'same-origin' }),
 				fetch(`/api/books/${bookId}/files`, { credentials: 'same-origin' })
 			]);
+			if (requestToken !== bookRequestToken) return;
 			const bookRes = bookResult.status === 'fulfilled' ? bookResult.value : null;
 			const filesRes = filesResult.status === 'fulfilled' ? filesResult.value : null;
 
@@ -154,7 +164,11 @@
 				book = await bookRes.json();
 				if (shouldOpenInlineMetadataEdit()) {
 					startEditing();
+				} else if (mode !== 'quiet') {
+					editing = false;
 				}
+			} else {
+				book = null;
 			}
 			if (filesRes?.ok) {
 				files = await filesRes.json();
@@ -164,10 +178,25 @@
 				filesError = 'Unable to check available reader formats.';
 			}
 		} catch (e) {
+			if (requestToken !== bookRequestToken) return;
 			console.error('Failed to fetch book:', e);
 			filesError = 'Unable to check available reader formats.';
 		} finally {
-			loading = false;
+			if (requestToken === bookRequestToken) {
+				if (resetRelated) {
+					sessions = [];
+					sessionsLoading = false;
+					similarBooks = [];
+					similarBooksLoaded = false;
+					similarError = '';
+					if (activeTab === 'sessions' && book?.id) {
+						void fetchSessions();
+					}
+				}
+				loading = false;
+				navigatingBook = false;
+				refreshingBook = false;
+			}
 		}
 	}
 
@@ -474,8 +503,9 @@
 	}
 
 	async function refreshAfterMetadataApply() {
-		await fetchBook();
-		if (editing) {
+		const wasEditing = editing;
+		await fetchBook({ mode: 'quiet', resetRelated: false });
+		if (wasEditing && book) {
 			startEditing();
 		}
 		showMetadataLookup = false;
@@ -563,6 +593,7 @@
 	}
 
 	async function goToSelectionOffset(offset: number) {
+		if (navigatingBook) return;
 		if (!hasSelectionNavigation() || !selectionSession || !book?.id) return;
 		if (!confirmDiscardUnsavedChanges()) return;
 		const nextIndex = getSelectionIndex() + offset;
@@ -721,7 +752,7 @@
 			});
 
 			if (res.ok) {
-				await fetchBook();
+				await fetchBook({ mode: 'quiet', resetRelated: false });
 				editing = stayEditing;
 				if (stayEditing) {
 					editForm = createMetadataEditForm(book);
@@ -903,7 +934,10 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
 		</div>
 	{:else if book}
-		<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 sm:p-6">
+		<section
+			class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 sm:p-6 {navigatingBook ? 'pointer-events-none' : ''}"
+			aria-busy={navigatingBook || refreshingBook}
+		>
 				<div class="flex items-start justify-between gap-4">
 					<div class="min-w-0 flex-1">
 						{#if editing}
@@ -1159,7 +1193,7 @@
 								{/if}
 							</div>
 							{#if !primaryReadFormat && !loading}
-								<button type="button" onclick={fetchBook} class="mt-1 text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">
+								<button type="button" onclick={() => void fetchBook({ mode: 'quiet', resetRelated: false })} class="mt-1 text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">
 									Retry reader check
 								</button>
 							{/if}
@@ -1532,7 +1566,10 @@
 			</div>
 		</section>
 
-			<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 sm:p-6">
+			<section
+				class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 sm:p-6 {navigatingBook ? 'pointer-events-none' : ''}"
+				aria-busy={navigatingBook}
+			>
 					<div bind:this={bookTabContainer} class="relative flex justify-center gap-2 overflow-x-auto sm:gap-6" onscroll={updateBookTabIndicator}>
 						<div class="book-tab-indicator" style={bookTabIndicatorStyle}></div>
 						<button
