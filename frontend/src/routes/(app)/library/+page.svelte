@@ -151,8 +151,8 @@
 		return ['AND', 'OR', 'NOT'].indexOf(getFilterMode());
 	}
 
-	function navigateWithFilters(url: URL, replaceState: boolean = false) {
-		showFilterPanel = true;
+	function navigateWithFilters(url: URL, replaceState: boolean = false, openFilters: boolean = true) {
+		if (openFilters) showFilterPanel = true;
 		goto(url.pathname + url.search, {
 			replaceState,
 			noScroll: true,
@@ -673,7 +673,7 @@
 		const url = new URL(window.location.href);
 		url.searchParams.set('sort', sortBy);
 		url.searchParams.set('sort_dir', sortDir);
-		navigateWithFilters(url, true);
+		navigateWithFilters(url, true, false);
 	}
 
 	function toggleSortDirection() {
@@ -681,7 +681,7 @@
 		const url = new URL(window.location.href);
 		url.searchParams.set('sort', sortBy);
 		url.searchParams.set('sort_dir', sortDir);
-		navigateWithFilters(url, true);
+		navigateWithFilters(url, true, false);
 	}
 
 	function updateScopedSearch(value: string) {
@@ -695,7 +695,7 @@
 			} else {
 				url.searchParams.delete('q');
 			}
-			navigateWithFilters(url, true);
+			navigateWithFilters(url, true, false);
 		}, 300);
 	}
 
@@ -704,7 +704,7 @@
 		librarySearch = '';
 		const url = new URL(window.location.href);
 		url.searchParams.delete('q');
-		navigateWithFilters(url, true);
+		navigateWithFilters(url, true, false);
 	}
 
  	function statusDot(status: string) {
@@ -1438,7 +1438,7 @@
   <!-- Filter Side Panel (right side, under top bar) -->
   {#if showFilterPanel}
 		<div class="fixed top-16 right-0 z-40 h-[calc(100dvh-4rem)] w-full max-w-80 bg-[var(--color-surface-overlay)] border-l border-[var(--color-surface-border)] overflow-y-auto shadow-xl transform transition-transform duration-300 ease-out translate-x-0">
-  			<div class="sticky top-0 h-[73px] bg-[var(--color-surface-overlay)] border-b border-[var(--color-surface-border)] px-4 flex items-center justify-between gap-3 z-10">
+			<div class="sticky top-0 min-h-20 bg-[var(--color-surface-overlay)] border-b border-[var(--color-surface-border)] px-4 py-3 flex items-center justify-between gap-3 z-10">
   				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Filters</h2>
 				<div class="relative grid grid-cols-3 flex-1 max-w-40 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
 					<span
