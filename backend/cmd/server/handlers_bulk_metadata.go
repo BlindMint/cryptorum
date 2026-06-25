@@ -271,7 +271,7 @@ func applyBulkMetadataUpdate(bookID int64, ownerUserID int64, req bulkMetadataRe
 	if req.Authors != nil || clear["authors"] {
 		authors := []string{}
 		if req.Authors != nil && !clear["authors"] {
-			authors = cleanedStringList(*req.Authors)
+			authors = normalizeMetadataStringList(*req.Authors)
 		}
 		authorsJSON, _ := json.Marshal(authors)
 		if _, err := tx.Exec(`UPDATE book_metadata SET authors = ? WHERE book_id = ?`, string(authorsJSON), bookID); err != nil {
@@ -386,10 +386,8 @@ func bulkUpdateBookJSONList(tx sqlExecer, bookID int64, column string, addValues
 			next = append(next, value)
 		}
 	}
-	for _, value := range cleanedStringList(addValues) {
-		next = uniqueMetadataStringList(append(next, value))
-	}
-	next = uniqueMetadataStringList(next)
+	next = append(next, cleanedStringList(addValues)...)
+	next = normalizeMetadataStringList(next)
 	valuesJSON, _ := json.Marshal(next)
 	_, err := tx.Exec(`UPDATE book_metadata SET `+column+` = ? WHERE book_id = ?`, string(valuesJSON), bookID)
 	return err

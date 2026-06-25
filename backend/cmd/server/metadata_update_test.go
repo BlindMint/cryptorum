@@ -37,12 +37,12 @@ func setupMetadataUpdateTestDB(t *testing.T) {
 	`)
 }
 
-func TestUpdateBookHandlerDeduplicatesGenresAndTags(t *testing.T) {
+func TestUpdateBookHandlerDeduplicatesMetadataLists(t *testing.T) {
 	setupMetadataUpdateTestDB(t)
 
 	body := `{
 		"title": "Updated",
-		"authors": ["Author"],
+		"authors": ["Author", " author ", "Second Author"],
 		"series_number": "",
 		"status": "reading",
 		"genres": ["Warhammer", " warhammer ", "Science Fiction"],
@@ -72,6 +72,14 @@ func TestUpdateBookHandlerDeduplicatesGenresAndTags(t *testing.T) {
 		t.Fatalf("status = %q, want ok", response.Status)
 	}
 
+	var authors []string
+	if err := json.Unmarshal([]byte(response.Book.Authors), &authors); err != nil {
+		t.Fatalf("decode authors: %v", err)
+	}
+	if !sameStringSet(authors, []string{"Author", "Second Author"}) || len(authors) != 2 {
+		t.Fatalf("authors = %#v, want deduplicated values", authors)
+	}
+
 	var genres []string
 	if err := json.Unmarshal([]byte(response.Book.Genres), &genres); err != nil {
 		t.Fatalf("decode genres: %v", err)
@@ -86,5 +94,45 @@ func TestUpdateBookHandlerDeduplicatesGenresAndTags(t *testing.T) {
 	}
 	if !sameStringSet(tags, []string{"Favorite", "To Read"}) || len(tags) != 2 {
 		t.Fatalf("tags = %#v, want deduplicated values", tags)
+	}
+}
+
+func TestApplyMetadataCandidateToBookDeduplicatesMetadataLists(t *testing.T) {
+	setupMetadataUpdateTestDB(t)
+
+	candidate := MetadataCandidate{
+		Title:   "Applied",
+		Authors: []string{"Author", " author ", "Second Author"},
+		Genres:  []string{"Warhammer", " warhammer ", "Science Fiction"},
+	}
+
+	if err := applyMetadataCandidateToBook(1, candidate, false); err != nil {
+		t.Fatalf("apply metadata candidate: %v", err)
+	}
+
+	var rawAuthors string
+	var rawGenres string
+	if err := appDB.QueryRow(`
+		SELECT COALESCE(authors, '[]'), COALESCE(genres, '[]')
+		FROM book_metadata
+		WHERE book_id = 1
+	`).Scan(&rawAuthors, &rawGenres); err != nil {
+		t.Fatalf("fetch metadata: %v", err)
+	}
+
+	var authors []string
+	if err := json.Unmarshal([]byte(rawAuthors), &authors); err != nil {
+		t.Fatalf("decode authors: %v", err)
+	}
+	if !sameStringSet(authors, []string{"Author", "Second Author"}) || len(authors) != 2 {
+		t.Fatalf("authors = %#v, want deduplicated values", authors)
+	}
+
+	var genres []string
+	if err := json.Unmarshal([]byte(rawGenres), &genres); err != nil {
+		t.Fatalf("decode genres: %v", err)
+	}
+	if !sameStringSet(genres, []string{"Warhammer", "Science Fiction"}) || len(genres) != 2 {
+		t.Fatalf("genres = %#v, want deduplicated values", genres)
 	}
 }

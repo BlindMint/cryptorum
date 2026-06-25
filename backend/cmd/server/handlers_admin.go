@@ -392,6 +392,9 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 		return fmt.Errorf("book not found")
 	}
 
+	candidate.Authors = normalizeMetadataStringList(candidate.Authors)
+	candidate.Genres = normalizeMetadataStringList(candidate.Genres)
+
 	authorsJSON, _ := json.Marshal(candidate.Authors)
 	genresJSON, _ := json.Marshal(candidate.Genres)
 
