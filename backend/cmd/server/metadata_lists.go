@@ -25,3 +25,7 @@ func uniqueMetadataStringList(values []string) []string {
 	}
 	return unique
 }
+
+func normalizeMetadataStringList(values []string) []string {
+	return uniqueMetadataStringList(values)
+}

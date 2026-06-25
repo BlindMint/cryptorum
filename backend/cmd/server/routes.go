@@ -1250,8 +1250,9 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.Genres = uniqueMetadataStringList(req.Genres)
-	req.Tags = uniqueMetadataStringList(req.Tags)
+	req.Authors = normalizeMetadataStringList(req.Authors)
+	req.Genres = normalizeMetadataStringList(req.Genres)
+	req.Tags = normalizeMetadataStringList(req.Tags)
 
 	authorsJSON, _ := json.Marshal(req.Authors)
 	genresJSON, _ := json.Marshal(req.Genres)
