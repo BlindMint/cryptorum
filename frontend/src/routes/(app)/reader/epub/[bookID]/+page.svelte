@@ -9,6 +9,7 @@
 	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 	import ReaderProgressTrack from '$lib/components/ReaderProgressTrack.svelte';
 	import { getPreferredTextFormat, getReaderRouteKind, normalizeBookFormat } from '$lib/utils/book-formats';
+	import { getReaderDisplayTitle } from '$lib/utils/reader-title';
 	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
 	import { isBottomSystemGestureStart } from '$lib/utils/system-gesture-guard';
 	import {
@@ -22,6 +23,7 @@
 	} from '$lib/stores/bookCache';
 
 	let book = $state<any>(null);
+	let readerFiles = $state<any[]>([]);
 	let bookFormat = $state('epub');
 	let bookLoaded = $state(false);
 	let loading = $state(true);
@@ -122,6 +124,7 @@
 	let readerPointerMoved = false;
 
 	const progress = $derived(currentProgress);
+	const readerTitle = $derived(getReaderDisplayTitle(book, readerFiles, loading, bookFormat));
 	const progressPreviewLabel = $derived(
 		progressPreviewPercent !== null
 			? progressPreviewSection !== null && numChapters() > 0
@@ -207,11 +210,12 @@
 				book = await bookRes.json();
 			} else {
 				error = 'Failed to load book details';
-			}
-			if (filesRes.ok) {
-				const files = await filesRes.json();
-				const requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
-				const preferredFormat = getPreferredTextFormat(files);
+				}
+				if (filesRes.ok) {
+					const files = await filesRes.json();
+					readerFiles = files;
+					const requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
+					const preferredFormat = getPreferredTextFormat(files);
 				bookFormat = requestedFormat && getReaderRouteKind(requestedFormat) === 'epub'
 					? requestedFormat
 					: preferredFormat || 'epub';
@@ -1834,7 +1838,7 @@
 </script>
 
 <svelte:head>
-	<title>{book?.title || 'Reading'} - Cryptorum</title>
+	<title>{readerTitle === 'Loading...' ? 'Reading' : readerTitle} - Cryptorum</title>
 	<link rel="stylesheet" href="/fonts/spectral.css" />
 </svelte:head>
 
@@ -1855,7 +1859,7 @@
 						<path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
 					</svg>
 				</div>
-				<p class="initial-loading-title">{book?.title || 'Loading...'}</p>
+				<p class="initial-loading-title">{readerTitle}</p>
 				<div class="initial-loading-spinner"></div>
 				<p class="initial-loading-message">
 					{loading || !book ? 'Loading book details...' : processingMessage}
@@ -1902,7 +1906,7 @@
 		</div>
 
 			<div class="nav-center">
-				<span class="book-title">{book?.title || 'Loading...'}</span>
+					<span class="book-title">{readerTitle}</span>
 					{#if showCurrentSection && currentChapter}
 						<span class="chapter-title">{currentChapter}</span>
 					{/if}

@@ -5,8 +5,10 @@
 	import { browser } from '$app/environment';
 	import { readerSettings, waveformStyles, skipIntervalOptions, sleepTimerOptions, type AudioReaderSetting } from '$lib/stores/readerSettings';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
+	import { getReaderDisplayTitle } from '$lib/utils/reader-title';
 
 	let book = $state<any>(null);
+	let readerFiles = $state<any[]>([]);
 	let loading = $state(true);
 	let audioElement = $state<HTMLAudioElement | null>(null);
 	let isPlaying = $state(false);
@@ -32,6 +34,7 @@
 	let handlePageExit: (() => void) | null = null;
 	let requestedFormat = $state('');
 	let closeTasksStarted = false;
+	const readerTitle = $derived(getReaderDisplayTitle(book, readerFiles, loading, requestedFormat));
 
 	let settings = $state<AudioReaderSetting>({
 		playbackSpeed: 1.0,
@@ -54,12 +57,18 @@
 	let activeSettingsTab = $state<'playback' | 'display' | 'chapters' | 'accessibility'>('playback');
 
 	onMount(async () => {
-		const bookId = $page.params.bookID;
-		try {
-			const res = await fetch(`/api/books/${bookId}`);
-			if (res.ok) {
-				book = await res.json();
-				requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
+			const bookId = $page.params.bookID;
+			try {
+				const [res, filesRes] = await Promise.all([
+					fetch(`/api/books/${bookId}`),
+					fetch(`/api/books/${bookId}/files`)
+				]);
+				if (res.ok) {
+					book = await res.json();
+					if (filesRes.ok) {
+						readerFiles = await filesRes.json();
+					}
+					requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
 				await fetchProgress();
 				await startSession();
 			}
@@ -448,7 +457,7 @@
 </script>
 
 <svelte:head>
-	<title>{book?.title || 'Reading'} - Cryptorum</title>
+	<title>{readerTitle === 'Loading...' ? 'Reading' : readerTitle} - Cryptorum</title>
 </svelte:head>
 
 <div 
@@ -466,9 +475,9 @@
 			<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
 			</svg>
-		</a>
-		<div class="text-center max-w-md mx-auto">
-			<h1 class="text-white font-medium truncate">{book?.title || 'Loading...'}</h1>
+			</a>
+			<div class="text-center max-w-md mx-auto">
+				<h1 class="text-white font-medium truncate">{readerTitle}</h1>
 			{#if currentChapter > 0 && chapters.length > 0}
 				<p class="text-white/60 text-sm truncate">{chapters[currentChapter]?.title || ''}</p>
 			{/if}

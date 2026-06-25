@@ -6,12 +6,14 @@
 	import { currentTheme as appThemeStore, resolveThemeColors, addCustomTheme, removeCustomTheme, generateId, type FullTheme } from '$lib/stores/theme';
 	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
+	import { getReaderDisplayTitle } from '$lib/utils/reader-title';
 
 	interface ProcessedWord {
 		text: string;
 	}
 
 	let book = $state<any>(null);
+	let readerFiles = $state<any[]>([]);
 	let loading = $state(true);
 	let loadError = $state('');
 	let words = $state<ProcessedWord[]>([]);
@@ -36,6 +38,8 @@
 	let sessionEnded = false;
 	let handlePageExit: (() => void) | null = null;
 	let closeTasksStarted = false;
+	let requestedFormat = $state('');
+	const readerTitle = $derived(getReaderDisplayTitle(book, readerFiles, loading, requestedFormat));
 
 	// Word picker state
 	let wordPickerPending = $state(0);   // word the user is about to jump to
@@ -210,14 +214,21 @@
 		};
 
 		void (async () => {
-			await document.fonts?.ready;
-			const bookId = $page.params.bookID;
-			try {
-				const res = await fetch(`/api/books/${bookId}`);
-				if (res.ok) {
-					book = await res.json();
-					await fetchProgress();
-					await loadText();
+				await document.fonts?.ready;
+				const bookId = $page.params.bookID;
+				requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
+				try {
+					const [res, filesRes] = await Promise.all([
+						fetch(`/api/books/${bookId}`),
+						fetch(`/api/books/${bookId}/files`)
+					]);
+					if (res.ok) {
+						book = await res.json();
+						if (filesRes.ok) {
+							readerFiles = await filesRes.json();
+						}
+						await fetchProgress();
+						await loadText();
 					await startSession();
 				}
 			} catch (e) {
@@ -345,7 +356,6 @@
 
 	async function loadText() {
 		try {
-			const requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
 			const res = await fetch(`/api/books/${book.id}/text${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`);
 			if (res.ok) {
 				const text = await res.text();
@@ -724,7 +734,7 @@
 </script>
 
 <svelte:head>
-	<title>{book?.title || 'Speed Reader'} - Cryptorum</title>
+	<title>{readerTitle === 'Loading...' ? 'Speed Reader' : readerTitle} - Cryptorum</title>
 	<link rel="stylesheet" href="/fonts/spectral.css" />
 </svelte:head>
 
@@ -748,9 +758,9 @@
 			</a>
 		</div>
 
-		<div class="nav-center">
-			<span class="book-title">{book?.title || 'Loading...'}</span>
-		</div>
+			<div class="nav-center">
+				<span class="book-title">{readerTitle}</span>
+			</div>
 
 		<div class="nav-right">
 				<button
