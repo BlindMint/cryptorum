@@ -5,10 +5,12 @@
 	import { readerSettings, cbxFitModes, cbxScrollModes, type CbxReaderSetting } from '$lib/stores/readerSettings';
 	import ReaderProgressTrack from '$lib/components/ReaderProgressTrack.svelte';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
+	import { getReaderDisplayTitle } from '$lib/utils/reader-title';
 	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
 	import { isBottomSystemGestureStart } from '$lib/utils/system-gesture-guard';
 
 	let book = $state<any>(null);
+	let readerFiles = $state<any[]>([]);
 	let loading = $state(true);
 	let numPages = $state(0);
 	let currentPage = $state(1);
@@ -76,6 +78,7 @@
 	const STRIP_PADDING_PX = 16;
 
 	const progress = $derived(numPages > 0 ? (currentPage / numPages) * 100 : 0);
+	const readerTitle = $derived(getReaderDisplayTitle(book, readerFiles, loading, requestedFormat));
 
 	async function loadComic(bookId: string, formatParam: string | null) {
 		const nextFormat = normalizeBookFormat(formatParam);
@@ -97,17 +100,24 @@
 		pendingProgressPage = null;
 		leftSidebarOpen = false;
 		rightSidebarOpen = false;
-		currentSessionId = null;
-		sessionEnded = false;
-		closeTasksStarted = false;
-		requestedFormat = nextFormat;
+			currentSessionId = null;
+			sessionEnded = false;
+			closeTasksStarted = false;
+			requestedFormat = nextFormat;
+			readerFiles = [];
 
-		try {
-			const res = await fetch(`/api/books/${bookId}`);
-			if (loadToken !== activeComicLoadToken) return;
-			if (res.ok) {
-				book = await res.json();
-				await fetchProgress();
+			try {
+				const [res, filesRes] = await Promise.all([
+					fetch(`/api/books/${bookId}`),
+					fetch(`/api/books/${bookId}/files`)
+				]);
+				if (loadToken !== activeComicLoadToken) return;
+				if (res.ok) {
+					book = await res.json();
+					if (filesRes.ok) {
+						readerFiles = await filesRes.json();
+					}
+					await fetchProgress();
 				if (loadToken !== activeComicLoadToken) return;
 				await startSession();
 				const pagesRes = await fetch(`/api/cbx/${bookId}/pages${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`);
@@ -831,7 +841,7 @@
 </script>
 
 <svelte:head>
-	<title>{book?.title || 'Reading'} - Cryptorum</title>
+	<title>{readerTitle === 'Loading...' ? 'Reading' : readerTitle} - Cryptorum</title>
 </svelte:head>
 
 <div
@@ -873,8 +883,8 @@
 			</button>
 		</div>
 
-		<div class="nav-center">
-			<span class="book-title">{book?.title || 'Loading...'}</span>
+			<div class="nav-center">
+				<span class="book-title">{readerTitle}</span>
 			{#if showCurrentSection}
 				<span class="chapter-title">Page {currentPage} / {Math.max(numPages, currentPage)}</span>
 			{/if}

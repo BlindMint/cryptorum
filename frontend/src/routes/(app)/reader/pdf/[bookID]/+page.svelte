@@ -6,12 +6,14 @@
 	import { defaultReaderSettings, readerSettings } from '$lib/stores/readerSettings';
 	import type { PdfReaderSetting, PdfViewMode } from '$lib/stores/readerSettings';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
+	import { getReaderDisplayTitle } from '$lib/utils/reader-title';
 	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
 	import { isBottomSystemGestureStart } from '$lib/utils/system-gesture-guard';
 	import EmbedPDFViewer from '$lib/components/EmbedPDFViewer.svelte';
 	import ReaderProgressTrack from '$lib/components/ReaderProgressTrack.svelte';
 
 	let book = $state<any>(null);
+	let readerFiles = $state<any[]>([]);
 	let loading = $state(true);
 	let error = $state('');
 	let currentPage = $state(1);
@@ -59,6 +61,7 @@
 			: ''
 	);
 	const readerChromeReady = $derived(embedPdfViewerReady && !loading && !error);
+	const readerTitle = $derived(getReaderDisplayTitle(book, readerFiles, loading, requestedFormat));
 
 	const topBarHideDelayMs = 2800;
 	const scrollHideThresholdPx = 8;
@@ -128,16 +131,7 @@
 	}
 
 	function getPdfDisplayTitle() {
-		const title = String(book?.title || book?.metadata?.title || '').trim();
-		if (title) return title;
-
-		const filePath = String(book?.path || book?.file_path || book?.filename || book?.file_name || '').trim();
-		if (filePath) {
-			const fileName = filePath.split(/[\\/]/).pop();
-			if (fileName) return fileName.replace(/\.[^.]+$/, '');
-		}
-
-		return book ? 'PDF Document' : 'Loading...';
+		return readerTitle;
 	}
 
 	function getPdfSourceUrl() {
@@ -787,11 +781,17 @@
 			const bookId = $page.params.bookID;
 			requestedFormat = normalizeBookFormat($page.url.searchParams.get('format')) || 'pdf';
 			try {
-				const res = await fetch(`/api/books/${bookId}`);
-				if (res.ok) {
-					book = await res.json();
-					numPages = book.page_count || 0;
-					await fetchProgress();
+					const [bookRes, filesRes] = await Promise.all([
+						fetch(`/api/books/${bookId}`),
+						fetch(`/api/books/${bookId}/files`)
+					]);
+					if (bookRes.ok) {
+						book = await bookRes.json();
+						if (filesRes.ok) {
+							readerFiles = await filesRes.json();
+						}
+						numPages = book.page_count || 0;
+						await fetchProgress();
 					if (
 						numPages <= 0 &&
 						(savedProgress?.page > 0 || savedProgress?.percent > 0)
@@ -803,9 +803,9 @@
 					embedPdfRestoringInitialPage = embedPdfInitialPage > 1;
 					embedPdfProgressReady = true;
 					await startSession();
-				} else {
-					error = `Failed to load book details: ${res.status}`;
-				}
+					} else {
+						error = `Failed to load book details: ${bookRes.status}`;
+					}
 			} catch (e) {
 				console.error('Failed to load book:', e);
 				error = 'Failed to load book';
@@ -865,7 +865,7 @@
 </script>
 
 <svelte:head>
-	<title>{book?.title || 'Reading'} - Cryptorum</title>
+	<title>{readerTitle === 'Loading...' ? 'Reading' : readerTitle} - Cryptorum</title>
 </svelte:head>
 
 <div
