@@ -13,6 +13,7 @@
 		type MetadataEditForm
 	} from '$lib/utils/metadata-edit';
 	import {
+		getBookDetailContextUrl,
 		getMetadataEditSession,
 		getMetadataEditUrl,
 		type MetadataEditSelectionSession
@@ -51,7 +52,10 @@
 	});
 
 	function loadSelectionSession() {
-		selectionSession = getMetadataEditSession($page.url.searchParams.get('selection'));
+		const selectionId = $page.url.searchParams.get('selection');
+		const contextId = $page.url.searchParams.get('context');
+		const sessionId = selectionId || contextId;
+		selectionSession = sessionId ? getMetadataEditSession(sessionId) : null;
 	}
 
 	function getSelectionIndex(): number {
@@ -62,12 +66,23 @@
 	}
 
 	function hasSelectionNavigation(): boolean {
-		return !!selectionSession && selectionSession.bookIds.length > 1 && (!book?.id || selectionSession.bookIds.includes(book.id));
+		return !!selectionSession && getNavigationTotal() > 1 && (!book?.id || selectionSession.bookIds.includes(book.id) || !!selectionSession.navigationUrl);
 	}
 
 	function getPositionLabel(): string {
 		if (!hasSelectionNavigation() || !selectionSession) return '';
-		return `${Math.min(getSelectionIndex() + 1, selectionSession.bookIds.length)} of ${selectionSession.bookIds.length}`;
+		return `${Math.min(getSelectionIndex() + 1, getNavigationTotal())} of ${getNavigationTotal()}`;
+	}
+
+	function getNavigationTotal(): number {
+		if (!selectionSession) return 0;
+		return Number.isFinite(selectionSession.totalCount) && (selectionSession.totalCount || 0) > 0
+			? selectionSession.totalCount || 0
+			: selectionSession.bookIds.length;
+	}
+
+	function isSelectionEditSession(): boolean {
+		return !!selectionSession && selectionSession.kind !== 'context';
 	}
 
 	function initializeForm() {
@@ -140,21 +155,51 @@
 
 	async function saveAndNext() {
 		if (await saveMetadata()) {
-			goToSelectionOffset(1);
+			await goToSelectionOffset(1);
 		}
 	}
 
-	function goToSelectionOffset(offset: number) {
+	async function fetchContextNavigation(offset: number): Promise<{ bookId: number; index: number; total: number } | null> {
+		if (!selectionSession?.navigationUrl || !book?.id) return null;
+		const url = new URL(selectionSession.navigationUrl, window.location.origin);
+		url.searchParams.set('current_id', String(book.id));
+		url.searchParams.set('direction', offset < 0 ? 'previous' : 'next');
+		const res = await fetch(url.pathname + url.search, { credentials: 'same-origin' });
+		if (!res.ok) return null;
+		const data = await res.json();
+		const bookId = Number(data.book_id || 0);
+		const index = Number(data.index);
+		const total = Number(data.total);
+		if (!Number.isFinite(bookId) || bookId <= 0 || !Number.isFinite(index)) return null;
+		if (Number.isFinite(total) && total > 0) {
+			selectionSession = { ...selectionSession, totalCount: total };
+		}
+		return { bookId, index, total };
+	}
+
+	async function goToSelectionOffset(offset: number) {
 		if (!hasSelectionNavigation() || !selectionSession) return;
 		const nextIndex = getSelectionIndex() + offset;
-		if (nextIndex < 0 || nextIndex >= selectionSession.bookIds.length) return;
-		const nextBookId = selectionSession.bookIds[nextIndex];
-		goto(getMetadataEditUrl(nextBookId, selectionSession, nextIndex));
+		const total = getNavigationTotal();
+		if (nextIndex < 0 || nextIndex >= total) return;
+		let nextBookId = selectionSession.bookIds[nextIndex];
+		let resolvedIndex = nextIndex;
+		if (!nextBookId && selectionSession.kind === 'context') {
+			const resolved = await fetchContextNavigation(offset);
+			if (!resolved) return;
+			nextBookId = resolved.bookId;
+			resolvedIndex = resolved.index;
+		}
+		goto(getMetadataEditUrl(nextBookId, selectionSession, resolvedIndex));
 	}
 
 	function backToSource() {
-		if (hasSelectionNavigation() && selectionSession?.sourcePath) {
-			goto(selectionSession.sourcePath);
+		if (isSelectionEditSession() && selectionSession?.sourcePath) {
+			goto(selectionSession.sourcePath, { replaceState: true });
+			return;
+		}
+		if (selectionSession?.kind === 'context' && book?.id) {
+			goto(getBookDetailContextUrl(book.id, selectionSession, getSelectionIndex()), { replaceState: true });
 			return;
 		}
 		if (book?.id) {
@@ -261,14 +306,14 @@
 			<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-surface-text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
 			</svg>
-			{hasSelectionNavigation() ? 'Back to Selection' : 'Back to Book Details'}
+			{isSelectionEditSession() ? 'Back to Selection' : 'Back to Book Details'}
 		</button>
 
 		{#if hasSelectionNavigation() && selectionSession}
 			<div class="flex items-center gap-2">
 				<button
 					type="button"
-					onclick={() => goToSelectionOffset(-1)}
+					onclick={() => void goToSelectionOffset(-1)}
 					disabled={getSelectionIndex() <= 0 || saving}
 					class="inline-flex items-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
 					aria-label="Previous selected book"
@@ -278,8 +323,8 @@
 				<span class="min-w-14 text-center text-xs font-medium uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">{getPositionLabel()}</span>
 				<button
 					type="button"
-					onclick={() => goToSelectionOffset(1)}
-					disabled={getSelectionIndex() >= selectionSession.bookIds.length - 1 || saving}
+					onclick={() => void goToSelectionOffset(1)}
+					disabled={getSelectionIndex() >= getNavigationTotal() - 1 || saving}
 					class="inline-flex items-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
 					aria-label="Next selected book"
 				>
@@ -373,7 +418,7 @@
 							{saving ? 'Saving...' : 'Save'}
 						</button>
 						{#if hasSelectionNavigation() && selectionSession}
-							<button onclick={saveAndNext} disabled={saving || getSelectionIndex() >= selectionSession.bookIds.length - 1} class="rounded-lg bg-[var(--color-primary-500)] px-4 py-2 font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md disabled:opacity-50">
+							<button onclick={saveAndNext} disabled={saving || getSelectionIndex() >= getNavigationTotal() - 1} class="rounded-lg bg-[var(--color-primary-500)] px-4 py-2 font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md disabled:opacity-50">
 								{saving ? 'Saving...' : 'Save & Next'}
 							</button>
 						{:else}
