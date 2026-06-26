@@ -395,7 +395,7 @@
 						<button
 							onclick={() => showMetadataLookup = true}
 							type="button"
-							class="inline-flex items-center rounded-lg bg-[var(--color-primary-500)] px-3 py-1.5 text-sm text-white transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+							class="accent-action inline-flex items-center rounded-lg px-3 py-1.5 text-sm transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 						>
 							Lookup Metadata
 						</button>
@@ -418,11 +418,11 @@
 							{saving ? 'Saving...' : 'Save'}
 						</button>
 						{#if hasSelectionNavigation() && selectionSession}
-							<button onclick={saveAndNext} disabled={saving || getSelectionIndex() >= getNavigationTotal() - 1} class="rounded-lg bg-[var(--color-primary-500)] px-4 py-2 font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md disabled:opacity-50">
+							<button onclick={saveAndNext} disabled={saving || getSelectionIndex() >= getNavigationTotal() - 1} class="accent-action rounded-lg px-4 py-2 font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-md">
 								{saving ? 'Saving...' : 'Save & Next'}
 							</button>
 						{:else}
-							<button onclick={async () => { if (await saveMetadata()) backToSource(); }} disabled={saving} class="rounded-lg bg-[var(--color-primary-500)] px-4 py-2 font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md disabled:opacity-50">
+							<button onclick={async () => { if (await saveMetadata()) backToSource(); }} disabled={saving} class="accent-action rounded-lg px-4 py-2 font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-md">
 								{saving ? 'Saving...' : 'Save & Close'}
 							</button>
 						{/if}

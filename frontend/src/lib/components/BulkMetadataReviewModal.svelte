@@ -545,7 +545,7 @@
 						{#if !job}
 							<button
 								type="button"
-								class="rounded-md bg-[var(--color-primary-500)] px-3 py-1.5 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+								class="accent-action rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:hover:translate-y-0 disabled:hover:shadow-none"
 								onclick={() => showLookupConfirm = true}
 								disabled={queueingLookup || bookIds.length === 0 || loadingBooks}
 							>
@@ -560,7 +560,7 @@
 						</button>
 						<button
 							type="button"
-							class="rounded-md bg-[var(--color-primary-500)] px-3 py-1.5 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+							class="accent-action rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:hover:translate-y-0 disabled:hover:shadow-none"
 							onclick={() => applySelections(selectedItems)}
 							disabled={applying || selectedItems.length === 0}
 						>
@@ -758,7 +758,7 @@
 						type="button"
 						onclick={queueLookupJob}
 						disabled={queueingLookup}
-						class="rounded-lg bg-[var(--color-primary-500)] px-4 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+						class="accent-action rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:hover:translate-y-0 disabled:hover:shadow-none"
 					>
 						{queueingLookup ? 'Queueing...' : 'Start Lookup'}
 					</button>

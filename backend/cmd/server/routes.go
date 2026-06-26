@@ -3058,7 +3058,58 @@ func searchQueryValues(r *http.Request, key string, splitComma bool) []string {
 
 type metadataOption struct {
 	Name      string `json:"name"`
+	Value     string `json:"value,omitempty"`
 	BookCount int64  `json:"book_count"`
+}
+
+type authorMetadataOption struct {
+	name      string
+	value     string
+	bookCount int64
+}
+
+func addAuthorMetadataOption(counts map[string]*authorMetadataOption, seenInRow map[string]bool, rawAuthor string, bookCount int64) {
+	value := strings.TrimSpace(rawAuthor)
+	if value == "" {
+		return
+	}
+	key := authorMetadataOptionKey(value)
+	if seenInRow[key] {
+		return
+	}
+	seenInRow[key] = true
+
+	if existing, ok := counts[key]; ok {
+		existing.bookCount += bookCount
+		return
+	}
+
+	counts[key] = &authorMetadataOption{
+		name:      canonicalAuthorOptionName(value),
+		value:     value,
+		bookCount: bookCount,
+	}
+}
+
+func sortedAuthorMetadataOptions(counts map[string]*authorMetadataOption) []metadataOption {
+	items := make([]metadataOption, 0, len(counts))
+	for _, item := range counts {
+		if strings.TrimSpace(item.name) == "" || strings.TrimSpace(item.value) == "" {
+			continue
+		}
+		items = append(items, metadataOption{
+			Name:      item.name,
+			Value:     item.value,
+			BookCount: item.bookCount,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].BookCount == items[j].BookCount {
+			return items[i].Name < items[j].Name
+		}
+		return items[i].BookCount > items[j].BookCount
+	})
+	return items
 }
 
 func sortedMetadataOptions(counts map[string]int64) []metadataOption {
@@ -3094,6 +3145,7 @@ func getJSONMetadataOptions(column string, hierarchical bool, current *AppUser) 
 	defer rows.Close()
 
 	counts := make(map[string]int64)
+	authorCounts := make(map[string]*authorMetadataOption)
 	for rows.Next() {
 		var jsonStr string
 		var bookCount int64
@@ -3108,13 +3160,8 @@ func getJSONMetadataOptions(column string, hierarchical bool, current *AppUser) 
 
 		prefixesInRow := make(map[string]bool)
 		for _, value := range values {
-			if !hierarchical {
-				value = strings.TrimSpace(value)
-				key := normalizedAuthorMatchKey(value)
-				if key != "" && !prefixesInRow[key] {
-					prefixesInRow[key] = true
-					counts[canonicalAuthorOptionName(value)] += bookCount
-				}
+			if !hierarchical && column == "authors" {
+				addAuthorMetadataOption(authorCounts, prefixesInRow, value, bookCount)
 				continue
 			}
 
@@ -3130,6 +3177,9 @@ func getJSONMetadataOptions(column string, hierarchical bool, current *AppUser) 
 		}
 	}
 
+	if !hierarchical && column == "authors" {
+		return sortedAuthorMetadataOptions(authorCounts), rows.Err()
+	}
 	return sortedMetadataOptions(counts), rows.Err()
 }
 
@@ -3264,6 +3314,7 @@ func getJSONMetadataOptionsForScope(column string, hierarchical bool, scopedBook
 	defer rows.Close()
 
 	counts := make(map[string]int64)
+	authorCounts := make(map[string]*authorMetadataOption)
 	for rows.Next() {
 		var jsonStr string
 		var bookCount int64
@@ -3278,13 +3329,8 @@ func getJSONMetadataOptionsForScope(column string, hierarchical bool, scopedBook
 
 		prefixesInRow := make(map[string]bool)
 		for _, value := range values {
-			if !hierarchical {
-				value = strings.TrimSpace(value)
-				key := normalizedAuthorMatchKey(value)
-				if key != "" && !prefixesInRow[key] {
-					prefixesInRow[key] = true
-					counts[canonicalAuthorOptionName(value)] += bookCount
-				}
+			if !hierarchical && column == "authors" {
+				addAuthorMetadataOption(authorCounts, prefixesInRow, value, bookCount)
 				continue
 			}
 
@@ -3300,6 +3346,9 @@ func getJSONMetadataOptionsForScope(column string, hierarchical bool, scopedBook
 		}
 	}
 
+	if !hierarchical && column == "authors" {
+		return sortedAuthorMetadataOptions(authorCounts), rows.Err()
+	}
 	return sortedMetadataOptions(counts), rows.Err()
 }
 

@@ -938,7 +938,7 @@
 			aria-busy={navigatingBook || refreshingBook}
 		>
 				<div class="flex items-start justify-between gap-4">
-					<div class="min-w-0 flex-1">
+						<div class="min-w-0 flex-1">
 						{#if editing}
 							<input
 								id="book-title"
@@ -994,17 +994,17 @@
 									</button>
 								{/each}
 							</div>
-						{/if}
-					</div>
+							{/if}
+						</div>
 						<div class="flex flex-shrink-0 flex-col items-end gap-2">
 							<div class="flex flex-wrap justify-end gap-2">
-							{#if editing}
-								<button
-									onclick={cancelEditing}
-									disabled={saving}
-									class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50"
-								>
-									Cancel
+								{#if editing}
+									<button
+										onclick={cancelEditing}
+										disabled={saving}
+										class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50"
+									>
+										Cancel
 								</button>
 								<button
 									onclick={applyMetadataEdits}
@@ -1019,26 +1019,26 @@
 									class="group rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] p-2 text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:bg-[var(--color-surface-600)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 									title="Edit Metadata"
 									aria-label="Edit metadata"
-								>
-									<svg class="h-5 w-5 transition-colors duration-200 ease-out group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
-									</svg>
-								</button>
-							{/if}
+									>
+										<svg class="h-5 w-5 transition-colors duration-200 ease-out group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+										</svg>
+									</button>
+								{/if}
 							</div>
 							{#if editing}
-									<button
-										type="button"
-										onclick={() => showMetadataLookup = true}
-										class="rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
-									>
+								<button
+									type="button"
+									onclick={() => showMetadataLookup = true}
+									class="accent-action rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+								>
 									Lookup Metadata
 								</button>
 							{/if}
 						</div>
-			</div>
+					</div>
 
-				<div class="mt-7 flex flex-col gap-6 md:flex-row md:items-start md:gap-8">
+					<div class="mt-7 flex flex-col gap-6 md:flex-row md:items-start md:gap-8">
 					<div class="w-full max-w-[13rem] mx-auto md:mx-0 flex-shrink-0 flex flex-col">
 						<input bind:this={coverFileInput} type="file" accept="image/*" class="hidden" onchange={uploadCustomCover} />
 						<div class="relative">
@@ -1157,15 +1157,15 @@
 											<span class="truncate">{getPrimaryReadActionLabel()}</span>
 											<span class="text-[10px] uppercase tracking-[0.14em]">{getFormatDisplayLabel(primaryReadFormat)}</span>
 										</button>
-									{:else}
-										<a
-											href={getBookReaderHref(book.id, primaryReadFormat, `/book/${book.id}`)}
-											class="flex min-w-0 flex-1 items-center justify-between gap-3 bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-colors duration-200 ease-out hover:bg-[var(--color-primary-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
+										{:else}
+											<a
+												href={getBookReaderHref(book.id, primaryReadFormat, `/book/${book.id}`)}
+												class="accent-action flex min-w-0 flex-1 items-center justify-between gap-3 border-r-0 px-3 py-2 text-sm font-medium transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
 										>
 											<span class="truncate">{getPrimaryReadActionLabel()}</span>
-											<span class="text-[10px] uppercase tracking-[0.14em] text-white/80">{getFormatDisplayLabel(primaryReadFormat)}</span>
+											<span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-primary-300)]">{getFormatDisplayLabel(primaryReadFormat)}</span>
 										</a>
-									{/if}
+								{/if}
 								{:else}
 									<button
 										type="button"
@@ -1181,7 +1181,7 @@
 										type="button"
 										onclick={() => formatMenuOpen = !formatMenuOpen}
 										disabled={editing}
-										class="inline-flex items-center justify-center border-l border-white/20 bg-[var(--color-primary-500)] px-3 text-white transition-colors duration-200 ease-out hover:bg-[var(--color-primary-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:cursor-not-allowed disabled:bg-[var(--color-surface-700)] disabled:text-[var(--color-surface-text-muted)]"
+										class="accent-action inline-flex items-center justify-center px-3 transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:bg-[var(--color-surface-700)] disabled:text-[var(--color-surface-text-muted)]"
 										aria-label="Choose reader format"
 										aria-expanded={formatMenuOpen}
 									>

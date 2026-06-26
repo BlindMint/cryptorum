@@ -58,6 +58,23 @@ body::before {
 	z-index: -1;
 }
 
+.accent-action {
+	border: 1px solid color-mix(in srgb, var(--color-primary-500) 55%, transparent);
+	background: color-mix(in srgb, var(--color-primary-500) 10%, var(--color-surface-overlay));
+	color: var(--color-primary-400);
+}
+
+.accent-action:hover:not(:disabled) {
+	border-color: color-mix(in srgb, var(--color-primary-400) 70%, transparent);
+	background: color-mix(in srgb, var(--color-primary-500) 16%, var(--color-surface-overlay));
+	color: var(--color-primary-400);
+}
+
+.accent-action:disabled {
+	cursor: not-allowed;
+	opacity: 0.5;
+}
+
 @keyframes scan-spin-counterclockwise {
 	from {
 		transform: rotate(0deg);

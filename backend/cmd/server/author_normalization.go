@@ -1,8 +1,12 @@
 package main
 
 import (
+	"database/sql/driver"
+	"fmt"
 	"strings"
 	"unicode"
+
+	"modernc.org/sqlite"
 )
 
 var authorCredentialSuffixes = map[string]string{
@@ -70,6 +74,26 @@ var authorTitlePrefixes = map[string]string{
 	"dame":      "Dame",
 }
 
+func init() {
+	sqlite.MustRegisterDeterministicScalarFunction(
+		"cryptorum_author_match_key",
+		1,
+		func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+			if len(args) == 0 || args[0] == nil {
+				return "", nil
+			}
+			switch value := args[0].(type) {
+			case string:
+				return normalizedAuthorMatchKey(value), nil
+			case []byte:
+				return normalizedAuthorMatchKey(string(value)), nil
+			default:
+				return normalizedAuthorMatchKey(strings.TrimSpace(fmt.Sprint(value))), nil
+			}
+		},
+	)
+}
+
 func normalizedAuthorMatchKey(author string) string {
 	author = canonicalAuthorDisplay(author)
 	var builder strings.Builder
@@ -134,24 +158,46 @@ func canonicalAuthorOptionName(author string) string {
 }
 
 func normalizedAuthorSQLExpression(valueExpression string) string {
-	normalized := "LOWER(" + valueExpression + ")"
-	for _, char := range []string{
-		" ", ".", ",", "'", "\"", "`", "’", "‘", "“", "”",
-		"(", ")", "[", "]", "{", "}", "-", "–", "—", "_",
-		"/", "\\", ":", ";", "&", "+", "!",
-	} {
-		normalized = "REPLACE(" + normalized + ", " + sqlStringLiteral(char) + ", '')"
+	return "cryptorum_author_match_key(" + valueExpression + ")"
+}
+
+func authorFilterShouldUseExactValue(author string) bool {
+	trimmed := strings.TrimSpace(author)
+	if trimmed == "" {
+		return true
 	}
-	return normalized
+	for _, r := range trimmed {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return true
+		}
+		break
+	}
+	return len([]rune(normalizedAuthorMatchKey(trimmed))) < 2
+}
+
+func authorMetadataOptionKey(author string) string {
+	if authorFilterShouldUseExactValue(author) {
+		return "exact:" + strings.TrimSpace(author)
+	}
+	return "normalized:" + normalizedAuthorMatchKey(author)
 }
 
 func addAuthorFilterCondition(addFilterCondition func(string, ...interface{}), column string, author string) {
+	rawAuthor := strings.TrimSpace(author)
 	key := normalizedAuthorMatchKey(author)
-	if key == "" {
+	if rawAuthor == "" || key == "" {
+		return
+	}
+	if authorFilterShouldUseExactValue(rawAuthor) {
+		addFilterCondition(
+			`EXISTS (SELECT 1 FROM json_each(COALESCE(`+column+`, '[]')) WHERE value = ?)`,
+			rawAuthor,
+		)
 		return
 	}
 	addFilterCondition(
-		`EXISTS (SELECT 1 FROM json_each(COALESCE(`+column+`, '[]')) WHERE `+normalizedAuthorSQLExpression("value")+` = ?)`,
+		`EXISTS (SELECT 1 FROM json_each(COALESCE(`+column+`, '[]')) WHERE value = ? OR `+normalizedAuthorSQLExpression("value")+` = ?)`,
+		rawAuthor,
 		key,
 	)
 }

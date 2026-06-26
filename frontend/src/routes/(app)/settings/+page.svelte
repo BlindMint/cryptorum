@@ -2216,16 +2216,16 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 							onclick={() => regenerateBookCovers('missing')}
 							disabled={coverRegenerating}
 							class="h-10 whitespace-nowrap px-3 py-2 rounded-lg border border-[var(--color-surface-border)] text-sm text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors disabled:opacity-50"
-						>
-							Regenerate Missing
-						</button>
-						<button
-							onclick={() => regenerateBookCovers('all')}
-							disabled={coverRegenerating}
-							class="h-10 whitespace-nowrap px-3 py-2 rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-sm text-white transition-colors disabled:opacity-50"
-						>
-							{coverRegenerating ? 'Starting...' : 'Regenerate All'}
-						</button>
+							>
+								Regenerate Missing
+							</button>
+							<button
+								onclick={() => regenerateBookCovers('all')}
+								disabled={coverRegenerating}
+								class="accent-action h-10 whitespace-nowrap rounded-lg px-3 py-2 text-sm transition-colors"
+							>
+								{coverRegenerating ? 'Starting...' : 'Regenerate All'}
+							</button>
 					</div>
 				</div>
 				<div class="p-6 space-y-6">
@@ -2330,14 +2330,14 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 							{:else}
 								Stored covers are regenerated from embedded image data where available.
 							{/if}
-						</p>
-						<button
-							onclick={saveBookCoverSettings}
-							disabled={coverSettingsSaving}
-							class="px-4 py-2 rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white transition-colors disabled:opacity-50"
-						>
-							{coverSettingsSaved ? 'Saved' : coverSettingsSaving ? 'Saving...' : 'Save Cover Settings'}
-						</button>
+							</p>
+							<button
+								onclick={saveBookCoverSettings}
+								disabled={coverSettingsSaving}
+								class="accent-action rounded-lg px-4 py-2 transition-colors"
+							>
+								{coverSettingsSaved ? 'Saved' : coverSettingsSaving ? 'Saving...' : 'Save Cover Settings'}
+							</button>
 					</div>
 				</div>
 			</div>

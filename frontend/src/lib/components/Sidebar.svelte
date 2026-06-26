@@ -632,17 +632,28 @@
 				</div>
 				<div class="flex items-center gap-1">
 					<div class="relative">
-						<button
-							type="button"
-							onclick={(event) => { event.stopPropagation(); showLibrarySortMenu = !showLibrarySortMenu; }}
-							class="h-7 rounded border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-2 text-xs text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-600)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary-500)]"
-							aria-haspopup="menu"
-							aria-expanded={showLibrarySortMenu}
-							aria-label="Sort libraries"
-							title="Sort libraries"
-						>
-							{librarySortLabel()}
-						</button>
+						<div class="inline-flex h-7 overflow-hidden rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-700)]">
+							<button
+								type="button"
+								onclick={(event) => { event.stopPropagation(); showLibrarySortMenu = !showLibrarySortMenu; }}
+								class="min-w-0 px-2 text-xs font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-600)] focus:outline-none focus:ring-1 focus:ring-inset focus:ring-[var(--color-primary-500)]"
+								aria-haspopup="menu"
+								aria-expanded={showLibrarySortMenu}
+								aria-label="Sort libraries by {librarySortLabel()}"
+								title="Sort libraries by {librarySortLabel()}"
+							>
+								{librarySortLabel()}
+							</button>
+							<button
+								type="button"
+								onclick={(event) => { event.stopPropagation(); toggleLibrarySortDirection(); }}
+								class="flex w-7 items-center justify-center border-l border-[var(--color-surface-border)] text-[var(--color-primary-400)] transition-colors hover:bg-[var(--color-surface-600)] focus:outline-none focus:ring-1 focus:ring-inset focus:ring-[var(--color-primary-500)]"
+								title={librarySortDir === 'asc' ? 'Sort ascending' : 'Sort descending'}
+								aria-label={librarySortDir === 'asc' ? 'Sort libraries ascending' : 'Sort libraries descending'}
+							>
+								<span class="text-sm leading-none">{librarySortDir === 'asc' ? '↑' : '↓'}</span>
+							</button>
+						</div>
 						{#if showLibrarySortMenu}
 							<div class="absolute right-0 top-full z-[85] mt-1 w-28 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-1 shadow-xl" role="menu">
 								<button
@@ -669,15 +680,6 @@
 							</div>
 						{/if}
 					</div>
-					<button
-						type="button"
-						onclick={(event) => { event.stopPropagation(); toggleLibrarySortDirection(); }}
-						class="flex h-7 w-7 items-center justify-center rounded text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-500)]"
-						title="Toggle sort direction"
-						aria-label="Toggle library sort direction"
-					>
-						{librarySortDir === 'asc' ? '↑' : '↓'}
-					</button>
 					<button
 						onclick={openLibraryModal}
 						class="p-1 rounded text-[var(--color-surface-text-muted)] hover:text-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)] transition-colors"

@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { beforeNavigate, goto } from '$app/navigation';
-	import { appActivity, gridScale, showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { appActivity, filterPanelWidth, gridScale, showFormatOnCover, getFormatColor } from '$lib/stores';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { getCoverThumbUrl, getLibraryCoverThumbSize } from '$lib/utils/covers';
 	import { getBookReaderHref, isAudioFormat } from '$lib/utils/book-formats';
@@ -66,6 +66,7 @@
 
 	// Filter state
 	let showFilterPanel = $state(false);
+	let filterPanelBackdrop = $state(false);
 	let showSortMenu = $state(false);
 	let availableAuthors = $state<any[]>([]);
 	let availableSeries = $state<any[]>([]);
@@ -520,7 +521,7 @@
 
 
 
-		onMount(() => {
+	onMount(() => {
 		restoreBulkSelectionState();
 		fetchLibraryName();
 		fetchBooks(true);
@@ -529,12 +530,19 @@
 		showFormatOnCover.init();
 		scheduleBackgroundRefresh(BACKGROUND_REFRESH_IDLE_INTERVAL_MS);
 		document.addEventListener('visibilitychange', handleVisibilityChange);
+		const filterPanelBackdropMedia = window.matchMedia('(max-width: 1023px)');
+		const updateFilterPanelBackdrop = (event: MediaQueryListEvent | MediaQueryList) => {
+			filterPanelBackdrop = event.matches;
+		};
+		updateFilterPanelBackdrop(filterPanelBackdropMedia);
+		filterPanelBackdropMedia.addEventListener('change', updateFilterPanelBackdrop);
 		const stopObservingGridWidth = gridMeasureElement
 			? observeElementWidth(gridMeasureElement, (width) => gridContainerWidth = width)
 			: () => {};
 
 		return () => {
 			stopObservingGridWidth();
+			filterPanelBackdropMedia.removeEventListener('change', updateFilterPanelBackdrop);
 			if (backgroundRefreshTimer !== null) {
 				window.clearTimeout(backgroundRefreshTimer);
 			}
@@ -1197,8 +1205,8 @@
 	}
   </script>
 
-<div class="pb-20 transition-all duration-300">
-	<div class="sticky top-0 z-30 px-3 py-3 sm:px-6 sm:py-4 bg-[var(--color-surface-base)]/95 backdrop-blur border-b border-[var(--color-surface-border)] shadow-[0_1px_0_rgba(255,255,255,0.04)] transition-all duration-300 {showFilterPanel ? 'lg:pr-[21.5rem]' : ''}">
+<div class="pb-20 transition-all duration-300" style={`--filter-panel-offset: ${$filterPanelWidth + 24}px;`}>
+	<div class="sticky top-0 z-30 px-3 py-3 sm:px-6 sm:py-4 bg-[var(--color-surface-base)]/95 backdrop-blur border-b border-[var(--color-surface-border)] shadow-[0_1px_0_rgba(255,255,255,0.04)] transition-all duration-300 {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}">
 		<div class="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:items-center lg:gap-4">
 			<div class="min-w-0 flex-1">
 				<div class="flex items-baseline gap-2 sm:gap-3 min-w-0">
@@ -1422,32 +1430,32 @@
 			</div>
 		{/if}
 	</div>
-	{#if showFilterPanel}
-		<FilterPanel
-			authors={availableAuthors}
-			series={availableSeries}
-			tags={availableTags}
-			formats={availableFormats}
-			filterMode={getFilterMode()}
-			valueFilterMode={getValueFilterMode()}
-			hasActiveFilters={hasFilterPanelFilters()}
-			onClose={() => showFilterPanel = false}
-			onClear={clearFilterPanelFilters}
-			onSetFilterMode={setFilterMode}
-			onSetValueFilterMode={setValueFilterMode}
-			onToggleAuthor={applyAuthorFilter}
-			onToggleSeries={applySeriesFilter}
-			onToggleTag={toggleTagSelection}
-			onToggleFormat={applyFormatFilter}
-			onToggleStatus={applyStatusFilter}
-			isAuthorSelected={isAuthorSelected}
-			isSeriesSelected={isSeriesSelected}
-			isTagSelected={isTagSelected}
-			isFormatSelected={isFormatSelected}
-			isStatusSelected={isStatusSelected}
-		/>
-	{/if}
-	<div bind:this={gridMeasureElement} class="px-6 pt-6 transition-all duration-300 {showFilterPanel ? 'lg:pr-[21.5rem]' : ''}">
+	<FilterPanel
+		authors={availableAuthors}
+		series={availableSeries}
+		tags={availableTags}
+		formats={availableFormats}
+		filterMode={getFilterMode()}
+		valueFilterMode={getValueFilterMode()}
+		hasActiveFilters={hasFilterPanelFilters()}
+		onClose={() => showFilterPanel = false}
+		onClear={clearFilterPanelFilters}
+		onSetFilterMode={setFilterMode}
+		onSetValueFilterMode={setValueFilterMode}
+		onToggleAuthor={applyAuthorFilter}
+		onToggleSeries={applySeriesFilter}
+		onToggleTag={toggleTagSelection}
+		onToggleFormat={applyFormatFilter}
+		onToggleStatus={applyStatusFilter}
+		isAuthorSelected={isAuthorSelected}
+		isSeriesSelected={isSeriesSelected}
+		isTagSelected={isTagSelected}
+		isFormatSelected={isFormatSelected}
+		isStatusSelected={isStatusSelected}
+		open={showFilterPanel}
+		showBackdrop={filterPanelBackdrop}
+	/>
+	<div bind:this={gridMeasureElement} class="px-6 pt-6 transition-all duration-300 {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}">
 	{#if loading}
 		<div class="flex justify-center py-12">
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
@@ -1679,7 +1687,7 @@
 							{#if totalBooks > 0 && selectAllMode !== 'filtered'}
 								<button
 									onclick={selectAllFiltered}
-									class="px-3 py-1.5 text-sm rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white transition-colors"
+									class="accent-action rounded-lg px-3 py-1.5 text-sm transition-colors"
 								>
 									Select All {totalBooks} Books
 								</button>
@@ -1732,15 +1740,15 @@
 									</button>
 								</div>
 							{/if}
-						</div>
-						<button
-							onclick={openShelfPicker}
-							disabled={actionInProgress}
-							class="px-4 py-2 text-sm rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white font-medium transition-colors disabled:opacity-50 flex items-center space-x-2"
-						>
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-							</svg>
+							</div>
+							<button
+								onclick={openShelfPicker}
+								disabled={actionInProgress}
+								class="accent-action flex items-center space-x-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+							>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+								</svg>
 							<span>Add to Shelf</span>
 						</button>
 						<button
