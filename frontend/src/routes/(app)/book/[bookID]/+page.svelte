@@ -753,14 +753,14 @@
 			});
 
 			if (res.ok) {
-				addMetadataSuggestionsFromPayload(payload);
-				void refreshMetadataSuggestions();
 				await fetchBook({ mode: 'quiet', resetRelated: false });
 				editing = stayEditing;
 				if (stayEditing) {
 					editForm = createMetadataEditForm(book);
 					authorsList = prepareAuthorRows(parseAuthors(book?.authors || '[]'));
 				}
+				addMetadataSuggestionsFromPayload(payload);
+				void refreshMetadataSuggestions();
 				return true;
 			} else {
 				const errorText = await res.text();

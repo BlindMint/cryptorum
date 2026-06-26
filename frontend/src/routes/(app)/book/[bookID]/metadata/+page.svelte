@@ -138,8 +138,6 @@
 				saveError = `Failed to save: ${res.status} ${await res.text()}`;
 				return false;
 			}
-			addMetadataSuggestionsFromPayload(payload);
-			void refreshMetadataSuggestions();
 			const data = (await res.json()) as MetadataSaveResponse;
 			if (data.book) {
 				book = data.book;
@@ -147,6 +145,8 @@
 			} else {
 				await fetchBook();
 			}
+			addMetadataSuggestionsFromPayload(payload);
+			void refreshMetadataSuggestions();
 			return true;
 		} catch (error) {
 			console.error('Failed to save metadata:', error);
