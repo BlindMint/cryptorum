@@ -138,7 +138,8 @@
 
 	function selectSuggestion(suggestion: string) {
 		const { before } = getLastSegment(value);
-		value = before + suggestion;
+		const separator = before && isMultipleValueField() ? ' ' : '';
+		value = before + separator + suggestion;
 		onchange(value);
 		showDropdown = false;
 		selectedIndex = -1;

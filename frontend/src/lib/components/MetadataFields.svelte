@@ -170,14 +170,8 @@
 	</div>
 
 	<div class={columns ? 'md:col-span-2' : ''}>
-		<label class="mb-1 block text-sm text-[var(--color-surface-text-muted)]" for="book-genres">Genres</label>
-		<AutocompleteInput id="book-genres" bind:value={editForm.genres} placeholder="Fiction, Science Fiction.Space Opera, History" field="genres" onchange={(value) => editForm.genres = value} />
-		<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Comma-separated. Use "Parent.Child" for hierarchies.</p>
-	</div>
-
-	<div class={columns ? 'md:col-span-2' : ''}>
 		<label class="mb-1 block text-sm text-[var(--color-surface-text-muted)]" for="book-tags">Tags</label>
-		<AutocompleteInput id="book-tags" bind:value={editForm.tags} placeholder="Favorite, Classics, Must Read" field="tags" onchange={(value) => editForm.tags = value} />
+		<AutocompleteInput id="book-tags" bind:value={editForm.tags} placeholder="Fiction, Science Fiction.Space Opera, Favorite" field="tags" onchange={(value) => editForm.tags = value} />
 		<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Comma-separated. Use "Parent.Child" for hierarchies.</p>
 	</div>
 

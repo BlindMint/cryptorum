@@ -102,11 +102,15 @@ func evaluateMagicShelfRules(shelfID string, rulesJSON string, user *AppUser) (*
 				conditions = append(conditions, "COALESCE(bm.series, '') LIKE ?")
 				args = append(args, "%"+condition.Value.(string)+"%")
 			}
-		case "genres":
+		case "genres", "tags":
 			switch condition.Operator {
 			case "contains":
-				conditions = append(conditions, "COALESCE(bm.genres, '[]') LIKE ?")
-				args = append(args, "%"+condition.Value.(string)+"%")
+				tagCondition := hierarchicalJSONFilterCondition("bm.tags")
+				genreCondition := hierarchicalJSONFilterCondition("bm.genres")
+				value := fmt.Sprintf("%v", condition.Value)
+				conditions = append(conditions, "("+tagCondition+" OR "+genreCondition+")")
+				args = append(args, hierarchicalJSONFilterArgs(value)...)
+				args = append(args, hierarchicalJSONFilterArgs(value)...)
 			}
 		case "publisher":
 			switch condition.Operator {

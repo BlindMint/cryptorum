@@ -349,8 +349,12 @@ func applyBulkMetadataUpdate(bookID int64, ownerUserID int64, req bulkMetadataRe
 			return err
 		}
 	}
-	if len(req.AddTags) > 0 || len(req.RemoveTags) > 0 || clear["tags"] {
-		if err := bulkUpdateBookJSONList(tx, bookID, "tags", req.AddTags, req.RemoveTags, clear["tags"]); err != nil {
+	addTags := append([]string{}, req.AddGenres...)
+	addTags = append(addTags, req.AddTags...)
+	removeTags := append([]string{}, req.RemoveGenres...)
+	removeTags = append(removeTags, req.RemoveTags...)
+	if len(addTags) > 0 || len(removeTags) > 0 || clear["tags"] {
+		if err := bulkUpdateBookJSONList(tx, bookID, "tags", addTags, removeTags, clear["tags"]); err != nil {
 			return err
 		}
 	}
@@ -387,7 +391,11 @@ func bulkUpdateBookJSONList(tx sqlExecer, bookID int64, column string, addValues
 		}
 	}
 	next = append(next, cleanedStringList(addValues)...)
-	next = normalizeMetadataStringList(next)
+	if column == "tags" {
+		next = normalizeMetadataTagList(next)
+	} else {
+		next = normalizeMetadataStringList(next)
+	}
 	valuesJSON, _ := json.Marshal(next)
 	_, err := tx.Exec(`UPDATE book_metadata SET `+column+` = ? WHERE book_id = ?`, string(valuesJSON), bookID)
 	return err

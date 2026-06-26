@@ -85,7 +85,27 @@ export function formatSeriesNumber(item: any): string {
 	return Number.isInteger(value) ? String(value) : String(value);
 }
 
+function mergeMetadataLists(...lists: string[][]): string[] {
+	const unique: string[] = [];
+	const seen = new Set<string>();
+	for (const list of lists) {
+		for (const value of list) {
+			const trimmed = value.trim();
+			if (!trimmed) continue;
+			const key = trimmed.toLowerCase();
+			if (seen.has(key)) continue;
+			seen.add(key);
+			unique.push(trimmed);
+		}
+	}
+	return unique.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+}
+
 export function createMetadataEditForm(book: any): MetadataEditForm {
+	const combinedTags = mergeMetadataLists(
+		parseJsonArray(book?.genres || '[]'),
+		parseJsonArray(book?.tags || '[]')
+	);
 	return {
 		title: book?.title || '',
 		series: book?.series || '',
@@ -95,8 +115,8 @@ export function createMetadataEditForm(book: any): MetadataEditForm {
 		description: book?.description || '',
 		rating: ratingToStars(book?.rating),
 		status: book?.status || 'unread',
-		genres: parseJsonArray(book?.genres || '[]').join(', '),
-		tags: parseJsonArray(book?.tags || '[]').join(', '),
+		genres: '',
+		tags: combinedTags.join(', '),
 		isbn: book?.isbn || '',
 		asin: book?.asin || '',
 		language: book?.language || '',

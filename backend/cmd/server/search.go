@@ -447,12 +447,12 @@ func buildBookSearchFilterClause(filters BookSearchFilters) (string, []interface
 	})
 	addFilterGroup(func(add func(string, ...interface{})) {
 		for _, value := range filters.Genre {
-			addHierarchicalJSONFilterCondition(add, "bm.genres", value)
+			addTagOrGenreFilterCondition(add, value)
 		}
 	})
 	addFilterGroup(func(add func(string, ...interface{})) {
 		for _, value := range filters.Tags {
-			addHierarchicalJSONFilterCondition(add, "bm.tags", value)
+			addTagOrGenreFilterCondition(add, value)
 		}
 	})
 	addFilterGroup(func(add func(string, ...interface{})) {

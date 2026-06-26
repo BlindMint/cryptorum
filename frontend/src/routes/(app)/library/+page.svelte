@@ -66,7 +66,6 @@
 	let showSortMenu = $state(false);
 	let availableAuthors = $state<any[]>([]);
 	let availableSeries = $state<any[]>([]);
-	let availableGenres = $state<any[]>([]);
 	let availableTags = $state<any[]>([]);
 	let availableFormats = $state<any[]>([]);
 
@@ -349,7 +348,6 @@
 			const data = await res.json();
 			availableAuthors = data.authors ?? [];
 			availableSeries = data.series ?? [];
-			availableGenres = data.genres ?? [];
 			availableTags = data.tags ?? [];
 			availableFormats = data.formats ?? [];
 		} catch (e) {
@@ -1050,7 +1048,7 @@
 			filters.push({ key: 'series', value: seriesName, label: `Series: ${seriesName}` });
 		}
 		for (const genre of getQueryValues(params, 'genre', true)) {
-			filters.push({ key: 'genre', value: genre, label: `Genre: ${genre}` });
+			filters.push({ key: 'genre', value: genre, label: `Tag: ${genre}` });
 		}
 		for (const tag of getQueryValues(params, 'tags', true)) {
 			filters.push({ key: 'tags', value: tag, label: `Tag: ${tag}` });
@@ -1140,23 +1138,6 @@
 		toggleRepeatedFilter('series', seriesName);
 	}
 
-	function toggleGenreSelection(genreName: string) {
-		const url = new URL($page.url);
-		const genreList = getQueryValues(url.searchParams, 'genre', true);
-		const newGenres = genreList.includes(genreName)
-			? genreList.filter((genre) => genre !== genreName)
-			: [...genreList, genreName];
-
-		if (newGenres.length === 0) {
-			url.searchParams.delete('genre');
-			url.searchParams.delete('genre_mode');
-		} else {
-			url.searchParams.set('genre', newGenres.join(','));
-			url.searchParams.delete('genre_mode');
-		}
-		navigateWithFilters(url);
-	}
-
 	function toggleTagSelection(tagName: string) {
 		const url = new URL($page.url);
 		const tagList = getQueryValues(url.searchParams, 'tags', true);
@@ -1172,10 +1153,6 @@
 			url.searchParams.delete('tag_mode');
 		}
 		navigateWithFilters(url);
-	}
-
-	function isGenreSelected(genreName: string): boolean {
-		return getQueryValues($page.url.searchParams, 'genre', true).includes(genreName);
 	}
 
 	function isTagSelected(tagName: string): boolean {
@@ -1459,7 +1436,6 @@
 		<FilterPanel
 			authors={availableAuthors}
 			series={availableSeries}
-			genres={availableGenres}
 			tags={availableTags}
 			formats={availableFormats}
 			filterMode={getFilterMode()}
@@ -1471,13 +1447,11 @@
 			onSetValueFilterMode={setValueFilterMode}
 			onToggleAuthor={applyAuthorFilter}
 			onToggleSeries={applySeriesFilter}
-			onToggleGenre={toggleGenreSelection}
 			onToggleTag={toggleTagSelection}
 			onToggleFormat={applyFormatFilter}
 			onToggleStatus={applyStatusFilter}
 			isAuthorSelected={isAuthorSelected}
 			isSeriesSelected={isSeriesSelected}
-			isGenreSelected={isGenreSelected}
 			isTagSelected={isTagSelected}
 			isFormatSelected={isFormatSelected}
 			isStatusSelected={isStatusSelected}

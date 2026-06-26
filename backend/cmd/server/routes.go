@@ -85,16 +85,30 @@ func addHierarchicalJSONFilterCondition(
 	column string,
 	value string,
 ) {
-	addFilterCondition(
-		fmt.Sprintf(
-			`EXISTS (SELECT 1 FROM json_each(COALESCE(%s, '[]')) WHERE value = ? OR value LIKE ? OR value LIKE ? OR value LIKE ?)`,
-			column,
-		),
-		value,
-		value+".%",
-		"%."+value,
-		"%."+value+".%",
+	addFilterCondition(hierarchicalJSONFilterCondition(column), hierarchicalJSONFilterArgs(value)...)
+}
+
+func addTagOrGenreFilterCondition(addFilterCondition func(string, ...interface{}), value string) {
+	tagCondition := hierarchicalJSONFilterCondition("bm.tags")
+	genreCondition := hierarchicalJSONFilterCondition("bm.genres")
+	args := append(hierarchicalJSONFilterArgs(value), hierarchicalJSONFilterArgs(value)...)
+	addFilterCondition("("+tagCondition+" OR "+genreCondition+")", args...)
+}
+
+func hierarchicalJSONFilterCondition(column string) string {
+	return fmt.Sprintf(
+		`EXISTS (SELECT 1 FROM json_each(COALESCE(%s, '[]')) WHERE value = ? OR value LIKE ? OR value LIKE ? OR value LIKE ?)`,
+		column,
 	)
+}
+
+func hierarchicalJSONFilterArgs(value string) []interface{} {
+	return []interface{}{
+		value,
+		value + ".%",
+		"%." + value,
+		"%." + value + ".%",
+	}
 }
 
 type sqlFilterGroup struct {
@@ -202,12 +216,12 @@ func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []inter
 	})
 	addFilterGroup(func(add func(string, ...interface{})) {
 		for _, value := range cleanFilterValues(req.Genre, true) {
-			addHierarchicalJSONFilterCondition(add, "bm.genres", value)
+			addTagOrGenreFilterCondition(add, value)
 		}
 	})
 	addFilterGroup(func(add func(string, ...interface{})) {
 		for _, value := range cleanFilterValues(req.Tags, true) {
-			addHierarchicalJSONFilterCondition(add, "bm.tags", value)
+			addTagOrGenreFilterCondition(add, value)
 		}
 	})
 	addFilterGroup(func(add func(string, ...interface{})) {
@@ -649,7 +663,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	if genre != "" {
 		addFilterGroup(func(add func(string, ...interface{})) {
 			for _, value := range queryValues("genre", true) {
-				addHierarchicalJSONFilterCondition(add, "bm.genres", value)
+				addTagOrGenreFilterCondition(add, value)
 			}
 		})
 	}
@@ -658,7 +672,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	if tags != "" {
 		addFilterGroup(func(add func(string, ...interface{})) {
 			for _, value := range queryValues("tags", true) {
-				addHierarchicalJSONFilterCondition(add, "bm.tags", value)
+				addTagOrGenreFilterCondition(add, value)
 			}
 		})
 	}
@@ -933,7 +947,7 @@ func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
 	if genre != "" {
 		addFilterGroup(func(add func(string, ...interface{})) {
 			for _, value := range queryValues("genre", true) {
-				addHierarchicalJSONFilterCondition(add, "bm.genres", value)
+				addTagOrGenreFilterCondition(add, value)
 			}
 		})
 	}
@@ -941,7 +955,7 @@ func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
 	if tags != "" {
 		addFilterGroup(func(add func(string, ...interface{})) {
 			for _, value := range queryValues("tags", true) {
-				addHierarchicalJSONFilterCondition(add, "bm.tags", value)
+				addTagOrGenreFilterCondition(add, value)
 			}
 		})
 	}
@@ -1159,6 +1173,8 @@ func fetchBookDetail(bookID int64) (BookDetail, error) {
 		return book, err
 	}
 
+	book.Tags = mergeMetadataTagJSON(book.Genres, book.Tags)
+
 	pathRows, err := appDB.Query(`SELECT path FROM library_path WHERE library_id = ? ORDER BY length(path) DESC`, book.LibraryID)
 	if err == nil {
 		defer pathRows.Close()
@@ -1252,7 +1268,7 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 
 	req.Authors = normalizeMetadataStringList(req.Authors)
 	req.Genres = normalizeMetadataStringList(req.Genres)
-	req.Tags = normalizeMetadataStringList(req.Tags)
+	req.Tags = mergeMetadataTagLists(req.Genres, req.Tags)
 
 	authorsJSON, _ := json.Marshal(req.Authors)
 	genresJSON, _ := json.Marshal(req.Genres)
@@ -3116,6 +3132,56 @@ func getJSONMetadataOptions(column string, hierarchical bool, current *AppUser) 
 	return sortedMetadataOptions(counts), rows.Err()
 }
 
+func getCombinedJSONMetadataOptions(primaryColumn string, legacyColumn string, hierarchical bool, current *AppUser) ([]metadataOption, error) {
+	ownerClause, ownerArgs := userOwnershipClause(current, "l")
+	rows, err := appDB.Query(fmt.Sprintf(`
+		SELECT COALESCE(bm.%s, '[]'), COALESCE(bm.%s, '[]')
+		FROM book_metadata bm
+		JOIN book b ON bm.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE %s
+		  AND ((bm.%s IS NOT NULL AND bm.%s != '[]' AND bm.%s != '')
+		    OR (bm.%s IS NOT NULL AND bm.%s != '[]' AND bm.%s != ''))
+	`, primaryColumn, legacyColumn, ownerClause, primaryColumn, primaryColumn, primaryColumn, legacyColumn, legacyColumn, legacyColumn), ownerArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var primaryJSON string
+		var legacyJSON string
+		if err := rows.Scan(&primaryJSON, &legacyJSON); err != nil {
+			continue
+		}
+
+		prefixesInRow := make(map[string]bool)
+		for _, value := range mergeMetadataTagLists(parseMetadataJSONList(primaryJSON), parseMetadataJSONList(legacyJSON)) {
+			if !hierarchical {
+				value = strings.TrimSpace(value)
+				if value != "" && !prefixesInRow[value] {
+					prefixesInRow[value] = true
+					counts[value]++
+				}
+				continue
+			}
+
+			parts := strings.Split(value, ".")
+			for i := range parts {
+				prefix := strings.TrimSpace(strings.Join(parts[:i+1], "."))
+				if prefix == "" || prefixesInRow[prefix] {
+					continue
+				}
+				prefixesInRow[prefix] = true
+				counts[prefix]++
+			}
+		}
+	}
+
+	return sortedMetadataOptions(counts), rows.Err()
+}
+
 func getScalarMetadataOptions(column string, current *AppUser) ([]metadataOption, error) {
 	ownerClause, ownerArgs := userOwnershipClause(current, "l")
 	rows, err := appDB.Query(fmt.Sprintf(`
@@ -3236,6 +3302,53 @@ func getJSONMetadataOptionsForScope(column string, hierarchical bool, scopedBook
 	return sortedMetadataOptions(counts), rows.Err()
 }
 
+func getCombinedJSONMetadataOptionsForScope(primaryColumn string, legacyColumn string, hierarchical bool, scopedBookIDsSQL string, scopedArgs []interface{}) ([]metadataOption, error) {
+	rows, err := appDB.Query(fmt.Sprintf(`
+		SELECT COALESCE(bm.%s, '[]'), COALESCE(bm.%s, '[]')
+		FROM book_metadata bm
+		JOIN (%s) scoped_books ON scoped_books.id = bm.book_id
+		WHERE (bm.%s IS NOT NULL AND bm.%s != '[]' AND bm.%s != '')
+		   OR (bm.%s IS NOT NULL AND bm.%s != '[]' AND bm.%s != '')
+	`, primaryColumn, legacyColumn, scopedBookIDsSQL, primaryColumn, primaryColumn, primaryColumn, legacyColumn, legacyColumn, legacyColumn), scopedArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var primaryJSON string
+		var legacyJSON string
+		if err := rows.Scan(&primaryJSON, &legacyJSON); err != nil {
+			continue
+		}
+
+		prefixesInRow := make(map[string]bool)
+		for _, value := range mergeMetadataTagLists(parseMetadataJSONList(primaryJSON), parseMetadataJSONList(legacyJSON)) {
+			if !hierarchical {
+				value = strings.TrimSpace(value)
+				if value != "" && !prefixesInRow[value] {
+					prefixesInRow[value] = true
+					counts[value]++
+				}
+				continue
+			}
+
+			parts := strings.Split(value, ".")
+			for i := range parts {
+				prefix := strings.TrimSpace(strings.Join(parts[:i+1], "."))
+				if prefix == "" || prefixesInRow[prefix] {
+					continue
+				}
+				prefixesInRow[prefix] = true
+				counts[prefix]++
+			}
+		}
+	}
+
+	return sortedMetadataOptions(counts), rows.Err()
+}
+
 func getScalarMetadataOptionsForScope(column string, scopedBookIDsSQL string, scopedArgs []interface{}) ([]metadataOption, error) {
 	rows, err := appDB.Query(fmt.Sprintf(`
 		SELECT bm.%s, COUNT(*) as book_count
@@ -3313,7 +3426,7 @@ func getFilterOptionsHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch genres")
 		return
 	}
-	tags, err := getJSONMetadataOptionsForScope("tags", true, scopedBookIDsSQL, scopedArgs)
+	tags, err := getCombinedJSONMetadataOptionsForScope("tags", "genres", true, scopedBookIDsSQL, scopedArgs)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch tags")
 		return
@@ -3375,6 +3488,15 @@ func getMetadataHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metadataType := chi.URLParam(r, "type")
+	if metadataType == "tags" {
+		tags, err := getCombinedJSONMetadataOptions("tags", "genres", true, current)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to fetch metadata")
+			return
+		}
+		jsonResponse(w, http.StatusOK, tags)
+		return
+	}
 	ownerClause, ownerArgs := userOwnershipClause(current, "l")
 
 	var query string

@@ -18,7 +18,7 @@
 	const tabs = [
 		{ id: 'authors', label: 'Authors', icon: 'user' },
 		{ id: 'series', label: 'Series', icon: 'collection' },
-		{ id: 'genres', label: 'Genres', icon: 'tag' },
+		{ id: 'tags', label: 'Tags', icon: 'tag' },
 		{ id: 'publishers', label: 'Publishers', icon: 'building' },
 		{ id: 'languages', label: 'Languages', icon: 'globe' }
 	];
@@ -71,7 +71,7 @@
 
 	function openFilteredLibrary(item: any) {
 		const url = new URL('/library', window.location.origin);
-		const key = activeTab === 'authors' ? 'author' : activeTab === 'series' ? 'series' : activeTab === 'genres' ? 'genre' : activeTab === 'publishers' ? 'publisher' : 'language';
+		const key = activeTab === 'authors' ? 'author' : activeTab === 'series' ? 'series' : activeTab === 'tags' ? 'tags' : activeTab === 'publishers' ? 'publisher' : 'language';
 		url.searchParams.set(key, item.name);
 		goto(url.pathname + url.search);
 	}

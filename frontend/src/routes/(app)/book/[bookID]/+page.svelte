@@ -303,7 +303,6 @@
  		return result;
  	}
 
- 	let hoveredGenrePath = $state<string | null>(null);
  	let hoveredTagPath = $state<string | null>(null);
 
 	function isHierarchyPartActive(hoveredPath: string | null, partPath: string): boolean {
@@ -1459,89 +1458,41 @@
 						{/if}
 					</div>
 
-					{#if editing || (book.genres && book.genres !== '[]') || (book.tags && book.tags !== '[]')}
+					{#if editing || (book.tags && book.tags !== '[]')}
 						<div class="mt-6 space-y-4">
-							{#if editing || (book.genres && book.genres !== '[]')}
-								<div class="flex items-start gap-2">
-									<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Genres</dt>
-									<dd class="min-w-0 flex-1">
-										{#if editing}
-											<AutocompleteInput
-												id="book-genres"
-												bind:value={editForm.genres}
-												placeholder="Fiction, Science Fiction.Space Opera, History"
-												field="genres"
-												onchange={(value) => editForm.genres = value}
-											/>
-											<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Comma-separated. Use "Parent.Child" for hierarchies.</p>
-										{:else}
-											<div class="flex flex-wrap gap-2">
-												{#each parseJsonArray(book.genres) as genre}
-													{@const parts = parseHierarchicalGenre(genre)}
-													<div class="relative group">
-															<div class="inline-flex items-center rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1 text-sm text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)] {isHoveredPathInHierarchy(hoveredGenrePath, genre) ? 'underline decoration-[var(--color-primary-300)] underline-offset-2' : ''}">
-																{#each parts as part, i}
-																	<button
-																		onclick={() => navigateWithFilter('genre', part.fullPath)}
-																		class="transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline {isHierarchyPartActive(hoveredGenrePath, part.fullPath) ? 'text-[var(--color-primary-300)]' : 'text-[var(--color-primary-400)]'}"
-																		onmouseenter={() => hoveredGenrePath = part.fullPath}
-																		onmouseleave={() => hoveredGenrePath = null}
-																	>{part.text}</button>{#if i < parts.length - 1}<span class="{isHierarchyPartActive(hoveredGenrePath, parts[i + 1].fullPath) ? 'text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)]'}">.</span>{/if}
-																{/each}
-														</div>
-														{#if isHoveredPathInHierarchy(hoveredGenrePath, genre)}
-															<div class="absolute bottom-full left-0 mb-1 px-2 py-1 bg-[var(--color-surface-800)] text-[var(--color-surface-text)] text-xs rounded shadow-lg whitespace-nowrap z-10">
-																Click to filter by: <span class="text-[var(--color-primary-400)]">{hoveredGenrePath}</span>
-															</div>
-														{/if}
-												</div>
-												{/each}
+							<div class="flex items-start gap-2">
+								<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Tags</dt>
+								<dd class="min-w-0 flex-1">
+									{#if editing}
+										<AutocompleteInput
+											id="book-tags"
+											bind:value={editForm.tags}
+											placeholder="Fiction, Science Fiction.Space Opera, Favorite"
+											field="tags"
+											onchange={(value) => editForm.tags = value}
+										/>
+										<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Comma-separated. Use "Parent.Child" for hierarchies.</p>
+									{:else}
+										<div class="flex flex-wrap gap-2">
+											{#each parseJsonArray(book.tags) as tag}
+												{@const parts = parseHierarchicalGenre(tag)}
+												<div class="relative group">
+														<div class="inline-flex items-center rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1 text-sm text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)] {isHoveredPathInHierarchy(hoveredTagPath, tag) ? 'underline decoration-[var(--color-primary-300)] underline-offset-2' : ''}">
+															{#each parts as part, i}
+																<button
+																	onclick={() => navigateWithFilter('tags', part.fullPath)}
+																	class="transition-colors duration-200 ease-out hover:text-[var(--color-primary-300)] hover:underline focus-visible:outline-none focus-visible:underline {isHierarchyPartActive(hoveredTagPath, part.fullPath) ? 'text-[var(--color-primary-300)]' : 'text-[var(--color-primary-400)]'}"
+																	onmouseenter={() => hoveredTagPath = part.fullPath}
+																	onmouseleave={() => hoveredTagPath = null}
+																>{part.text}</button>{#if i < parts.length - 1}<span class="{isHierarchyPartActive(hoveredTagPath, parts[i + 1].fullPath) ? 'text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)]'}">.</span>{/if}
+															{/each}
+													</div>
 											</div>
-										{/if}
-									</dd>
-								</div>
-							{/if}
-
-							{#if editing || (book.tags && book.tags !== '[]')}
-								<div class="flex items-start gap-2">
-									<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Tags</dt>
-									<dd class="min-w-0 flex-1">
-										{#if editing}
-											<AutocompleteInput
-												id="book-tags"
-												bind:value={editForm.tags}
-												placeholder="Favorite, Classics, Must Read"
-												field="tags"
-												onchange={(value) => editForm.tags = value}
-											/>
-											<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Comma-separated. Use "Parent.Child" for hierarchies.</p>
-										{:else}
-											<div class="flex flex-wrap gap-2">
-												{#each parseJsonArray(book.tags) as tag}
-													{@const parts = parseHierarchicalGenre(tag)}
-													<div class="relative group">
-															<div class="inline-flex items-center rounded-full border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/20 px-3 py-1 text-sm text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:border-[var(--color-primary-500)]/60 hover:bg-[var(--color-primary-500)]/30 {isHoveredPathInHierarchy(hoveredTagPath, tag) ? 'underline decoration-[var(--color-primary-200)] underline-offset-2' : ''}">
-																{#each parts as part, i}
-																	<button
-																		onclick={() => navigateWithFilter('tags', part.fullPath)}
-																		class="transition-colors duration-200 ease-out hover:text-[var(--color-primary-200)] hover:underline focus-visible:outline-none focus-visible:underline {isHierarchyPartActive(hoveredTagPath, part.fullPath) ? 'text-[var(--color-primary-200)]' : 'text-[var(--color-primary-400)]'}"
-																		onmouseenter={() => hoveredTagPath = part.fullPath}
-																		onmouseleave={() => hoveredTagPath = null}
-																	>{part.text}</button>{#if i < parts.length - 1}<span class="{isHierarchyPartActive(hoveredTagPath, parts[i + 1].fullPath) ? 'text-[var(--color-primary-200)]' : 'text-[var(--color-primary-500)]'}">.</span>{/if}
-																{/each}
-														</div>
-														{#if isHoveredPathInHierarchy(hoveredTagPath, tag)}
-															<div class="absolute bottom-full left-0 mb-1 px-2 py-1 bg-[var(--color-surface-800)] text-[var(--color-surface-text)] text-xs rounded shadow-lg whitespace-nowrap z-10">
-																Click to filter by: <span class="text-[var(--color-primary-400)]">{hoveredTagPath}</span>
-															</div>
-														{/if}
-												</div>
-												{/each}
-											</div>
-										{/if}
-									</dd>
-								</div>
-							{/if}
+											{/each}
+										</div>
+									{/if}
+								</dd>
+							</div>
 						</div>
 					{/if}
 

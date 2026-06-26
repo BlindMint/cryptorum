@@ -22,8 +22,6 @@
 	let status = $state('');
 	let rating = $state(0);
 	let hoveredRating = $state(0);
-	let addGenres = $state('');
-	let removeGenres = $state('');
 	let addTags = $state('');
 	let removeTags = $state('');
 	let clearFields = $state<Set<string>>(new Set());
@@ -73,8 +71,6 @@
 		setPayloadField(payload, 'series_number', seriesNumber);
 		if (status) payload.status = status;
 		if (rating > 0) payload.rating = starsToRating(rating);
-		setPayloadField(payload, 'add_genres', addGenres, commaValues);
-		setPayloadField(payload, 'remove_genres', removeGenres, commaValues);
 		setPayloadField(payload, 'add_tags', addTags, commaValues);
 		setPayloadField(payload, 'remove_tags', removeTags, commaValues);
 
@@ -199,18 +195,6 @@
 						</div>
 					</div>
 					<button type="button" onclick={() => toggleClear('rating')} class="mb-0.5 rounded-lg border px-3 py-2 text-sm transition-colors {clearFields.has('rating') ? 'border-red-400 bg-red-500/20 text-red-200' : 'border-[var(--color-surface-border)] text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}">Clear</button>
-				</div>
-
-				<label class="space-y-1">
-					<span class="block text-sm text-[var(--color-surface-text-muted)]">Add Genres</span>
-					<AutocompleteInput id="bulk-add-genres" bind:value={addGenres} field="genres" onchange={(value) => addGenres = value} />
-				</label>
-				<div class="flex items-end gap-2">
-					<label class="min-w-0 flex-1 space-y-1">
-						<span class="block text-sm text-[var(--color-surface-text-muted)]">Remove Genres</span>
-						<AutocompleteInput id="bulk-remove-genres" bind:value={removeGenres} field="genres" onchange={(value) => removeGenres = value} />
-					</label>
-					<button type="button" onclick={() => toggleClear('genres')} class="mb-0.5 rounded-lg border px-3 py-2 text-sm transition-colors {clearFields.has('genres') ? 'border-red-400 bg-red-500/20 text-red-200' : 'border-[var(--color-surface-border)] text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}">Clear All</button>
 				</div>
 
 				<label class="space-y-1">

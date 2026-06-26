@@ -9,7 +9,6 @@
 	type Props = {
 		authors: FilterOption[];
 		series: FilterOption[];
-		genres: FilterOption[];
 		tags: FilterOption[];
 		formats: FilterOption[];
 		filterMode: FilterMode;
@@ -21,13 +20,11 @@
 		onSetValueFilterMode: (mode: FilterMode) => void;
 		onToggleAuthor: (value: string) => void;
 		onToggleSeries: (value: string) => void;
-		onToggleGenre: (value: string) => void;
 		onToggleTag: (value: string) => void;
 		onToggleFormat: (value: string) => void;
 		onToggleStatus: (value: string) => void;
 		isAuthorSelected: (value: string) => boolean;
 		isSeriesSelected: (value: string) => boolean;
-		isGenreSelected: (value: string) => boolean;
 		isTagSelected: (value: string) => boolean;
 		isFormatSelected: (value: string) => boolean;
 		isStatusSelected: (value: string) => boolean;
@@ -37,7 +34,6 @@
 	let {
 		authors,
 		series,
-		genres,
 		tags,
 		formats,
 		filterMode,
@@ -49,13 +45,11 @@
 		onSetValueFilterMode,
 		onToggleAuthor,
 		onToggleSeries,
-		onToggleGenre,
 		onToggleTag,
 		onToggleFormat,
 		onToggleStatus,
 		isAuthorSelected,
 		isSeriesSelected,
-		isGenreSelected,
 		isTagSelected,
 		isFormatSelected,
 		isStatusSelected,
@@ -77,20 +71,17 @@
 	let filterOptionSort = $state<FilterOptionSort>('alpha');
 	let authorsOpen = $state(true);
 	let seriesOpen = $state(true);
-	let genresOpen = $state(true);
 	let tagsOpen = $state(true);
 	let formatsOpen = $state(true);
 	let statusOpen = $state(true);
 	let authorSearch = $state('');
 	let seriesSearch = $state('');
-	let genreSearch = $state('');
 	let tagSearch = $state('');
 	let formatSearch = $state('');
 	let statusSearch = $state('');
 
 	let visibleAuthors = $derived(visibleFilterOptions(authors, authorSearch, filterOptionSort));
 	let visibleSeries = $derived(visibleFilterOptions(series, seriesSearch, filterOptionSort));
-	let visibleGenres = $derived(visibleFilterOptions(genres, genreSearch, filterOptionSort));
 	let visibleTags = $derived(visibleFilterOptions(tags, tagSearch, filterOptionSort));
 	let visibleFormats = $derived(visibleFilterOptions(formats, formatSearch, filterOptionSort));
 	let visibleStatuses = $derived(visibleStatusOptions(statusSearch, filterOptionSort));
@@ -296,43 +287,6 @@
 						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No series found</p>
 					{:else if visibleSeries.length === 0}
 						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching series</p>
-					{/if}
-				</div>
-			{/if}
-		</div>
-
-		<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-			<button onclick={() => genresOpen = !genresOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-700)]">
-				<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Genre</span>
-				<div class="flex items-center space-x-2">
-					<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{genres.length}</span>
-					<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {genresOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-					</svg>
-				</div>
-			</button>
-			{#if genresOpen}
-				<div class="border-b border-[var(--color-surface-border)] p-2">
-					<input type="search" bind:value={genreSearch} placeholder="Search genres" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
-				</div>
-				<div class="max-h-48 overflow-y-auto">
-					{#each visibleGenres as genre}
-						<button onclick={() => onToggleGenre(genre.name)} class="grid w-full grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {isGenreSelected(genre.name) ? 'bg-[var(--color-primary-500)]/20' : ''}">
-							<span class="flex h-4 w-4 items-center justify-center">
-								{#if isGenreSelected(genre.name)}
-									<svg class="h-4 w-4 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-									</svg>
-								{/if}
-							</span>
-							<span class="min-w-0 truncate">{genre.name}</span>
-							<span class="text-xs text-[var(--color-surface-text-muted)]">{genre.book_count}</span>
-						</button>
-					{/each}
-					{#if genres.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No genres found</p>
-					{:else if visibleGenres.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching genres</p>
 					{/if}
 				</div>
 			{/if}

@@ -90,6 +90,17 @@ func TestFilterOptionsORFiltersStayInsideSearchScope(t *testing.T) {
 	}
 }
 
+func TestFilterOptionsTagsIncludeLegacyGenres(t *testing.T) {
+	setupFilterOptionsTestDB(t)
+
+	options := fetchFilterOptionsForTest(t, "/api/filter-options?library_id=1")
+	tags := optionNames(options["tags"])
+	want := []string{"Gardening", "Military", "Other", "Plants", "Starfleet"}
+	if !sameStringSet(tags, want) {
+		t.Fatalf("tags = %#v, want combined tags and legacy genres %#v", tags, want)
+	}
+}
+
 func TestFilterOptionsBaseScopeCanIgnoreActiveFilters(t *testing.T) {
 	setupFilterOptionsTestDB(t)
 
@@ -112,6 +123,17 @@ func TestBookFiltersDefaultToORWithinCategoriesAndANDAcrossCategories(t *testing
 	books := fetchBooksForTest(t, "/api/books?q=offensive&author=Will%20Crudge&author=Other%20Author&genre=Military")
 	titles := bookTitles(books)
 	want := []string{"Offensive", "Other Offensive"}
+	if !sameStringSet(titles, want) {
+		t.Fatalf("titles = %#v, want %#v", titles, want)
+	}
+}
+
+func TestTagFilterMatchesLegacyGenres(t *testing.T) {
+	setupFilterOptionsTestDB(t)
+
+	books := fetchBooksForTest(t, "/api/books?q=offensive&tags=Military")
+	titles := bookTitles(books)
+	want := []string{"Offensive", "Other Offensive", "Offensive Elsewhere"}
 	if !sameStringSet(titles, want) {
 		t.Fatalf("titles = %#v, want %#v", titles, want)
 	}
