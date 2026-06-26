@@ -2,10 +2,11 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { onDestroy, onMount } from 'svelte';
-	import { showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { gridScale, showFormatOnCover, getFormatColor } from '$lib/stores';
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { getBookReaderHref, isAudioFormat } from '$lib/utils/book-formats';
+	import { DEFAULT_GRID_SCALE, getResponsiveGridColumns, GRID_SCALE_STEP, MAX_GRID_SCALE, MIN_GRID_SCALE, observeElementWidth } from '$lib/utils/responsive-grid';
 	import {
 		getBookDetailContextUrl,
 		getInlineMetadataEditUrl,
@@ -47,10 +48,13 @@
 	let serverHasMore = $state(false);
 	let currentOffset = $state(0);
 	let viewMode = $state('grid');
-	let gridSize = $state(6);
+	let localGridScale = $state(DEFAULT_GRID_SCALE);
+	let gridContainerWidth = $state(0);
+	let gridMeasureElement = $state<HTMLDivElement | null>(null);
 	let sortBy = $state($page.url.searchParams.get('sort') || 'relevance');
 	let sortDir = $state<'asc' | 'desc'>($page.url.searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc');
 	let showSortMenu = $state(false);
+	let showDisplayMenu = $state(false);
 	let showFilterPanel = $state(false);
 	let availableAuthors = $state<any[]>([]);
 	let availableSeries = $state<any[]>([]);
@@ -80,9 +84,14 @@
 
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
 	let hasMore = $derived(serverHasMore);
+	let responsiveGridColumns = $derived(getResponsiveGridColumns(gridContainerWidth, localGridScale));
 	let gridStyle = $derived(viewMode === 'grid'
-		? `grid-template-columns: repeat(${gridSize}, minmax(0, 1fr))`
+		? `grid-template-columns: repeat(${responsiveGridColumns}, minmax(0, 1fr))`
 		: '');
+
+	function updateGridScale(value: number) {
+		gridScale.set(value);
+	}
 
 	function parseAuthors(authors: string): string {
 		try {
@@ -205,13 +214,24 @@
 	});
 
 	onMount(() => {
+		gridScale.init();
 		showFormatOnCover.init();
 		void fetchFilterOptions();
 	});
 
 	$effect(() => {
+		const unsub = gridScale.subscribe((value: number) => localGridScale = value);
+		return unsub;
+	});
+
+	$effect(() => {
 		const unsub = showFormatOnCover.subscribe((value: boolean) => formatOnCover = value);
 		return unsub;
+	});
+
+	$effect(() => {
+		if (!gridMeasureElement) return;
+		return observeElementWidth(gridMeasureElement, (width) => gridContainerWidth = width);
 	});
 
 	$effect(() => {
@@ -746,13 +766,13 @@
 		{#if libraryName}
 			<p class="mb-4 text-sm text-[var(--color-surface-text-muted)]">Scoped to {libraryName}</p>
 		{/if}
-		<div class="flex gap-3">
+		<div class="flex flex-col gap-3 sm:flex-row">
 			<input
 				type="text"
 				bind:value={query}
 				onkeydown={handleKeydown}
 				placeholder="Search books by title, author, or description..."
-				class="flex-1 px-4 py-3 border border-[var(--color-surface-border)] rounded-lg bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:ring-2 focus:ring-[var(--color-primary-500)] focus:border-transparent"
+				class="min-w-0 flex-1 px-4 py-3 border border-[var(--color-surface-border)] rounded-lg bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:ring-2 focus:ring-[var(--color-primary-500)] focus:border-transparent"
 			>
 			<button
 				onclick={submitSearch}
@@ -792,9 +812,9 @@
 	{/if}
 
 	{#if results.length > 0}
-		<div class="max-w-7xl mx-auto">
-			<div class="flex items-center justify-between mb-6 gap-4 flex-wrap">
-				<div>
+		<div bind:this={gridMeasureElement} class="w-full">
+			<div class="mb-6 flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+				<div class="min-w-0">
 					<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">
 						{#if totalResults > results.length}
 							{results.length} of {totalResults} result{totalResults === 1 ? '' : 's'} shown
@@ -804,7 +824,7 @@
 					</h2>
 				</div>
 
-				<div class="flex items-center space-x-2">
+				<div class="grid grid-cols-[auto_auto_2.5rem_2.5rem] items-center gap-2 lg:justify-end">
 					<div class="relative">
 						{#if showSortMenu}
 							<button
@@ -814,14 +834,14 @@
 								onclick={() => showSortMenu = false}
 							></button>
 						{/if}
-						<div class="inline-flex h-10 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
+						<div class="inline-flex h-10 max-w-36 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] sm:max-w-48">
 							<button
 								onclick={() => showSortMenu = !showSortMenu}
 								aria-label="Sort results"
-								class="inline-flex items-center px-3 font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] sm:px-4"
+								class="inline-flex min-w-0 items-center px-3 font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] sm:px-4"
 							>
 								<span class="hidden sm:inline">Sort</span>
-								<span class="ml-0 text-sm text-[var(--color-surface-text-muted)] sm:ml-2">{currentSortLabel()}</span>
+								<span class="ml-0 hidden min-w-0 truncate text-sm text-[var(--color-surface-text-muted)] sm:ml-2 md:inline">{currentSortLabel()}</span>
 								<svg class="ml-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 								</svg>
@@ -869,37 +889,71 @@
 					</button>
 
 					<button
-						onclick={() => viewMode = 'grid'}
-						class="p-2 rounded-lg {viewMode === 'grid' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'} transition-colors"
-						aria-label="Grid view"
+						type="button"
+						onclick={() => viewMode = viewMode === 'grid' ? 'list' : 'grid'}
+						class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-primary-400)]"
+						aria-label={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'}
+						title={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'}
 					>
-						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
-						</svg>
-					</button>
-					<button
-						onclick={() => viewMode = 'list'}
-						class="p-2 rounded-lg {viewMode === 'list' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'} transition-colors"
-						aria-label="List view"
-					>
-						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
-						</svg>
+						{#if viewMode === 'grid'}
+							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
+							</svg>
+						{:else}
+							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
+							</svg>
+						{/if}
 					</button>
 
-					{#if viewMode === 'grid'}
-						<div class="flex items-center space-x-2">
-							<span class="text-sm text-[var(--color-surface-text-muted)]">Grid size:</span>
-							<input
-								type="range"
-								min="3"
-								max="8"
-								bind:value={gridSize}
-								class="w-20"
-							>
-							<span class="text-sm text-[var(--color-surface-text)] w-6">{gridSize}</span>
-						</div>
-					{/if}
+					<div class="relative">
+						{#if showDisplayMenu}
+							<button
+								type="button"
+								class="fixed inset-0 z-20"
+								aria-label="Close display menu"
+								onclick={() => showDisplayMenu = false}
+							></button>
+						{/if}
+						<button
+							type="button"
+							onclick={() => showDisplayMenu = !showDisplayMenu}
+							aria-label="Display settings"
+							class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)]"
+						>
+							<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+							</svg>
+						</button>
+						{#if showDisplayMenu}
+							<div class="absolute right-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 shadow-lg">
+								{#if viewMode === 'grid'}
+									<div>
+										<div class="mb-2 flex items-center justify-between gap-3">
+											<label class="text-sm font-medium text-[var(--color-surface-text)]" for="search-grid-scale">Grid Scale</label>
+											<span class="text-xs text-[var(--color-surface-text-muted)]">{responsiveGridColumns} cols</span>
+										</div>
+										<div class="flex items-center gap-2">
+											<input
+												id="search-grid-scale"
+												type="range"
+												min={MIN_GRID_SCALE}
+												max={MAX_GRID_SCALE}
+												step={GRID_SCALE_STEP}
+												value={localGridScale}
+												oninput={(event) => updateGridScale(Number(event.currentTarget.value))}
+												class="flex-1"
+											>
+											<span class="w-12 text-right text-sm text-[var(--color-surface-text)]">{localGridScale}%</span>
+										</div>
+									</div>
+								{:else}
+									<p class="text-sm text-[var(--color-surface-text-muted)]">Grid scale is available in grid view.</p>
+								{/if}
+							</div>
+						{/if}
+					</div>
 				</div>
 			</div>
 
@@ -926,7 +980,7 @@
 				</div>
 			{/if}
 
-			<div class={viewMode === 'grid' ? 'grid gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4' : 'space-y-4'} style={viewMode === 'grid' ? gridStyle : ''}>
+			<div class={viewMode === 'grid' ? 'grid gap-4' : 'space-y-4'} style={viewMode === 'grid' ? gridStyle : ''}>
 				{#each results as book}
 					{#if viewMode === 'grid'}
 						<div

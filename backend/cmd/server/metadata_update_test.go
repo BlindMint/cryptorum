@@ -85,8 +85,8 @@ func TestUpdateBookHandlerDeduplicatesMetadataLists(t *testing.T) {
 	if err := json.Unmarshal([]byte(response.Book.Genres), &genres); err != nil {
 		t.Fatalf("decode genres: %v", err)
 	}
-	if !sameStringSet(genres, []string{"Warhammer", "Science Fiction"}) || len(genres) != 2 {
-		t.Fatalf("genres = %#v, want deduplicated values", genres)
+	if len(genres) != 0 {
+		t.Fatalf("genres = %#v, want legacy genres cleared", genres)
 	}
 
 	var tags []string
@@ -114,11 +114,12 @@ func TestApplyMetadataCandidateToBookDeduplicatesMetadataLists(t *testing.T) {
 
 	var rawAuthors string
 	var rawGenres string
+	var rawTags string
 	if err := appDB.QueryRow(`
-		SELECT COALESCE(authors, '[]'), COALESCE(genres, '[]')
+		SELECT COALESCE(authors, '[]'), COALESCE(genres, '[]'), COALESCE(tags, '[]')
 		FROM book_metadata
 		WHERE book_id = 1
-	`).Scan(&rawAuthors, &rawGenres); err != nil {
+	`).Scan(&rawAuthors, &rawGenres, &rawTags); err != nil {
 		t.Fatalf("fetch metadata: %v", err)
 	}
 
@@ -134,7 +135,38 @@ func TestApplyMetadataCandidateToBookDeduplicatesMetadataLists(t *testing.T) {
 	if err := json.Unmarshal([]byte(rawGenres), &genres); err != nil {
 		t.Fatalf("decode genres: %v", err)
 	}
-	if !sameStringSet(genres, []string{"Warhammer", "Science Fiction"}) || len(genres) != 2 {
-		t.Fatalf("genres = %#v, want deduplicated values", genres)
+	if len(genres) != 0 {
+		t.Fatalf("genres = %#v, want legacy genres empty", genres)
+	}
+
+	var tags []string
+	if err := json.Unmarshal([]byte(rawTags), &tags); err != nil {
+		t.Fatalf("decode tags: %v", err)
+	}
+	wantTags := []string{"Science Fiction", "Warhammer"}
+	if !reflect.DeepEqual(tags, wantTags) {
+		t.Fatalf("tags = %#v, want provider categories mapped to tags %#v", tags, wantTags)
+	}
+}
+
+func TestFetchBookDetailMergesLegacyGenresIntoTags(t *testing.T) {
+	setupMetadataUpdateTestDB(t)
+	mustExec(t, `
+		INSERT INTO book_metadata (book_id, title, genres, tags, owner_user_id)
+		VALUES (1, 'Legacy', '["Military","Space.Opera"]', '["Favorite","military"]', 1)
+	`)
+
+	book, err := fetchBookDetail(1)
+	if err != nil {
+		t.Fatalf("fetch book detail: %v", err)
+	}
+
+	var tags []string
+	if err := json.Unmarshal([]byte(book.Tags), &tags); err != nil {
+		t.Fatalf("decode tags: %v", err)
+	}
+	want := []string{"Favorite", "Military", "Space.Opera"}
+	if !reflect.DeepEqual(tags, want) {
+		t.Fatalf("tags = %#v, want legacy genres merged into tags %#v", tags, want)
 	}
 }

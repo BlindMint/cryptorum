@@ -650,7 +650,8 @@ func (s *Scanner) saveFilenameFallbackTitle(bookID int64, path string, ownerUser
 // saveMetadata upserts book metadata and saves the cover image to disk
 func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerUserID int64) error {
 	authorsJSON, _ := json.Marshal(meta.Authors)
-	genresJSON, _ := json.Marshal(meta.Genres)
+	emptyGenresJSON, _ := json.Marshal([]string{})
+	tagsJSON, _ := json.Marshal(meta.Genres)
 	var existingCoverPath string
 	_ = s.db.QueryRow("SELECT COALESCE(cover_path, '') FROM book_metadata WHERE book_id = ?", bookID).Scan(&existingCoverPath)
 
@@ -671,8 +672,8 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 	_, err := s.db.Exec(`
 		INSERT INTO book_metadata
 		    (book_id, title, authors, series, series_number, series_number_display, publisher, pub_date,
-		     description, rating, genres, isbn, asin, language, page_count, cover_path, cover_updated_on, owner_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		     description, rating, genres, tags, isbn, asin, language, page_count, cover_path, cover_updated_on, owner_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(book_id) DO UPDATE SET
 		    title         = COALESCE(NULLIF(excluded.title, ''), title),
 		    authors       = COALESCE(NULLIF(excluded.authors, '[]'), authors),
@@ -683,7 +684,7 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 		    pub_date      = COALESCE(NULLIF(excluded.pub_date, ''), pub_date),
 		    description   = COALESCE(NULLIF(excluded.description, ''), description),
 		    rating        = COALESCE(NULLIF(excluded.rating, 0), rating),
-		    genres        = COALESCE(NULLIF(excluded.genres, '[]'), genres),
+		    tags          = COALESCE(NULLIF(excluded.tags, '[]'), tags),
 		    isbn          = COALESCE(NULLIF(excluded.isbn, ''), isbn),
 		    asin          = COALESCE(NULLIF(excluded.asin, ''), asin),
 		    language      = COALESCE(NULLIF(excluded.language, ''), language),
@@ -695,7 +696,7 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 		    END
 	`, bookID, meta.Title, string(authorsJSON), meta.Series, meta.SeriesNumber, meta.SeriesNumberDisplay,
 		meta.Publisher, meta.PubDate, meta.Description, meta.Rating,
-		string(genresJSON), meta.ISBN, meta.ASIN, meta.Language, meta.PageCount, coverPath, coverUpdatedOn, ownerUserID)
+		string(emptyGenresJSON), string(tagsJSON), meta.ISBN, meta.ASIN, meta.Language, meta.PageCount, coverPath, coverUpdatedOn, ownerUserID)
 
 	if err != nil {
 		return err

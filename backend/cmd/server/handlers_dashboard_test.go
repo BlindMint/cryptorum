@@ -140,7 +140,10 @@ func TestStatsScopesToCurrentUser(t *testing.T) {
 	if stats["total_books"].(float64) != 1 || stats["reading"].(float64) != 0 || stats["finished"].(float64) != 1 {
 		t.Fatalf("unexpected scoped stats counts: %+v", stats)
 	}
-	if stats["total_authors"].(float64) != 1 || stats["total_genres"].(float64) != 1 {
+	if stats["total_authors"].(float64) != 1 || stats["total_tags"].(float64) != 1 || stats["total_genres"].(float64) != 1 {
 		t.Fatalf("unexpected scoped metadata totals: %+v", stats)
+	}
+	if _, ok := stats["tag_distribution"].([]interface{}); !ok {
+		t.Fatalf("missing tag_distribution alias: %+v", stats)
 	}
 }

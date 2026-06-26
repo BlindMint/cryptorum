@@ -393,10 +393,11 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 	}
 
 	candidate.Authors = normalizeMetadataStringList(candidate.Authors)
-	candidate.Genres = normalizeMetadataStringList(candidate.Genres)
+	candidateTags := metadataCandidateTags(candidate)
 
 	authorsJSON, _ := json.Marshal(candidate.Authors)
-	genresJSON, _ := json.Marshal(candidate.Genres)
+	emptyJSON, _ := json.Marshal([]string{})
+	candidateTagsJSON, _ := json.Marshal(candidateTags)
 
 	type currentMetadata struct {
 		Title        string
@@ -408,6 +409,7 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 		Description  string
 		Rating       float64
 		Genres       string
+		Tags         string
 		ISBN         string
 		ASIN         string
 		CoverPath    string
@@ -428,6 +430,7 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 		       COALESCE(description, ''),
 		       COALESCE(rating, 0),
 		       COALESCE(genres, '[]'),
+		       COALESCE(tags, '[]'),
 		       COALESCE(isbn, ''),
 		       COALESCE(asin, ''),
 		       COALESCE(cover_path, ''),
@@ -447,6 +450,7 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 		&current.Description,
 		&current.Rating,
 		&current.Genres,
+		&current.Tags,
 		&current.ISBN,
 		&current.ASIN,
 		&current.CoverPath,
@@ -460,12 +464,12 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 		_, err = appDB.Exec(`
 			INSERT INTO book_metadata (
 				book_id, title, authors, series, series_number, publisher,
-				pub_date, description, rating, genres, isbn, asin, cover_path,
+				pub_date, description, rating, genres, tags, isbn, asin, cover_path,
 				cover_updated_on, page_count, language, locked_fields
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, bookID, candidate.Title, nullString(authorsJSON), candidate.Series,
 			0, candidate.Publisher, candidate.PubDate, candidate.Description,
-			candidate.Rating, nullString(genresJSON), candidate.ISBN, candidate.ASIN, "",
+			candidate.Rating, nullString(emptyJSON), nullString(candidateTagsJSON), candidate.ISBN, candidate.ASIN, "",
 			0, candidate.PageCount, candidate.Language, "[]")
 		if err != nil {
 			return err
@@ -515,9 +519,10 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 			finalRating = candidate.Rating
 		}
 
-		finalGenres := current.Genres
-		if len(candidate.Genres) > 0 && !contains(locked, "genres") {
-			finalGenres = nullString(genresJSON).(string)
+		finalTags := current.Tags
+		if len(candidateTags) > 0 && !contains(locked, "tags") && !contains(locked, "genres") {
+			mergedTagsJSON, _ := json.Marshal(mergeMetadataTagLists(parseMetadataJSONList(current.Tags), candidateTags))
+			finalTags = string(mergedTagsJSON)
 		}
 
 		finalISBN := current.ISBN
@@ -550,14 +555,14 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 				pub_date = ?,
 				description = ?,
 				rating = ?,
-				genres = ?,
+				tags = ?,
 				isbn = ?,
 				asin = ?,
 				page_count = ?,
 				language = ?
 			WHERE book_id = ?
 		`, finalTitle, finalAuthors, finalSeries, finalSeriesNumber, finalPublisher,
-			finalPubDate, finalDescription, finalRating, finalGenres, finalISBN, finalASIN,
+			finalPubDate, finalDescription, finalRating, finalTags, finalISBN, finalASIN,
 			finalPageCount, finalLanguage, bookID)
 		if err != nil {
 			return err

@@ -73,6 +73,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		TotalPages            int64             `json:"total_pages"`
 		TotalSeries           int64             `json:"total_series"`
 		TotalAuthors          int64             `json:"total_authors"`
+		TotalTags             int64             `json:"total_tags"`
 		TotalGenres           int64             `json:"total_genres"`
 		TotalLanguages        int64             `json:"total_languages"`
 		LibraryFirstAddedAt   int64             `json:"library_first_added_at"`
@@ -86,6 +87,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		CurrentReadingStreak  int64             `json:"current_reading_streak"`
 		BooksByFormat         FormatCounts      `json:"books_by_format"`
 		ReadingActivity       []ActivityDay     `json:"reading_activity"`
+		TagDistribution       []GenreCount      `json:"tag_distribution"`
 		GenreDistribution     []GenreCount      `json:"genre_distribution"`
 		AuthorDistribution    []AuthorCount     `json:"author_distribution"`
 		LanguageDistribution  []CountItem       `json:"language_distribution"`
@@ -138,7 +140,8 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		WHERE `+ownerClause+activeBookExists+` AND bm.language IS NOT NULL AND bm.language != ''
 	`, ownerArgs...).Scan(&stats.TotalLanguages)
 	stats.TotalAuthors = countDistinctStatsJSONValues("authors", ownerClause, ownerArgs, activeBookExists)
-	stats.TotalGenres = countDistinctStatsCombinedTagValues(ownerClause, ownerArgs, activeBookExists)
+	stats.TotalTags = countDistinctStatsCombinedTagValues(ownerClause, ownerArgs, activeBookExists)
+	stats.TotalGenres = stats.TotalTags
 	appDB.QueryRow(`
 		SELECT COALESCE(MIN(b.added_at), 0), COALESCE(MAX(b.added_at), 0)
 		FROM book b
@@ -237,7 +240,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Tag distribution. The response field keeps its legacy name for API compatibility.
+	// Tag distribution. GenreDistribution is kept as a legacy alias.
 	genreRows, _ := appDB.Query(`
 		SELECT COALESCE(bm.tags, '[]'), COALESCE(bm.genres, '[]')
 		FROM book_metadata bm
@@ -246,7 +249,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		WHERE `+ownerClause+activeBookExists+`
 		  AND ((bm.tags IS NOT NULL AND bm.tags != '[]') OR (bm.genres IS NOT NULL AND bm.genres != '[]'))
 	`, ownerArgs...)
-	stats.GenreDistribution = []GenreCount{}
+	stats.TagDistribution = []GenreCount{}
 	for genreRows.Next() {
 		var tagsJSON string
 		var genresJSON string
@@ -254,22 +257,22 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 
 		for _, genre := range mergeMetadataTagLists(parseMetadataJSONList(tagsJSON), parseMetadataJSONList(genresJSON)) {
 			found := false
-			for i, existing := range stats.GenreDistribution {
+			for i, existing := range stats.TagDistribution {
 				if existing.Name == genre {
-					stats.GenreDistribution[i].Count++
+					stats.TagDistribution[i].Count++
 					found = true
 					break
 				}
 			}
 			if !found {
-				stats.GenreDistribution = append(stats.GenreDistribution, GenreCount{Name: genre, Count: 1})
+				stats.TagDistribution = append(stats.TagDistribution, GenreCount{Name: genre, Count: 1})
 			}
 		}
 	}
 	genreRows.Close()
 
-	// Sort genre distribution
-	genreSlice := stats.GenreDistribution
+	// Sort tag distribution
+	genreSlice := stats.TagDistribution
 	for i := 0; i < len(genreSlice)-1; i++ {
 		for j := i + 1; j < len(genreSlice); j++ {
 			if genreSlice[i].Count < genreSlice[j].Count {
@@ -280,7 +283,8 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	if len(genreSlice) > 10 {
 		genreSlice = genreSlice[:10]
 	}
-	stats.GenreDistribution = genreSlice
+	stats.TagDistribution = genreSlice
+	stats.GenreDistribution = stats.TagDistribution
 
 	// Author distribution
 	authorRows, _ := appDB.Query(`

@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import { browser } from '$app/environment';
+import { clampGridScale, DEFAULT_GRID_SCALE } from '$lib/utils/responsive-grid';
 
 export const mobileMenuOpen = writable(false);
 export const desktopSidebarCollapsed = writable(false);
@@ -7,7 +8,8 @@ export const desktopSidebarCollapsed = writable(false);
 // Sidebar refresh store - increment to trigger refresh
 export const sidebarRefresh = writable(0);
 
-// Grid size for library and dashboard - default 4, will be overridden by screen size detection
+// Legacy fixed grid column count. Kept so older localStorage state and any
+// future compatibility reads do not break while responsive grid scale replaces it.
 function createGridSizeStore() {
 	const defaultValue = 4;
 	const { subscribe, set, update } = writable<number>(defaultValue);
@@ -41,6 +43,46 @@ function createGridSizeStore() {
 }
 
 export const gridSize = createGridSizeStore();
+
+// Grid scale for responsive library/search grids. This replaces fixed column
+// counts while keeping the old gridSize store available for compatibility.
+function createGridScaleStore() {
+	const { subscribe, set, update } = writable<number>(DEFAULT_GRID_SCALE);
+
+	function persist(value: number) {
+		const nextValue = clampGridScale(value);
+		if (browser) {
+			localStorage.setItem('gridScale', JSON.stringify(nextValue));
+		}
+		set(nextValue);
+	}
+
+	return {
+		subscribe,
+		set: persist,
+		update: (fn: (value: number) => number) => {
+			update(value => {
+				const newValue = clampGridScale(fn(value));
+				if (browser) {
+					localStorage.setItem('gridScale', JSON.stringify(newValue));
+				}
+				return newValue;
+			});
+		},
+		init: () => {
+			if (browser) {
+				const stored = localStorage.getItem('gridScale');
+				if (stored !== null) {
+					persist(JSON.parse(stored));
+					return;
+				}
+			}
+			set(DEFAULT_GRID_SCALE);
+		}
+	};
+}
+
+export const gridScale = createGridScaleStore();
 
 // Show file format badge on book covers
 function createShowFormatOnCoverStore() {
