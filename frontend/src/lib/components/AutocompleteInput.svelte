@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { lenientSearchMatch } from '$lib/utils/search';
 	import {
 		loadMetadataSuggestions,
@@ -23,6 +24,7 @@
 	let selectedIndex = $state(-1);
 	let inputElement: HTMLInputElement | null = $state(null);
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+	let blurTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function isMultipleValueField(): boolean {
 		return multiple ?? (field === 'genres' || field === 'tags');
@@ -61,33 +63,49 @@
 			.slice(0, 20);
 	}
 
-	function handleInput(e: Event) {
-		const target = e.target as HTMLInputElement;
-		value = target.value;
-		onchange(value);
-
-		if (debounceTimer) {
-			clearTimeout(debounceTimer);
-		}
-		debounceTimer = setTimeout(() => {
-			const { segment } = getLastSegment(value);
-			filteredSuggestions = filterSuggestions(segment);
-			showDropdown = filteredSuggestions.length > 0;
-			selectedIndex = -1;
-		}, 150);
+	function clearDebounceTimer() {
+		if (!debounceTimer) return;
+		clearTimeout(debounceTimer);
+		debounceTimer = null;
 	}
 
-	function handleFocus() {
+	function clearBlurTimer() {
+		if (!blurTimer) return;
+		clearTimeout(blurTimer);
+		blurTimer = null;
+	}
+
+	function updateFilteredSuggestions() {
 		const { segment } = getLastSegment(value);
 		filteredSuggestions = filterSuggestions(segment);
 		showDropdown = filteredSuggestions.length > 0;
 		selectedIndex = -1;
 	}
 
-	function handleBlur() {
-		setTimeout(() => {
-			showDropdown = false;
+	function handleInput(e: Event) {
+		const target = e.target as HTMLInputElement;
+		value = target.value;
+		onchange(value);
+
+		clearDebounceTimer();
+		debounceTimer = setTimeout(() => {
+			updateFilteredSuggestions();
+			debounceTimer = null;
 		}, 150);
+	}
+
+	function handleFocus() {
+		clearBlurTimer();
+		updateFilteredSuggestions();
+	}
+
+	function handleBlur() {
+		clearBlurTimer();
+		blurTimer = setTimeout(() => {
+			showDropdown = false;
+			selectedIndex = -1;
+			blurTimer = null;
+		}, 120);
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -116,26 +134,32 @@
 	}
 
 	function selectSuggestion(suggestion: string) {
+		clearBlurTimer();
+		clearDebounceTimer();
 		const { before } = getLastSegment(value);
 		const separator = before && isMultipleValueField() ? ' ' : '';
 		value = before + separator + suggestion;
 		onchange(value);
 		showDropdown = false;
 		selectedIndex = -1;
-		inputElement?.focus();
+	}
+
+	function handleSuggestionPointerDown(event: PointerEvent, suggestion: string) {
+		event.preventDefault();
+		selectSuggestion(suggestion);
 	}
 
 	$effect(() => {
 		const unsubscribe = metadataSuggestions.subscribe((state) => {
 			suggestions = state[field] ?? [];
-			if (showDropdown) {
-				const { segment } = getLastSegment(value);
-				filteredSuggestions = filterSuggestions(segment);
-				showDropdown = filteredSuggestions.length > 0;
-			}
 		});
 		void loadMetadataSuggestions();
 		return unsubscribe;
+	});
+
+	onDestroy(() => {
+		clearDebounceTimer();
+		clearBlurTimer();
 	});
 </script>
 
@@ -160,7 +184,7 @@
 					<li>
 						<button
 							type="button"
-							onclick={() => selectSuggestion(suggestion)}
+							onpointerdown={(event) => handleSuggestionPointerDown(event, suggestion)}
 							onmouseenter={() => selectedIndex = i}
 							class="autocomplete-option w-full rounded-md px-3 py-2 text-left text-[var(--color-surface-text)] transition-all duration-150 ease-out focus-visible:outline-none {i === selectedIndex ? 'active' : ''}"
 						>
