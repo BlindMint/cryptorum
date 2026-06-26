@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -46,7 +47,7 @@ func TestUpdateBookHandlerDeduplicatesMetadataLists(t *testing.T) {
 		"series_number": "",
 		"status": "reading",
 		"genres": ["Warhammer", " warhammer ", "Science Fiction"],
-		"tags": ["Favorite", "favorite", "To Read"]
+		"tags": ["zeta", " Alpha ", "beta", "alpha"]
 	}`
 	req := httptest.NewRequest(http.MethodPut, "/api/books/1", strings.NewReader(body))
 	req = req.WithContext(authContextWithUser(req.Context(), &AppUser{ID: 1, IsAdmin: true}))
@@ -92,8 +93,9 @@ func TestUpdateBookHandlerDeduplicatesMetadataLists(t *testing.T) {
 	if err := json.Unmarshal([]byte(response.Book.Tags), &tags); err != nil {
 		t.Fatalf("decode tags: %v", err)
 	}
-	if !sameStringSet(tags, []string{"Favorite", "To Read"}) || len(tags) != 2 {
-		t.Fatalf("tags = %#v, want deduplicated values", tags)
+	wantTags := []string{"Alpha", "beta", "Science Fiction", "Warhammer", "zeta"}
+	if !reflect.DeepEqual(tags, wantTags) {
+		t.Fatalf("tags = %#v, want sorted deduplicated values %#v", tags, wantTags)
 	}
 }
 

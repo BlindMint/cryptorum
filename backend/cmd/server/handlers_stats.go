@@ -138,7 +138,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		WHERE `+ownerClause+activeBookExists+` AND bm.language IS NOT NULL AND bm.language != ''
 	`, ownerArgs...).Scan(&stats.TotalLanguages)
 	stats.TotalAuthors = countDistinctStatsJSONValues("authors", ownerClause, ownerArgs, activeBookExists)
-	stats.TotalGenres = countDistinctStatsJSONValues("genres", ownerClause, ownerArgs, activeBookExists)
+	stats.TotalGenres = countDistinctStatsCombinedTagValues(ownerClause, ownerArgs, activeBookExists)
 	appDB.QueryRow(`
 		SELECT COALESCE(MIN(b.added_at), 0), COALESCE(MAX(b.added_at), 0)
 		FROM book b
@@ -237,37 +237,32 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Genre distribution
+	// Tag distribution. The response field keeps its legacy name for API compatibility.
 	genreRows, _ := appDB.Query(`
-		SELECT bm.genres, COUNT(*) as cnt
+		SELECT COALESCE(bm.tags, '[]'), COALESCE(bm.genres, '[]')
 		FROM book_metadata bm
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause+activeBookExists+` AND bm.genres IS NOT NULL AND bm.genres != '[]'
-		GROUP BY bm.genres
-		ORDER BY cnt DESC
-		LIMIT 10
+		WHERE `+ownerClause+activeBookExists+`
+		  AND ((bm.tags IS NOT NULL AND bm.tags != '[]') OR (bm.genres IS NOT NULL AND bm.genres != '[]'))
 	`, ownerArgs...)
 	stats.GenreDistribution = []GenreCount{}
 	for genreRows.Next() {
-		var genresJson string
-		var cnt int64
-		genreRows.Scan(&genresJson, &cnt)
+		var tagsJSON string
+		var genresJSON string
+		genreRows.Scan(&tagsJSON, &genresJSON)
 
-		// Parse genres JSON and count individually
-		var genres []string
-		json.Unmarshal([]byte(genresJson), &genres)
-		for _, genre := range genres {
+		for _, genre := range mergeMetadataTagLists(parseMetadataJSONList(tagsJSON), parseMetadataJSONList(genresJSON)) {
 			found := false
 			for i, existing := range stats.GenreDistribution {
 				if existing.Name == genre {
-					stats.GenreDistribution[i].Count += cnt
+					stats.GenreDistribution[i].Count++
 					found = true
 					break
 				}
 			}
 			if !found {
-				stats.GenreDistribution = append(stats.GenreDistribution, GenreCount{Name: genre, Count: cnt})
+				stats.GenreDistribution = append(stats.GenreDistribution, GenreCount{Name: genre, Count: 1})
 			}
 		}
 	}
@@ -600,6 +595,36 @@ func countDistinctStatsJSONValues(column, ownerClause string, ownerArgs []interf
 			}
 			if item != "" {
 				values[item] = true
+			}
+		}
+	}
+	return int64(len(values))
+}
+
+func countDistinctStatsCombinedTagValues(ownerClause string, ownerArgs []interface{}, activeBookExists string) int64 {
+	rows, err := appDB.Query(`
+		SELECT COALESCE(bm.tags, '[]'), COALESCE(bm.genres, '[]')
+		FROM book_metadata bm
+		JOIN book b ON bm.book_id = b.id
+		JOIN library l ON b.library_id = l.id
+		WHERE `+ownerClause+activeBookExists+`
+		  AND ((bm.tags IS NOT NULL AND bm.tags != '[]') OR (bm.genres IS NOT NULL AND bm.genres != '[]'))
+	`, ownerArgs...)
+	if err != nil {
+		return 0
+	}
+	defer rows.Close()
+
+	values := make(map[string]bool)
+	for rows.Next() {
+		var tagsJSON string
+		var genresJSON string
+		if err := rows.Scan(&tagsJSON, &genresJSON); err != nil {
+			continue
+		}
+		for _, value := range mergeMetadataTagLists(parseMetadataJSONList(tagsJSON), parseMetadataJSONList(genresJSON)) {
+			if value != "" {
+				values[value] = true
 			}
 		}
 	}

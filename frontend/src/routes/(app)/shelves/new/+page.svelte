@@ -15,7 +15,7 @@
 		{ value: 'status', label: 'Reading Status' },
 		{ value: 'authors', label: 'Author' },
 		{ value: 'series', label: 'Series' },
-		{ value: 'genres', label: 'Genres' },
+		{ value: 'tags', label: 'Tags' },
 		{ value: 'publisher', label: 'Publisher' },
 		{ value: 'language', label: 'Language' },
 		{ value: 'rating', label: 'Rating' },

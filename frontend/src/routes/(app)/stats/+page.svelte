@@ -166,7 +166,7 @@
 						...commonOptions.plugins,
 						title: {
 							display: true,
-							text: 'Top Genres',
+							text: 'Top Tags',
 							color: textColor
 						}
 					}
@@ -594,9 +594,9 @@
 				accent: 'from-fuchsia-500/20 to-fuchsia-500/5'
 			},
 			{
-				title: 'Top Genre',
+				title: 'Top Tag',
 				value: getTopGenre()?.label || 'N/A',
-				description: `${formatNumber(getTopGenre()?.count || 0)} books share that genre path.`,
+				description: `${formatNumber(getTopGenre()?.count || 0)} books share that tag path.`,
 				accent: 'from-cyan-500/20 to-cyan-500/5'
 			}
 		];
@@ -659,9 +659,9 @@
 					<div class="mt-1 text-sm text-[var(--color-surface-text-muted)]">Tracked author entries</div>
 				</div>
 				<div class="rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5">
-					<div class="text-xs font-medium uppercase tracking-[0.18em] text-[var(--color-surface-text-muted)]">Genres</div>
+					<div class="text-xs font-medium uppercase tracking-[0.18em] text-[var(--color-surface-text-muted)]">Tags</div>
 					<div class="mt-2 text-3xl font-semibold text-[var(--color-surface-text)]">{formatNumber(stats.total_genres)}</div>
-					<div class="mt-1 text-sm text-[var(--color-surface-text-muted)]">Unique genre paths</div>
+					<div class="mt-1 text-sm text-[var(--color-surface-text-muted)]">Unique tag paths</div>
 				</div>
 				<div class="rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5">
 					<div class="text-xs font-medium uppercase tracking-[0.18em] text-[var(--color-surface-text-muted)]">Library Age</div>

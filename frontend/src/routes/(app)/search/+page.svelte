@@ -54,7 +54,6 @@
 	let showFilterPanel = $state(false);
 	let availableAuthors = $state<any[]>([]);
 	let availableSeries = $state<any[]>([]);
-	let availableGenres = $state<any[]>([]);
 	let availableTags = $state<any[]>([]);
 	let availableFormats = $state<any[]>([]);
 	let selectedBooks = $state<Set<number>>(new Set());
@@ -340,7 +339,6 @@
 			const data = await res.json();
 			availableAuthors = data.authors ?? [];
 			availableSeries = data.series ?? [];
-			availableGenres = data.genres ?? [];
 			availableTags = data.tags ?? [];
 			availableFormats = data.formats ?? [];
 		} catch (error) {
@@ -385,7 +383,7 @@
 
 		for (const author of getQueryValues(params, 'author')) filters.push({ key: 'author', value: author, label: `Author: ${author}` });
 		for (const seriesName of getQueryValues(params, 'series')) filters.push({ key: 'series', value: seriesName, label: `Series: ${seriesName}` });
-		for (const genre of getQueryValues(params, 'genre', true)) filters.push({ key: 'genre', value: genre, label: `Genre: ${genre}` });
+		for (const genre of getQueryValues(params, 'genre', true)) filters.push({ key: 'genre', value: genre, label: `Tag: ${genre}` });
 		for (const tag of getQueryValues(params, 'tags', true)) filters.push({ key: 'tags', value: tag, label: `Tag: ${tag}` });
 		for (const format of getQueryValues(params, 'format')) filters.push({ key: 'format', value: format, label: `Format: ${format.toUpperCase()}` });
 		for (const status of getQueryValues(params, 'status')) filters.push({ key: 'status', value: status, label: `Status: ${status}` });
@@ -455,19 +453,6 @@
 		navigateWithSearchParams(url, true);
 	}
 
-	function toggleGenreSelection(genreName: string) {
-		const url = new URL($page.url);
-		const genreList = getQueryValues(url.searchParams, 'genre', true);
-		const newGenres = genreList.includes(genreName)
-			? genreList.filter((genre) => genre !== genreName)
-			: [...genreList, genreName];
-
-		url.searchParams.delete('genre');
-		if (newGenres.length > 0) url.searchParams.set('genre', newGenres.join(','));
-		url.searchParams.delete('genre_mode');
-		navigateWithSearchParams(url);
-	}
-
 	function toggleTagSelection(tagName: string) {
 		const url = new URL($page.url);
 		const tagList = getQueryValues(url.searchParams, 'tags', true);
@@ -487,10 +472,6 @@
 
 	function isSeriesSelected(seriesName: string): boolean {
 		return getQueryValues($page.url.searchParams, 'series').includes(seriesName);
-	}
-
-	function isGenreSelected(genreName: string): boolean {
-		return getQueryValues($page.url.searchParams, 'genre', true).includes(genreName);
 	}
 
 	function isTagSelected(tagName: string): boolean {
@@ -787,7 +768,6 @@
 		<FilterPanel
 			authors={availableAuthors}
 			series={availableSeries}
-			genres={availableGenres}
 			tags={availableTags}
 			formats={availableFormats}
 			filterMode={getFilterMode()}
@@ -799,13 +779,11 @@
 			onSetValueFilterMode={setValueFilterMode}
 			onToggleAuthor={(value) => toggleRepeatedFilter('author', value)}
 			onToggleSeries={(value) => toggleRepeatedFilter('series', value)}
-			onToggleGenre={toggleGenreSelection}
 			onToggleTag={toggleTagSelection}
 			onToggleFormat={(value) => toggleRepeatedFilter('format', value)}
 			onToggleStatus={(value) => toggleRepeatedFilter('status', value)}
 			isAuthorSelected={isAuthorSelected}
 			isSeriesSelected={isSeriesSelected}
-			isGenreSelected={isGenreSelected}
 			isTagSelected={isTagSelected}
 			isFormatSelected={isFormatSelected}
 			isStatusSelected={isStatusSelected}
