@@ -1,6 +1,7 @@
 <script lang="ts">
 	import AutocompleteInput from '$lib/components/AutocompleteInput.svelte';
 	import { appActivity } from '$lib/stores';
+	import { addMetadataSuggestions, refreshMetadataSuggestions } from '$lib/stores/metadataSuggestions';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { metadataStatusOptions, ratingStars, starsToRating } from '$lib/utils/metadata-edit';
 
@@ -96,6 +97,14 @@
 			} else {
 				appActivity.confirmPendingJob(pendingJob);
 			}
+			addMetadataSuggestions({
+				authors: commaValues(authors),
+				series: series ? [series] : [],
+				publishers: publisher ? [publisher] : [],
+				languages: language ? [language] : [],
+				tags: commaValues(addTags)
+			});
+			void refreshMetadataSuggestions();
 			await appActivity.refresh();
 			queuedMessage = 'Bulk metadata update queued. You can monitor progress from the notification panel or Settings > Jobs.';
 			onSaved?.(job);

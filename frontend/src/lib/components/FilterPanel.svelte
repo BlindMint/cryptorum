@@ -226,7 +226,7 @@
 </style>
 
 <div
-	class="fixed right-0 top-20 z-40 h-[calc(100dvh-5rem)] max-w-[calc(100vw-1rem)] overflow-y-auto border-l border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-xl transition-transform duration-300 ease-out {open ? 'translate-x-0' : 'invisible translate-x-full pointer-events-none'}"
+	class="fixed right-0 top-20 z-40 h-[calc(100dvh-5rem)] max-w-[calc(100vw-1rem)] overflow-y-auto border-l border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-xl {open ? 'translate-x-0' : 'invisible translate-x-full pointer-events-none'}"
 	style={`width: ${$filterPanelWidth}px;`}
 	aria-hidden={!open}
 	inert={!open}

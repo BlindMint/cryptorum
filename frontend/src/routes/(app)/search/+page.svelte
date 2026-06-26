@@ -6,7 +6,7 @@
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { getBookReaderHref, isAudioFormat } from '$lib/utils/book-formats';
-	import { DEFAULT_GRID_SCALE, getResponsiveGridColumns, GRID_SCALE_STEP, MAX_GRID_SCALE, MIN_GRID_SCALE, observeElementWidth } from '$lib/utils/responsive-grid';
+	import { DEFAULT_GRID_SCALE, getResponsiveGridLayout, getResponsiveGridStyle, GRID_SCALE_STEP, MAX_GRID_SCALE, MIN_GRID_SCALE } from '$lib/utils/responsive-grid';
 	import {
 		getBookDetailContextUrl,
 		getInlineMetadataEditUrl,
@@ -49,8 +49,6 @@
 	let currentOffset = $state(0);
 	let viewMode = $state('grid');
 	let localGridScale = $state(DEFAULT_GRID_SCALE);
-	let gridContainerWidth = $state(0);
-	let gridMeasureElement = $state<HTMLDivElement | null>(null);
 	let sortBy = $state($page.url.searchParams.get('sort') || 'relevance');
 	let sortDir = $state<'asc' | 'desc'>($page.url.searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc');
 	let showSortMenu = $state(false);
@@ -85,9 +83,11 @@
 
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
 	let hasMore = $derived(serverHasMore);
-	let responsiveGridColumns = $derived(getResponsiveGridColumns(gridContainerWidth, localGridScale));
+	let estimatedGridWidth = $derived(typeof window === 'undefined' ? 1920 : window.innerWidth);
+	let responsiveGridLayout = $derived(getResponsiveGridLayout(estimatedGridWidth, localGridScale));
+	let responsiveGridColumns = $derived(responsiveGridLayout.columns);
 	let gridStyle = $derived(viewMode === 'grid'
-		? `grid-template-columns: repeat(${responsiveGridColumns}, minmax(0, 1fr))`
+		? getResponsiveGridStyle(responsiveGridLayout)
 		: '');
 
 	function updateGridScale(value: number) {
@@ -118,6 +118,14 @@
 		}
 
 		return Array.from(new Set(cleaned));
+	}
+
+	function setQueryValues(params: URLSearchParams, key: string, values: string[]) {
+		params.delete(key);
+		for (const value of values) {
+			const trimmed = value.trim();
+			if (trimmed) params.append(key, trimmed);
+		}
 	}
 
 	function getFilterMode(): FilterMode {
@@ -163,10 +171,8 @@
 		if (libraryFilter) params.set('library_id', libraryFilter);
 		for (const author of getQueryValues($page.url.searchParams, 'author')) params.append('author', author);
 		for (const seriesName of getQueryValues($page.url.searchParams, 'series')) params.append('series', seriesName);
-		const genres = getQueryValues($page.url.searchParams, 'genre', true);
-		const tags = getQueryValues($page.url.searchParams, 'tags', true);
-		if (genres.length > 0) params.set('genre', genres.join(','));
-		if (tags.length > 0) params.set('tags', tags.join(','));
+		for (const genre of getQueryValues($page.url.searchParams, 'genre')) params.append('genre', genre);
+		for (const tag of getQueryValues($page.url.searchParams, 'tags')) params.append('tags', tag);
 		for (const format of getQueryValues($page.url.searchParams, 'format')) params.append('format', format);
 		for (const status of getQueryValues($page.url.searchParams, 'status')) params.append('status', status);
 		if (getFilterMode() !== 'AND') params.set('filter_mode', getFilterMode());
@@ -238,11 +244,6 @@
 	$effect(() => {
 		const unsub = showFormatOnCover.subscribe((value: boolean) => formatOnCover = value);
 		return unsub;
-	});
-
-	$effect(() => {
-		if (!gridMeasureElement) return;
-		return observeElementWidth(gridMeasureElement, (width) => gridContainerWidth = width);
 	});
 
 	$effect(() => {
@@ -414,8 +415,8 @@
 
 		for (const author of getQueryValues(params, 'author')) filters.push({ key: 'author', value: author, label: `Author: ${author}` });
 		for (const seriesName of getQueryValues(params, 'series')) filters.push({ key: 'series', value: seriesName, label: `Series: ${seriesName}` });
-		for (const genre of getQueryValues(params, 'genre', true)) filters.push({ key: 'genre', value: genre, label: `Tag: ${genre}` });
-		for (const tag of getQueryValues(params, 'tags', true)) filters.push({ key: 'tags', value: tag, label: `Tag: ${tag}` });
+		for (const genre of getQueryValues(params, 'genre')) filters.push({ key: 'genre', value: genre, label: `Tag: ${genre}` });
+		for (const tag of getQueryValues(params, 'tags')) filters.push({ key: 'tags', value: tag, label: `Tag: ${tag}` });
 		for (const format of getQueryValues(params, 'format')) filters.push({ key: 'format', value: format, label: `Format: ${format.toUpperCase()}` });
 		for (const status of getQueryValues(params, 'status')) filters.push({ key: 'status', value: status, label: `Status: ${status}` });
 
@@ -425,9 +426,8 @@
 	function removeFilter(key: string, value: string) {
 		const url = new URL($page.url);
 		if (key === 'genre' || key === 'tags') {
-			const values = getQueryValues(url.searchParams, key, true).filter((item) => item !== value);
-			url.searchParams.delete(key);
-			if (values.length > 0) url.searchParams.set(key, values.join(','));
+			const values = getQueryValues(url.searchParams, key).filter((item) => item !== value);
+			setQueryValues(url.searchParams, key, values);
 		} else {
 			const values = getQueryValues(url.searchParams, key).filter((item) => item !== value);
 			url.searchParams.delete(key);
@@ -486,13 +486,12 @@
 
 	function toggleTagSelection(tagName: string) {
 		const url = new URL($page.url);
-		const tagList = getQueryValues(url.searchParams, 'tags', true);
+		const tagList = getQueryValues(url.searchParams, 'tags');
 		const newTags = tagList.includes(tagName)
 			? tagList.filter((tag) => tag !== tagName)
 			: [...tagList, tagName];
 
-		url.searchParams.delete('tags');
-		if (newTags.length > 0) url.searchParams.set('tags', newTags.join(','));
+		setQueryValues(url.searchParams, 'tags', newTags);
 		url.searchParams.delete('tag_mode');
 		navigateWithSearchParams(url);
 	}
@@ -506,7 +505,7 @@
 	}
 
 	function isTagSelected(tagName: string): boolean {
-		return getQueryValues($page.url.searchParams, 'tags', true).includes(tagName);
+		return getQueryValues($page.url.searchParams, 'tags').includes(tagName);
 	}
 
 	function isStatusSelected(status: string): boolean {
@@ -771,7 +770,7 @@
 
 </script>
 
-<div class="space-y-6 transition-all duration-300 {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}" style={`--filter-panel-offset: ${$filterPanelWidth + 24}px;`}>
+<div class="space-y-6 {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}" style={`--filter-panel-offset: ${$filterPanelWidth + 24}px;`}>
 	<div class="max-w-2xl mx-auto">
 		<h1 class="text-2xl font-bold text-[var(--color-surface-text)] mb-2">Search</h1>
 		{#if libraryName}
@@ -822,7 +821,7 @@
 	/>
 
 	{#if results.length > 0}
-		<div bind:this={gridMeasureElement} class="w-full">
+		<div class="w-full">
 			<div class="mb-6 flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
 				<div class="min-w-0">
 					<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">
@@ -990,7 +989,7 @@
 				</div>
 			{/if}
 
-			<div class={viewMode === 'grid' ? 'grid gap-4' : 'space-y-4'} style={viewMode === 'grid' ? gridStyle : ''}>
+			<div class={viewMode === 'grid' ? 'grid' : 'space-y-4'} style={viewMode === 'grid' ? gridStyle : ''}>
 				{#each results as book}
 					{#if viewMode === 'grid'}
 						<div

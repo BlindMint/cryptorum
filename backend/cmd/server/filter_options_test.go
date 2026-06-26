@@ -140,6 +140,59 @@ func TestTagFilterMatchesLegacyGenres(t *testing.T) {
 	}
 }
 
+func TestTagAndGenreFiltersPreserveCommaValues(t *testing.T) {
+	setupFilterOptionsTestDB(t)
+	insertFilterOptionBook(t, 10, 1, "Comma Tag", `["Comma Author"]`, `[]`, `["History, Military"]`, "epub", "unread")
+	insertFilterOptionBook(t, 11, 1, "Comma Genre", `["Genre Author"]`, `["Reference, Technical"]`, `[]`, "epub", "unread")
+	insertFilterOptionBook(t, 12, 1, "Split Values", `["Split Author"]`, `["Reference"]`, `["History"]`, "epub", "unread")
+
+	tagBooks := fetchBooksForTest(t, "/api/books?library_id=1&tags="+url.QueryEscape("History, Military"))
+	if titles := bookTitles(tagBooks); !sameStringSet(titles, []string{"Comma Tag"}) {
+		t.Fatalf("comma tag titles = %#v, want Comma Tag", titles)
+	}
+
+	genreBooks := fetchBooksForTest(t, "/api/books?library_id=1&genre="+url.QueryEscape("Reference, Technical"))
+	if titles := bookTitles(genreBooks); !sameStringSet(titles, []string{"Comma Genre"}) {
+		t.Fatalf("comma genre titles = %#v, want Comma Genre", titles)
+	}
+
+	options := fetchFilterOptionsForTest(t, "/api/filter-options?library_id=1&tags="+url.QueryEscape("History, Military"))
+	if names := optionNames(options["authors"]); !sameStringSet(names, []string{"Comma Author"}) {
+		t.Fatalf("scoped authors for comma tag = %#v, want Comma Author", names)
+	}
+}
+
+func TestBulkFilterQueryPreservesCommaTagValues(t *testing.T) {
+	setupFilterOptionsTestDB(t)
+	insertFilterOptionBook(t, 10, 1, "Comma Tag", `["Comma Author"]`, `[]`, `["History, Military"]`, "epub", "unread")
+	insertFilterOptionBook(t, 11, 1, "Split Values", `["Split Author"]`, `[]`, `["History"]`, "epub", "unread")
+
+	query, args := buildBulkFilterQuery(&AppUser{ID: 1, IsAdmin: true}, bulkFilterRequest{
+		LibraryID: "1",
+		Tags:      filterList{"History, Military"},
+	})
+	rows, err := appDB.Query(query, args...)
+	if err != nil {
+		t.Fatalf("query bulk filter: %v", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan id: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != 10 {
+		t.Fatalf("bulk filter ids = %#v, want [10]", ids)
+	}
+}
+
 func TestBookFiltersCanRequireAllValuesWithinCategory(t *testing.T) {
 	setupFilterOptionsTestDB(t)
 

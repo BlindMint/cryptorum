@@ -215,12 +215,12 @@ func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []inter
 		}
 	})
 	addFilterGroup(func(add func(string, ...interface{})) {
-		for _, value := range cleanFilterValues(req.Genre, true) {
+		for _, value := range cleanFilterValues(req.Genre, false) {
 			addTagOrGenreFilterCondition(add, value)
 		}
 	})
 	addFilterGroup(func(add func(string, ...interface{})) {
-		for _, value := range cleanFilterValues(req.Tags, true) {
+		for _, value := range cleanFilterValues(req.Tags, false) {
 			addTagOrGenreFilterCondition(add, value)
 		}
 	})
@@ -662,7 +662,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	// Genre filter
 	if genre != "" {
 		addFilterGroup(func(add func(string, ...interface{})) {
-			for _, value := range queryValues("genre", true) {
+			for _, value := range queryValues("genre", false) {
 				addTagOrGenreFilterCondition(add, value)
 			}
 		})
@@ -671,7 +671,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	// Tags filter
 	if tags != "" {
 		addFilterGroup(func(add func(string, ...interface{})) {
-			for _, value := range queryValues("tags", true) {
+			for _, value := range queryValues("tags", false) {
 				addTagOrGenreFilterCondition(add, value)
 			}
 		})
@@ -946,7 +946,7 @@ func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
 
 	if genre != "" {
 		addFilterGroup(func(add func(string, ...interface{})) {
-			for _, value := range queryValues("genre", true) {
+			for _, value := range queryValues("genre", false) {
 				addTagOrGenreFilterCondition(add, value)
 			}
 		})
@@ -954,7 +954,7 @@ func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
 
 	if tags != "" {
 		addFilterGroup(func(add func(string, ...interface{})) {
-			for _, value := range queryValues("tags", true) {
+			for _, value := range queryValues("tags", false) {
 				addTagOrGenreFilterCondition(add, value)
 			}
 		})
@@ -3016,8 +3016,8 @@ func searchBooksHandler(w http.ResponseWriter, r *http.Request) {
 	filters := BookSearchFilters{
 		Author:          searchQueryValues(r, "author", false),
 		Series:          searchQueryValues(r, "series", false),
-		Genre:           searchQueryValues(r, "genre", true),
-		Tags:            searchQueryValues(r, "tags", true),
+		Genre:           searchQueryValues(r, "genre", false),
+		Tags:            searchQueryValues(r, "tags", false),
 		Status:          searchQueryValues(r, "status", false),
 		Format:          searchQueryValues(r, "format", false),
 		FilterMode:      r.URL.Query().Get("filter_mode"),

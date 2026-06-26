@@ -18,6 +18,7 @@
 		getMetadataEditUrl,
 		type MetadataEditSelectionSession
 	} from '$lib/utils/metadata-edit-session';
+	import { addMetadataSuggestionsFromPayload, refreshMetadataSuggestions } from '$lib/stores/metadataSuggestions';
 
 	let book = $state<any>(null);
 	let files = $state<any[]>([]);
@@ -127,15 +128,18 @@
 		saveError = null;
 		saving = true;
 		try {
+			const payload = buildMetadataPayload(editForm, authorsList);
 			const res = await fetch(`/api/books/${book.id}`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(buildMetadataPayload(editForm, authorsList))
+				body: JSON.stringify(payload)
 			});
 			if (!res.ok) {
 				saveError = `Failed to save: ${res.status} ${await res.text()}`;
 				return false;
 			}
+			addMetadataSuggestionsFromPayload(payload);
+			void refreshMetadataSuggestions();
 			const data = (await res.json()) as MetadataSaveResponse;
 			if (data.book) {
 				book = data.book;

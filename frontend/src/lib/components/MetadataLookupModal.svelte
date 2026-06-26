@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { appActivity } from '$lib/stores';
+	import { addMetadataSuggestions, refreshMetadataSuggestions } from '$lib/stores/metadataSuggestions';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 	type MetadataCandidate = {
@@ -426,6 +427,7 @@
 				throw new Error(text || `Apply failed (${res.status})`);
 			}
 
+			addCandidateSuggestions([metadata]);
 			updateTarget(bookId, (item) => ({ ...item, loading: false }));
 			if (notifyParent) {
 				await onApplied?.();
@@ -489,6 +491,7 @@
 			} else {
 				appActivity.confirmPendingJob(pendingJob);
 			}
+			addCandidateSuggestions(selectedItems.map((item) => item.metadata));
 			await appActivity.refresh();
 
 			await onApplied?.();
@@ -558,6 +561,18 @@
 			...candidate,
 			cover_url: shouldUpdateCover(bookId, index, candidate) ? candidate.cover_url : ''
 		};
+	}
+
+	function addCandidateSuggestions(candidates: MetadataCandidate[]) {
+		addMetadataSuggestions({
+			authors: candidates.flatMap((candidate) => candidate.authors ?? []),
+			series: candidates.flatMap((candidate) => candidate.series ? [candidate.series] : []),
+			publishers: candidates.flatMap((candidate) => candidate.publisher ? [candidate.publisher] : []),
+			languages: candidates.flatMap((candidate) => candidate.language ? [candidate.language] : []),
+			genres: candidates.flatMap((candidate) => candidate.genres ?? []),
+			tags: candidates.flatMap((candidate) => candidate.tags ?? [])
+		});
+		void refreshMetadataSuggestions();
 	}
 
 	onMount(() => {

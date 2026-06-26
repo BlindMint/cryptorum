@@ -7,6 +7,7 @@
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
 	import PathDisplay from '$lib/components/PathDisplay.svelte';
 	import { showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { addMetadataSuggestionsFromPayload, refreshMetadataSuggestions } from '$lib/stores/metadataSuggestions';
 	import { getCoverThumbUrl } from '$lib/utils/covers';
 	import {
 		getBookDetailContextUrl,
@@ -744,13 +745,16 @@
 		saveError = null;
 		saving = true;
 		try {
+			const payload = buildMetadataPayload(editForm, authorsList);
 			const res = await fetch(`/api/books/${book.id}`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(buildMetadataPayload(editForm, authorsList))
+				body: JSON.stringify(payload)
 			});
 
 			if (res.ok) {
+				addMetadataSuggestionsFromPayload(payload);
+				void refreshMetadataSuggestions();
 				await fetchBook({ mode: 'quiet', resetRelated: false });
 				editing = stayEditing;
 				if (stayEditing) {
@@ -1146,7 +1150,7 @@
 
 					<div class="mt-3 mb-4 md:mb-0 flex flex-col gap-2">
 						<div class="relative">
-							<div class="flex w-full overflow-hidden rounded-lg">
+							<div class="flex w-full overflow-hidden rounded-lg {primaryReadFormat && !editing ? 'read-action-control' : ''}">
 								{#if primaryReadFormat}
 									{#if editing}
 										<button
@@ -1160,7 +1164,7 @@
 										{:else}
 											<a
 												href={getBookReaderHref(book.id, primaryReadFormat, `/book/${book.id}`)}
-												class="accent-action flex min-w-0 flex-1 items-center justify-between gap-3 border-r-0 px-3 py-2 text-sm font-medium transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
+												class="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2 text-sm font-medium transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
 										>
 											<span class="truncate">{getPrimaryReadActionLabel()}</span>
 											<span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-primary-300)]">{getFormatDisplayLabel(primaryReadFormat)}</span>
@@ -1181,7 +1185,7 @@
 										type="button"
 										onclick={() => formatMenuOpen = !formatMenuOpen}
 										disabled={editing}
-										class="accent-action inline-flex items-center justify-center px-3 transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:bg-[var(--color-surface-700)] disabled:text-[var(--color-surface-text-muted)]"
+										class="read-action-format-toggle inline-flex items-center justify-center px-3 transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:bg-[var(--color-surface-700)] disabled:text-[var(--color-surface-text-muted)]"
 										aria-label="Choose reader format"
 										aria-expanded={formatMenuOpen}
 									>
@@ -1845,6 +1849,21 @@
 {/if}
 
 <style>
+	.read-action-control {
+		border: 1px solid color-mix(in srgb, var(--color-primary-500) 55%, transparent);
+		background: color-mix(in srgb, var(--color-primary-500) 10%, var(--color-surface-overlay));
+		color: var(--color-primary-400);
+	}
+
+	.read-action-control:hover {
+		border-color: color-mix(in srgb, var(--color-primary-400) 70%, transparent);
+		background: color-mix(in srgb, var(--color-primary-500) 16%, var(--color-surface-overlay));
+	}
+
+	.read-action-format-toggle {
+		border-left: 1px solid color-mix(in srgb, var(--color-primary-500) 35%, transparent);
+	}
+
 	.book-tab-indicator {
 		position: absolute;
 		bottom: 0;
