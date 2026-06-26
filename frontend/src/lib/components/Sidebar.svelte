@@ -564,7 +564,7 @@
 	class="
 		fixed lg:static top-[4.75rem] lg:top-0 bottom-0 left-0 z-40
 		w-64 bg-[var(--color-surface-overlay)] shadow-[1px_0_0_rgba(255,255,255,0.03)]
-		transform overflow-hidden transition-[transform,width,min-width,box-shadow] duration-150 ease-out
+		transform overflow-hidden
 		lg:translate-x-0
 		{$desktopSidebarCollapsed ? 'lg:w-0 lg:min-w-0 lg:shadow-none' : 'lg:w-[var(--sidebar-width)] lg:min-w-[240px]'}
 		{$mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
@@ -572,7 +572,7 @@
 	"
 	style={`--sidebar-width: ${sidebarWidth}px;`}
 >
-	<div class={`flex h-full min-w-[240px] flex-col min-h-0 transition-opacity duration-100 ease-out ${$desktopSidebarCollapsed ? 'lg:pointer-events-none lg:opacity-0' : 'lg:opacity-100'}`}>
+	<div class={`flex h-full min-w-[240px] flex-col min-h-0 ${$desktopSidebarCollapsed ? 'lg:pointer-events-none lg:opacity-0' : 'lg:opacity-100'}`}>
 	<div class="flex-shrink-0 p-4 pb-3 space-y-1">
 		<a
 			href="/"

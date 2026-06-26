@@ -4,12 +4,20 @@ export const MAX_GRID_SCALE = 150;
 export const GRID_SCALE_STEP = 5;
 
 const BASE_GRID_SLOT_WIDTH = 160;
+const BASE_GRID_COVER_WIDTH = 144;
 const NARROW_CONTAINER_WIDTH = 520;
+const ROW_GAP = 16;
 
 type ResponsiveGridOptions = {
 	minColumns?: number;
 	narrowMinColumns?: number;
 	maxColumns?: number;
+};
+
+export type ResponsiveGridLayout = {
+	columns: number;
+	coverWidth: number;
+	rowGap: number;
 };
 
 export function clampGridScale(value: number): number {
@@ -18,33 +26,42 @@ export function clampGridScale(value: number): number {
 }
 
 export function getResponsiveGridColumns(width: number, scale: number, options: ResponsiveGridOptions = {}): number {
+	return getResponsiveGridLayout(width, scale, options).columns;
+}
+
+export function getResponsiveGridLayout(width: number, scale: number, options: ResponsiveGridOptions = {}): ResponsiveGridLayout {
 	const containerWidth = Math.max(0, Math.round(width));
 	const minColumns = containerWidth < NARROW_CONTAINER_WIDTH
 		? options.narrowMinColumns ?? 2
 		: options.minColumns ?? 3;
 	const maxColumns = options.maxColumns ?? 20;
+	const scaleRatio = clampGridScale(scale) / 100;
+	const slotWidth = BASE_GRID_SLOT_WIDTH * scaleRatio;
+	const targetCoverWidth = Math.round(BASE_GRID_COVER_WIDTH * scaleRatio);
 
-	if (containerWidth <= 0) return minColumns;
-
-	const slotWidth = BASE_GRID_SLOT_WIDTH * (clampGridScale(scale) / 100);
-	const columns = Math.round(containerWidth / slotWidth);
-	return Math.min(maxColumns, Math.max(minColumns, columns));
-}
-
-export function observeElementWidth(node: HTMLElement, onWidthChange: (width: number) => void): () => void {
-	const notify = () => onWidthChange(node.getBoundingClientRect().width);
-	notify();
-
-	if (typeof ResizeObserver === 'undefined') {
-		window.addEventListener('resize', notify);
-		return () => window.removeEventListener('resize', notify);
+	if (containerWidth <= 0) {
+		return {
+			columns: minColumns,
+			coverWidth: targetCoverWidth,
+			rowGap: ROW_GAP
+		};
 	}
 
-	const observer = new ResizeObserver((entries) => {
-		const width = entries[0]?.contentRect.width ?? node.getBoundingClientRect().width;
-		onWidthChange(width);
-	});
-	observer.observe(node);
+	const columns = Math.min(maxColumns, Math.max(minColumns, Math.round(containerWidth / slotWidth)));
 
-	return () => observer.disconnect();
+	return {
+		columns,
+		coverWidth: targetCoverWidth,
+		rowGap: ROW_GAP
+	};
+}
+
+export function getResponsiveGridStyle(layout: ResponsiveGridLayout): string {
+	return [
+		`--grid-cover-width: ${layout.coverWidth}px`,
+		`row-gap: ${layout.rowGap}px`,
+		'grid-template-columns: repeat(auto-fill, var(--grid-cover-width))',
+		'justify-content: space-between',
+		'column-gap: 1rem'
+	].join('; ');
 }

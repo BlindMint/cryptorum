@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { lenientSearchMatch } from '$lib/utils/search';
-
-	type MetadataSuggestionField = 'authors' | 'series' | 'publishers' | 'languages' | 'genres' | 'tags';
+	import {
+		loadMetadataSuggestions,
+		metadataSuggestions,
+		type MetadataSuggestionField
+	} from '$lib/stores/metadataSuggestions';
 
 	interface Props {
 		value: string;
@@ -20,30 +23,6 @@
 	let selectedIndex = $state(-1);
 	let inputElement: HTMLInputElement | null = $state(null);
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-	async function fetchSuggestions() {
-		try {
-			const res = await fetch('/api/filter-options');
-			if (res.ok) {
-				const data = await res.json();
-				suggestions = extractSuggestionNames(data[field]);
-			}
-		} catch {
-			suggestions = [];
-		}
-	}
-
-	function extractSuggestionNames(items: unknown): string[] {
-		if (!Array.isArray(items)) return [];
-		return items
-			.map((item) => {
-				if (typeof item === 'string') return item;
-				const name = (item as { name?: unknown })?.name;
-				return typeof name === 'string' ? name : '';
-			})
-			.map((item) => item.trim())
-			.filter(Boolean);
-	}
 
 	function isMultipleValueField(): boolean {
 		return multiple ?? (field === 'genres' || field === 'tags');
@@ -147,7 +126,16 @@
 	}
 
 	$effect(() => {
-		fetchSuggestions();
+		const unsubscribe = metadataSuggestions.subscribe((state) => {
+			suggestions = state[field] ?? [];
+			if (showDropdown) {
+				const { segment } = getLastSegment(value);
+				filteredSuggestions = filterSuggestions(segment);
+				showDropdown = filteredSuggestions.length > 0;
+			}
+		});
+		void loadMetadataSuggestions();
+		return unsubscribe;
 	});
 </script>
 

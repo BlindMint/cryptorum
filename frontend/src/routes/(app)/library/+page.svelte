@@ -6,7 +6,7 @@
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { getCoverThumbUrl, getLibraryCoverThumbSize } from '$lib/utils/covers';
 	import { getBookReaderHref, isAudioFormat } from '$lib/utils/book-formats';
-	import { DEFAULT_GRID_SCALE, getResponsiveGridColumns, GRID_SCALE_STEP, MAX_GRID_SCALE, MIN_GRID_SCALE, observeElementWidth } from '$lib/utils/responsive-grid';
+	import { DEFAULT_GRID_SCALE, getResponsiveGridLayout, getResponsiveGridStyle, GRID_SCALE_STEP, MAX_GRID_SCALE, MIN_GRID_SCALE } from '$lib/utils/responsive-grid';
 	import {
 		getBookDetailContextUrl,
 		getInlineMetadataEditUrl,
@@ -34,12 +34,12 @@
 	// Display controls
 	let viewMode = $state('grid');
 	let localGridScale = $state(DEFAULT_GRID_SCALE);
-	let gridContainerWidth = $state(0);
-	let gridMeasureElement = $state<HTMLDivElement | null>(null);
 	let sortBy = $state($page.url.searchParams.get('sort') || 'title');
 	let sortDir = $state<'asc' | 'desc'>($page.url.searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc');
-	let responsiveGridColumns = $derived(getResponsiveGridColumns(gridContainerWidth, localGridScale));
-	let gridStyle = $derived(viewMode === 'grid' ? `grid-template-columns: repeat(${responsiveGridColumns}, minmax(0, 1fr))` : '');
+	let estimatedGridWidth = $derived(typeof window === 'undefined' ? 1920 : window.innerWidth);
+	let responsiveGridLayout = $derived(getResponsiveGridLayout(estimatedGridWidth, localGridScale));
+	let responsiveGridColumns = $derived(responsiveGridLayout.columns);
+	let gridStyle = $derived(viewMode === 'grid' ? getResponsiveGridStyle(responsiveGridLayout) : '');
 	let libraryCoverThumbSize = $derived(getLibraryCoverThumbSize(responsiveGridColumns));
 	let showSettingsMenu = $state(false);
 	let formatOnCover = $state(true);
@@ -140,6 +140,14 @@
 		return Array.from(new Set(cleaned));
 	}
 
+	function setQueryValues(params: URLSearchParams, key: string, values: string[]) {
+		params.delete(key);
+		for (const value of values) {
+			const trimmed = value.trim();
+			if (trimmed) params.append(key, trimmed);
+		}
+	}
+
 	function getFilterMode(): FilterMode {
 		const mode = ($page.url.searchParams.get('filter_mode') || 'AND').toUpperCase();
 		return mode === 'OR' || mode === 'NOT' ? mode : 'AND';
@@ -179,8 +187,8 @@
 		const params = $page.url.searchParams;
 		const authors = getQueryValues(params, 'author');
 		const series = getQueryValues(params, 'series');
-		const genres = getQueryValues(params, 'genre', true);
-		const tags = getQueryValues(params, 'tags', true);
+		const genres = getQueryValues(params, 'genre');
+		const tags = getQueryValues(params, 'tags');
 		const formats = getQueryValues(params, 'format');
 		const statuses = getQueryValues(params, 'status');
 		const filterMode = getFilterMode();
@@ -196,8 +204,8 @@
 		if (q) queryParams.set('q', q);
 		for (const author of authors) queryParams.append('author', author);
 		for (const seriesName of series) queryParams.append('series', seriesName);
-		if (genres.length > 0) queryParams.set('genre', genres.join(','));
-		if (tags.length > 0) queryParams.set('tags', tags.join(','));
+		for (const genre of genres) queryParams.append('genre', genre);
+		for (const tag of tags) queryParams.append('tags', tag);
 		for (const format of formats) queryParams.append('format', format);
 		for (const status of statuses) queryParams.append('status', status);
 		if (filterMode !== 'AND') queryParams.set('filter_mode', filterMode);
@@ -536,12 +544,7 @@
 		};
 		updateFilterPanelBackdrop(filterPanelBackdropMedia);
 		filterPanelBackdropMedia.addEventListener('change', updateFilterPanelBackdrop);
-		const stopObservingGridWidth = gridMeasureElement
-			? observeElementWidth(gridMeasureElement, (width) => gridContainerWidth = width)
-			: () => {};
-
 		return () => {
-			stopObservingGridWidth();
 			filterPanelBackdropMedia.removeEventListener('change', updateFilterPanelBackdrop);
 			if (backgroundRefreshTimer !== null) {
 				window.clearTimeout(backgroundRefreshTimer);
@@ -928,8 +931,8 @@
 			library_id: libraryFilter || undefined,
 			author: getQueryValues($page.url.searchParams, 'author'),
 			series: getQueryValues($page.url.searchParams, 'series'),
-			genre: getQueryValues($page.url.searchParams, 'genre', true).join(',') || undefined,
-			tags: getQueryValues($page.url.searchParams, 'tags', true).join(',') || undefined,
+			genre: getQueryValues($page.url.searchParams, 'genre'),
+			tags: getQueryValues($page.url.searchParams, 'tags'),
 			format: getQueryValues($page.url.searchParams, 'format'),
 			status: getQueryValues($page.url.searchParams, 'status'),
 			q: $page.url.searchParams.get('q') || undefined,
@@ -1049,10 +1052,10 @@
 		for (const seriesName of getQueryValues(params, 'series')) {
 			filters.push({ key: 'series', value: seriesName, label: `Series: ${seriesName}` });
 		}
-		for (const genre of getQueryValues(params, 'genre', true)) {
+		for (const genre of getQueryValues(params, 'genre')) {
 			filters.push({ key: 'genre', value: genre, label: `Tag: ${genre}` });
 		}
-		for (const tag of getQueryValues(params, 'tags', true)) {
+		for (const tag of getQueryValues(params, 'tags')) {
 			filters.push({ key: 'tags', value: tag, label: `Tag: ${tag}` });
 		}
 		for (const format of getQueryValues(params, 'format')) {
@@ -1072,9 +1075,8 @@
 	function removeFilter(key: string, value: string) {
 		const url = new URL($page.url);
 		if (key === 'genre' || key === 'tags') {
-			const values = getQueryValues(url.searchParams, key, true).filter((item) => item !== value);
-			url.searchParams.delete(key);
-			if (values.length > 0) url.searchParams.set(key, values.join(','));
+			const values = getQueryValues(url.searchParams, key).filter((item) => item !== value);
+			setQueryValues(url.searchParams, key, values);
 		} else {
 			const values = getQueryValues(url.searchParams, key).filter((item) => item !== value);
 			url.searchParams.delete(key);
@@ -1142,23 +1144,22 @@
 
 	function toggleTagSelection(tagName: string) {
 		const url = new URL($page.url);
-		const tagList = getQueryValues(url.searchParams, 'tags', true);
+		const tagList = getQueryValues(url.searchParams, 'tags');
 		const newTags = tagList.includes(tagName)
 			? tagList.filter((tag) => tag !== tagName)
 			: [...tagList, tagName];
 
+		setQueryValues(url.searchParams, 'tags', newTags);
 		if (newTags.length === 0) {
-			url.searchParams.delete('tags');
 			url.searchParams.delete('tag_mode');
 		} else {
-			url.searchParams.set('tags', newTags.join(','));
 			url.searchParams.delete('tag_mode');
 		}
 		navigateWithFilters(url);
 	}
 
 	function isTagSelected(tagName: string): boolean {
-		return getQueryValues($page.url.searchParams, 'tags', true).includes(tagName);
+		return getQueryValues($page.url.searchParams, 'tags').includes(tagName);
 	}
 
 	function isFormatSelected(format: string): boolean {
@@ -1205,8 +1206,8 @@
 	}
   </script>
 
-<div class="pb-20 transition-all duration-300" style={`--filter-panel-offset: ${$filterPanelWidth + 24}px;`}>
-	<div class="sticky top-0 z-30 px-3 py-3 sm:px-6 sm:py-4 bg-[var(--color-surface-base)]/95 backdrop-blur border-b border-[var(--color-surface-border)] shadow-[0_1px_0_rgba(255,255,255,0.04)] transition-all duration-300 {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}">
+<div class="pb-20" style={`--filter-panel-offset: ${$filterPanelWidth + 24}px;`}>
+	<div class="sticky top-0 z-30 px-3 py-3 sm:px-6 sm:py-4 bg-[var(--color-surface-base)]/95 backdrop-blur border-b border-[var(--color-surface-border)] shadow-[0_1px_0_rgba(255,255,255,0.04)] {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}">
 		<div class="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:items-center lg:gap-4">
 			<div class="min-w-0 flex-1">
 				<div class="flex items-baseline gap-2 sm:gap-3 min-w-0">
@@ -1455,7 +1456,7 @@
 		open={showFilterPanel}
 		showBackdrop={filterPanelBackdrop}
 	/>
-	<div bind:this={gridMeasureElement} class="px-6 pt-6 transition-all duration-300 {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}">
+	<div class="px-6 pt-6 {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}">
 	{#if loading}
 		<div class="flex justify-center py-12">
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
@@ -1486,7 +1487,7 @@
 			{/if}
 		</div>
 	{:else}
-		<div class={viewMode === 'grid' ? 'grid gap-4' : 'space-y-4'} style={gridStyle}>
+		<div class={viewMode === 'grid' ? 'grid' : 'space-y-4'} style={gridStyle}>
 			{#each books as book}
 				{#if viewMode === 'grid'}
 					<div
