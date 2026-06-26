@@ -140,10 +140,10 @@
 			addChart(genreChartCanvas, {
 				type: 'doughnut',
 				data: {
-					labels: (stats.genre_distribution ?? []).map((item: any) => item.name),
+					labels: tagDistribution().map((item: any) => item.name),
 					datasets: [
 						{
-							data: (stats.genre_distribution ?? []).map((item: any) => item.count),
+							data: tagDistribution().map((item: any) => item.count),
 							backgroundColor: [
 								'rgba(245, 158, 11, 0.82)',
 								'rgba(239, 68, 68, 0.82)',
@@ -153,7 +153,7 @@
 								'rgba(6, 182, 212, 0.82)',
 								'rgba(236, 72, 153, 0.82)',
 								'rgba(249, 115, 22, 0.82)'
-							].slice(0, (stats.genre_distribution ?? []).length),
+							].slice(0, tagDistribution().length),
 							borderColor: 'rgba(255,255,255,0.12)',
 							borderWidth: 2
 						}
@@ -534,8 +534,12 @@
 		return [...items].sort((a, b) => b.count - a.count)[0] ?? null;
 	}
 
-	function getTopGenre() {
-		return getTopCount((stats?.genre_distribution ?? []).map((item: any) => ({ label: item.name, count: item.count })));
+	function tagDistribution(): any[] {
+		return stats?.tag_distribution ?? stats?.genre_distribution ?? [];
+	}
+
+	function getTopTag() {
+		return getTopCount(tagDistribution().map((item: any) => ({ label: item.name, count: item.count })));
 	}
 
 	function getTopAuthor() {
@@ -595,8 +599,8 @@
 			},
 			{
 				title: 'Top Tag',
-				value: getTopGenre()?.label || 'N/A',
-				description: `${formatNumber(getTopGenre()?.count || 0)} books share that tag path.`,
+				value: getTopTag()?.label || 'N/A',
+				description: `${formatNumber(getTopTag()?.count || 0)} books share that tag path.`,
 				accent: 'from-cyan-500/20 to-cyan-500/5'
 			}
 		];
@@ -660,7 +664,7 @@
 				</div>
 				<div class="rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5">
 					<div class="text-xs font-medium uppercase tracking-[0.18em] text-[var(--color-surface-text-muted)]">Tags</div>
-					<div class="mt-2 text-3xl font-semibold text-[var(--color-surface-text)]">{formatNumber(stats.total_genres)}</div>
+					<div class="mt-2 text-3xl font-semibold text-[var(--color-surface-text)]">{formatNumber(stats.total_tags ?? stats.total_genres)}</div>
 					<div class="mt-1 text-sm text-[var(--color-surface-text-muted)]">Unique tag paths</div>
 				</div>
 				<div class="rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5">

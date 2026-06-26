@@ -17,6 +17,7 @@
 		page_count?: number;
 		language?: string;
 		rating?: number;
+		tags?: string[];
 		genres?: string[];
 		match_score?: number;
 	};

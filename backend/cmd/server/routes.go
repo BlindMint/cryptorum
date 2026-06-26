@@ -1269,6 +1269,7 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 	req.Authors = normalizeMetadataStringList(req.Authors)
 	req.Genres = normalizeMetadataStringList(req.Genres)
 	req.Tags = mergeMetadataTagLists(req.Genres, req.Tags)
+	req.Genres = []string{}
 
 	authorsJSON, _ := json.Marshal(req.Authors)
 	genresJSON, _ := json.Marshal(req.Genres)
@@ -3691,7 +3692,11 @@ func getMetadataSuggestionsHandler(w http.ResponseWriter, r *http.Request) {
 	case "genres":
 		query = `SELECT DISTINCT genres FROM book_metadata WHERE genres IS NOT NULL AND genres != '[]' AND genres != ''`
 	case "tags":
-		query = `SELECT DISTINCT tags FROM book_metadata WHERE tags IS NOT NULL AND tags != '[]' AND tags != ''`
+		query = `
+			SELECT tags FROM book_metadata WHERE tags IS NOT NULL AND tags != '[]' AND tags != ''
+			UNION ALL
+			SELECT genres FROM book_metadata WHERE genres IS NOT NULL AND genres != '[]' AND genres != ''
+		`
 	default:
 		errorResponse(w, http.StatusBadRequest, "Invalid field. Use 'genres' or 'tags'")
 		return

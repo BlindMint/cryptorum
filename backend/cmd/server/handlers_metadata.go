@@ -44,7 +44,8 @@ type MetadataCandidate struct {
 	PageCount   int      `json:"page_count,omitempty"`
 	Language    string   `json:"language,omitempty"`
 	Rating      float64  `json:"rating,omitempty"`
-	Genres      []string `json:"genres,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Genres      []string `json:"genres,omitempty"` // Legacy compatibility alias for provider categories.
 	MatchScore  float64  `json:"match_score,omitempty"`
 }
 
@@ -666,9 +667,14 @@ func cloneMetadataCandidates(candidates []MetadataCandidate) []MetadataCandidate
 	for i, candidate := range candidates {
 		cloned[i] = candidate
 		cloned[i].Authors = append([]string(nil), candidate.Authors...)
+		cloned[i].Tags = append([]string(nil), candidate.Tags...)
 		cloned[i].Genres = append([]string(nil), candidate.Genres...)
 	}
 	return cloned
+}
+
+func metadataCandidateTags(candidate MetadataCandidate) []string {
+	return mergeMetadataTagLists(candidate.Tags, candidate.Genres)
 }
 
 func metadataCandidateKey(candidate MetadataCandidate) string {
@@ -1089,7 +1095,7 @@ func searchGoogleBooks(query string) ([]MetadataCandidate, error) {
 			PageCount:   item.VolumeInfo.PageCount,
 			Language:    item.VolumeInfo.Language,
 			Rating:      item.VolumeInfo.AverageRating,
-			Genres:      item.VolumeInfo.Categories,
+			Tags:        item.VolumeInfo.Categories,
 		}
 
 		// Extract ISBN

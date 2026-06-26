@@ -2,10 +2,11 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { beforeNavigate, goto } from '$app/navigation';
-	import { appActivity, gridSize, showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { appActivity, gridScale, showFormatOnCover, getFormatColor } from '$lib/stores';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { getCoverThumbUrl, getLibraryCoverThumbSize } from '$lib/utils/covers';
 	import { getBookReaderHref, isAudioFormat } from '$lib/utils/book-formats';
+	import { DEFAULT_GRID_SCALE, getResponsiveGridColumns, GRID_SCALE_STEP, MAX_GRID_SCALE, MIN_GRID_SCALE, observeElementWidth } from '$lib/utils/responsive-grid';
 	import {
 		getBookDetailContextUrl,
 		getInlineMetadataEditUrl,
@@ -28,21 +29,24 @@
   let libraryName = $state('');
   let totalBooks = $state(0);
   let serverHasMore = $state(false);
-  let hasMore = $derived(serverHasMore);
+	let hasMore = $derived(serverHasMore);
 
 	// Display controls
 	let viewMode = $state('grid');
-  let localGridSize = $state(4);
-  let sortBy = $state($page.url.searchParams.get('sort') || 'title');
+	let localGridScale = $state(DEFAULT_GRID_SCALE);
+	let gridContainerWidth = $state(0);
+	let gridMeasureElement = $state<HTMLDivElement | null>(null);
+	let sortBy = $state($page.url.searchParams.get('sort') || 'title');
 	let sortDir = $state<'asc' | 'desc'>($page.url.searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc');
-  let gridStyle = $derived(viewMode === 'grid' ? `grid-template-columns: repeat(${localGridSize}, minmax(0, 1fr))` : '');
-  let libraryCoverThumbSize = $derived(getLibraryCoverThumbSize(localGridSize));
-  let showSettingsMenu = $state(false);
+	let responsiveGridColumns = $derived(getResponsiveGridColumns(gridContainerWidth, localGridScale));
+	let gridStyle = $derived(viewMode === 'grid' ? `grid-template-columns: repeat(${responsiveGridColumns}, minmax(0, 1fr))` : '');
+	let libraryCoverThumbSize = $derived(getLibraryCoverThumbSize(responsiveGridColumns));
+	let showSettingsMenu = $state(false);
 	let formatOnCover = $state(true);
 	let activeBookActions = $state<number | null>(null);
 
 	$effect(() => {
-		const unsub = gridSize.subscribe((v: number) => localGridSize = v);
+		const unsub = gridScale.subscribe((v: number) => localGridScale = v);
 		return unsub;
 	});
 
@@ -51,9 +55,8 @@
 		return unsub;
 	});
 
-	function updateGridSize(value: number) {
-		localGridSize = value;
-		gridSize.set(value);
+	function updateGridScale(value: number) {
+		gridScale.set(value);
 	}
 
 	function toggleFormatOnCover() {
@@ -522,25 +525,16 @@
 		fetchLibraryName();
 		fetchBooks(true);
 		fetchFilterOptions();
+		gridScale.init();
 		showFormatOnCover.init();
 		scheduleBackgroundRefresh(BACKGROUND_REFRESH_IDLE_INTERVAL_MS);
 		document.addEventListener('visibilitychange', handleVisibilityChange);
-
-		// Set initial grid size based on viewport
-		const updateGridSizeForViewport = () => {
-			const width = window.innerWidth;
-			if (width >= 1024) {
-				localGridSize = 7;
-			} else if (width >= 768) {
-				localGridSize = 5;
-			} else {
-				localGridSize = 3;
-			}
-			gridSize.set(localGridSize);
-		};
-		updateGridSizeForViewport();
+		const stopObservingGridWidth = gridMeasureElement
+			? observeElementWidth(gridMeasureElement, (width) => gridContainerWidth = width)
+			: () => {};
 
 		return () => {
+			stopObservingGridWidth();
 			if (backgroundRefreshTimer !== null) {
 				window.clearTimeout(backgroundRefreshTimer);
 			}
@@ -1205,16 +1199,12 @@
 
 <div class="pb-20 transition-all duration-300">
 	<div class="sticky top-0 z-30 px-3 py-3 sm:px-6 sm:py-4 bg-[var(--color-surface-base)]/95 backdrop-blur border-b border-[var(--color-surface-border)] shadow-[0_1px_0_rgba(255,255,255,0.04)] transition-all duration-300 {showFilterPanel ? 'lg:pr-[21.5rem]' : ''}">
-		<div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between min-w-0">
+		<div class="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:items-center lg:gap-4">
 			<div class="min-w-0 flex-1">
 				<div class="flex items-baseline gap-2 sm:gap-3 min-w-0">
-					<h1 class="text-xl sm:text-2xl font-bold text-[var(--color-surface-text)] truncate">
-						{libraryFilter ? libraryName || 'Library' : 'All Books'}
-					</h1>
+					<h1 class="text-xl sm:text-2xl font-bold text-[var(--color-surface-text)] truncate">{libraryFilter ? libraryName || 'Library' : 'All Books'}</h1>
 					{#if totalBooks > 0}
-						<p class="text-sm text-[var(--color-surface-text-muted)] whitespace-nowrap">
-							{totalBooks} books
-						</p>
+						<p class="text-sm text-[var(--color-surface-text-muted)] whitespace-nowrap">{totalBooks} books</p>
 					{/if}
 				</div>
 				{#if scanMessage}
@@ -1224,24 +1214,23 @@
 				{/if}
 			</div>
 
-			<div class="flex items-center justify-start xl:justify-end gap-2 flex-wrap flex-shrink-0">
+			<div class="grid min-w-0 grid-cols-[2.5rem_2.5rem_minmax(0,1fr)_auto_auto] items-center gap-2 lg:w-full lg:justify-self-end">
 				<button
-					onclick={() => viewMode = 'grid'}
-					class="p-2.5 rounded-lg {viewMode === 'grid' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'} transition-colors"
-					aria-label="Grid view"
+					type="button"
+					onclick={() => viewMode = viewMode === 'grid' ? 'list' : 'grid'}
+					class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-primary-400)]"
+					aria-label={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'}
+					title={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'}
 				>
-					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
-					</svg>
-				</button>
-				<button
-					onclick={() => viewMode = 'list'}
-					class="p-2.5 rounded-lg {viewMode === 'list' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'} transition-colors"
-					aria-label="List view"
-				>
-					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
-					</svg>
+					{#if viewMode === 'grid'}
+						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
+						</svg>
+					{:else}
+						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
+						</svg>
+					{/if}
 				</button>
 
 				<div class="relative">
@@ -1256,32 +1245,33 @@
 					<button
 						onclick={() => showSettingsMenu = !showSettingsMenu}
 						aria-label="Library settings"
-						class="inline-flex h-10 items-center px-3 sm:px-4 rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors"
+						class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors"
 					>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-						</svg>
-						<svg class="hidden sm:block w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 						</svg>
 					</button>
 					{#if showSettingsMenu}
 						<div class="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-3 shadow-lg">
 							{#if viewMode === 'grid'}
 								<div class="px-4 pb-3 border-b border-[var(--color-surface-border)]">
-									<label class="text-sm font-medium text-[var(--color-surface-text)] block mb-2" for="library-grid-size">Grid Size</label>
+									<div class="mb-2 flex items-center justify-between gap-3">
+										<label class="text-sm font-medium text-[var(--color-surface-text)]" for="library-grid-scale">Grid Scale</label>
+										<span class="text-xs text-[var(--color-surface-text-muted)]">{responsiveGridColumns} cols</span>
+									</div>
 									<div class="flex items-center space-x-2">
 										<input
-											id="library-grid-size"
+											id="library-grid-scale"
 											type="range"
-											min="2"
-											max="12"
-											bind:value={localGridSize}
-											onchange={(e) => updateGridSize(Number(e.currentTarget.value))}
+											min={MIN_GRID_SCALE}
+											max={MAX_GRID_SCALE}
+											step={GRID_SCALE_STEP}
+											value={localGridScale}
+											oninput={(e) => updateGridScale(Number(e.currentTarget.value))}
 											class="flex-1 h-2 bg-[var(--color-surface-700)] rounded-lg appearance-none cursor-pointer slider"
 										>
-										<span class="text-sm text-[var(--color-surface-text)] w-6 text-center">{localGridSize}</span>
+										<span class="text-sm text-[var(--color-surface-text)] w-12 text-right">{localGridScale}%</span>
 									</div>
 								</div>
 							{/if}
@@ -1318,7 +1308,7 @@
 					{/if}
 				</div>
 
-				<div class="relative min-w-[14rem] flex-1 lg:max-w-sm">
+				<div class="relative min-w-0">
 					<svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"></path>
 					</svg>
@@ -1353,16 +1343,16 @@
 							onclick={() => showSortMenu = false}
 						></button>
 					{/if}
-					<div class="inline-flex h-10 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
-							<button
-								onclick={() => showSortMenu = !showSortMenu}
-								aria-label="Sort books by {currentSortLabel()}"
-								class="inline-flex items-center px-3 sm:px-4 text-[var(--color-surface-text)] font-medium transition-colors hover:bg-[var(--color-surface-700)]"
-							>
-								<span class="text-sm">{currentSortLabel()}</span>
-								<svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-								</svg>
+					<div class="inline-flex h-10 max-w-32 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] sm:max-w-40 md:max-w-48">
+						<button
+							onclick={() => showSortMenu = !showSortMenu}
+							aria-label="Sort books by {currentSortLabel()}"
+							class="inline-flex min-w-0 items-center px-3 text-[var(--color-surface-text)] font-medium transition-colors hover:bg-[var(--color-surface-700)] sm:px-4"
+						>
+							<span class="hidden min-w-0 truncate text-sm md:inline">{currentSortLabel()}</span>
+							<svg class="w-4 h-4 md:ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+							</svg>
 						</button>
 						<button
 							type="button"
@@ -1393,7 +1383,7 @@
 
 				<button
 					onclick={() => showFilterPanel = !showFilterPanel}
-					class="inline-flex h-10 items-center px-3 sm:px-4 rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors"
+					class="inline-flex h-10 items-center rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] px-3 text-[var(--color-surface-text)] font-medium transition-colors sm:px-4"
 				>
 					<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
@@ -1457,7 +1447,7 @@
 			isStatusSelected={isStatusSelected}
 		/>
 	{/if}
-	<div class="px-6 pt-6 transition-all duration-300 {showFilterPanel ? 'lg:pr-[21.5rem]' : ''}">
+	<div bind:this={gridMeasureElement} class="px-6 pt-6 transition-all duration-300 {showFilterPanel ? 'lg:pr-[21.5rem]' : ''}">
 	{#if loading}
 		<div class="flex justify-center py-12">
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
