@@ -2,6 +2,7 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { browser } from '$app/environment';
 	import { readerSettings, cbxFitModes, cbxScrollModes, type CbxReaderSetting } from '$lib/stores/readerSettings';
 	import ReaderProgressTrack from '$lib/components/ReaderProgressTrack.svelte';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
@@ -709,9 +710,35 @@
 		void endSession(true);
 	}
 
+	function getSafeReturnPath(value: string | null) {
+		if (!value) return null;
+		if (!value.startsWith('/') || value.startsWith('//')) return null;
+		if (value.startsWith('/login') || value.includes('/reader/')) return null;
+		return value;
+	}
+
+	function getReaderReturnUrl() {
+		const queryReturnTo = getSafeReturnPath($page.url.searchParams.get('returnTo'));
+		if (queryReturnTo) return queryReturnTo;
+
+		if (browser && document.referrer) {
+			try {
+				const referrer = new URL(document.referrer);
+				if (referrer.origin === window.location.origin) {
+					const referrerPath = getSafeReturnPath(`${referrer.pathname}${referrer.search}${referrer.hash}`);
+					if (referrerPath) return referrerPath;
+				}
+			} catch {
+				// Ignore invalid referrers and fall back to the book route.
+			}
+		}
+
+		return book ? `/book/${book.id}` : '/book';
+	}
+
 	function closeReader(e?: Event) {
 		e?.preventDefault();
-		const targetUrl = book ? `/book/${book.id}` : '/book';
+		const targetUrl = getReaderReturnUrl();
 		startCloseBackgroundTasks();
 		void goto(targetUrl, { replaceState: true });
 	}
@@ -857,7 +884,7 @@
 	<header class="top-nav" class:top-nav-hidden={!topBarVisible}>
 		<div class="nav-left">
 			<a
-				href={book ? `/book/${book.id}` : '/book'}
+				href={getReaderReturnUrl()}
 				onclick={closeReader}
 				class="nav-btn nav-close"
 				title="Close (Esc)"
@@ -1049,7 +1076,7 @@
 			{:else}
 				<div class="error-message">
 					<p>No pages available</p>
-					<a href="/book/{book?.id}" class="btn">Return to Library</a>
+					<a href={getReaderReturnUrl()} class="btn">Return to Library</a>
 				</div>
 			{/if}
 		</div>

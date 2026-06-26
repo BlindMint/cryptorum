@@ -75,6 +75,18 @@ body::before {
 	opacity: 0.5;
 }
 
+.cover-accent-action {
+	border: 1px solid color-mix(in srgb, var(--color-primary-500) 55%, transparent);
+	background: color-mix(in srgb, var(--color-primary-500) 10%, color-mix(in srgb, var(--color-surface-900) 90%, transparent));
+	color: var(--color-primary-400);
+}
+
+.cover-accent-action:hover:not(:disabled) {
+	border-color: color-mix(in srgb, var(--color-primary-400) 70%, transparent);
+	background: color-mix(in srgb, var(--color-primary-500) 16%, color-mix(in srgb, var(--color-surface-900) 92%, transparent));
+	color: var(--color-primary-400);
+}
+
 @keyframes scan-spin-counterclockwise {
 	from {
 		transform: rotate(0deg);

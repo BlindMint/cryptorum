@@ -1880,7 +1880,7 @@
 	<header class="top-nav" class:top-nav-hidden={!topBarVisible}>
 		<div class="nav-left">
 			<a
-				href={book ? `/book/${book.id}` : '/book'}
+				href={getReaderReturnUrl()}
 				class="nav-btn nav-close"
 				title="Close (Esc)"
 				onclick={closeReader}
@@ -2147,7 +2147,7 @@
 			{:else if error}
 				<div class="error-message">
 					<p>{error}</p>
-					<a href="/book/{book?.id}" class="btn">Return to Library</a>
+					<a href={getReaderReturnUrl()} class="btn">Return to Library</a>
 				</div>
 			{:else}
 				<!-- Tap zones for navigation in paged mode -->

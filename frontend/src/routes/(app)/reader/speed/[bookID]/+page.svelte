@@ -2,6 +2,7 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { browser } from '$app/environment';
 	import { readerSettings, speedReaderThemes, fontFamilies, fontWeightOptions, resolveFontFamily, type SpeedReaderSetting } from '$lib/stores/readerSettings';
 	import { currentTheme as appThemeStore, resolveThemeColors, addCustomTheme, removeCustomTheme, generateId, type FullTheme } from '$lib/stores/theme';
 	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
@@ -699,9 +700,35 @@
 		void endSession(true);
 	}
 
+	function getSafeReturnPath(value: string | null) {
+		if (!value) return null;
+		if (!value.startsWith('/') || value.startsWith('//')) return null;
+		if (value.startsWith('/login') || value.includes('/reader/')) return null;
+		return value;
+	}
+
+	function getReaderReturnUrl() {
+		const queryReturnTo = getSafeReturnPath($page.url.searchParams.get('returnTo'));
+		if (queryReturnTo) return queryReturnTo;
+
+		if (browser && document.referrer) {
+			try {
+				const referrer = new URL(document.referrer);
+				if (referrer.origin === window.location.origin) {
+					const referrerPath = getSafeReturnPath(`${referrer.pathname}${referrer.search}${referrer.hash}`);
+					if (referrerPath) return referrerPath;
+				}
+			} catch {
+				// Ignore invalid referrers and fall back to the book route.
+			}
+		}
+
+		return book ? `/book/${book.id}` : '/book';
+	}
+
 	function closeReader(e?: Event) {
 		e?.preventDefault();
-		const targetUrl = book ? `/book/${book.id}` : '/book';
+		const targetUrl = getReaderReturnUrl();
 		startCloseBackgroundTasks();
 		void goto(targetUrl, { replaceState: true });
 	}
@@ -750,7 +777,7 @@
 		class="top-nav transition-opacity duration-200 {showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}"
 	>
 		<div class="nav-left">
-			<a href={book ? `/book/${book.id}` : '/book'} onclick={closeReader} class="nav-btn nav-close" title="Close">
+			<a href={getReaderReturnUrl()} onclick={closeReader} class="nav-btn nav-close" title="Close">
 				<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 					<line x1="18" y1="6" x2="6" y2="18"></line>
 					<line x1="6" y1="6" x2="18" y2="18"></line>
