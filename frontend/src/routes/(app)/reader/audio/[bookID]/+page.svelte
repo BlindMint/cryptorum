@@ -261,9 +261,35 @@
 		void endSession(true);
 	}
 
+	function getSafeReturnPath(value: string | null) {
+		if (!value) return null;
+		if (!value.startsWith('/') || value.startsWith('//')) return null;
+		if (value.startsWith('/login') || value.includes('/reader/')) return null;
+		return value;
+	}
+
+	function getReaderReturnUrl() {
+		const queryReturnTo = getSafeReturnPath($page.url.searchParams.get('returnTo'));
+		if (queryReturnTo) return queryReturnTo;
+
+		if (browser && document.referrer) {
+			try {
+				const referrer = new URL(document.referrer);
+				if (referrer.origin === window.location.origin) {
+					const referrerPath = getSafeReturnPath(`${referrer.pathname}${referrer.search}${referrer.hash}`);
+					if (referrerPath) return referrerPath;
+				}
+			} catch {
+				// Ignore invalid referrers and fall back to the book route.
+			}
+		}
+
+		return book ? `/book/${book.id}` : '/book';
+	}
+
 	function closeReader(e?: Event) {
 		e?.preventDefault();
-		const targetUrl = book ? `/book/${book.id}` : '/book';
+		const targetUrl = getReaderReturnUrl();
 		startCloseBackgroundTasks();
 		void goto(targetUrl, { replaceState: true });
 	}
@@ -421,7 +447,7 @@
 		} else if (e.key === 'Escape' && showSettings) {
 			showSettings = false;
 		} else if (e.key === 'Escape') {
-			window.location.href = `/book/${book?.id}`;
+			closeReader();
 		} else if ((e.ctrlKey || e.metaKey) && e.key === 's') {
 			e.preventDefault();
 			showSettings = !showSettings;
@@ -471,7 +497,7 @@
 		class="absolute top-0 left-0 right-0 h-14 flex items-center justify-between px-4 transition-[transform,opacity] duration-200 z-20 {showControls ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}"
 		style="background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);"
 	>
-		<a href="/book/{book?.id}" onclick={closeReader} class="text-white/80 hover:text-white transition-colors" aria-label="Back to book details">
+		<a href={getReaderReturnUrl()} onclick={closeReader} class="text-white/80 hover:text-white transition-colors" aria-label="Back to book details">
 			<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
 			</svg>

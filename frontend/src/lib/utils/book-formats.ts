@@ -70,12 +70,19 @@ export function getBookReaderHref(
 	return appendReturnTo(href, returnTo);
 }
 
-export function getSpeedReaderHref(bookId: number | string, format: string | null | undefined): string {
+export function getSpeedReaderHref(
+	bookId: number | string,
+	format: string | null | undefined,
+	returnTo?: string | null
+): string {
 	const normalized = normalizeBookFormat(format);
+	let href: string;
 	if (normalized) {
-		return `/reader/speed/${bookId}?format=${encodeURIComponent(normalized)}`;
+		href = `/reader/speed/${bookId}?format=${encodeURIComponent(normalized)}`;
+	} else {
+		href = `/reader/speed/${bookId}`;
 	}
-	return `/reader/speed/${bookId}`;
+	return appendReturnTo(href, returnTo);
 }
 
 export function getFormatDisplayLabel(format: string | null | undefined): string {

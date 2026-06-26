@@ -105,7 +105,24 @@
 		const selectionId = $page.url.searchParams.get('selection');
 		const contextId = $page.url.searchParams.get('context');
 		const sessionId = selectionId || contextId;
-		selectionSession = sessionId ? getMetadataEditSession(sessionId) : null;
+		if (sessionId) {
+			selectionSession = getMetadataEditSession(sessionId);
+			return;
+		}
+
+		selectionSession = null;
+		if (typeof window === 'undefined' || !document.referrer) return;
+		try {
+			const referrer = new URL(document.referrer);
+			if (referrer.origin !== window.location.origin || !referrer.pathname.startsWith('/reader/')) return;
+			const latestSession = getMetadataEditSession();
+			const currentBookId = Number($page.params.bookID);
+			if (latestSession && Number.isFinite(currentBookId) && latestSession.bookIds.includes(currentBookId)) {
+				selectionSession = latestSession;
+			}
+		} catch {
+			// Ignore invalid referrers and leave the page as a normal book detail view.
+		}
 	}
 
 	function shouldOpenInlineMetadataEdit(): boolean {
@@ -344,6 +361,10 @@
 			return 'pdf';
 		}
 		return speedReadable[0] || null;
+	}
+
+	function getCurrentBookDetailUrl(): string {
+		return `${$page.url.pathname}${$page.url.search}`;
 	}
 
 	const readableFormats = $derived(getReadableFormats());
@@ -1070,7 +1091,7 @@
 										type="button"
 										onclick={resetCustomCover}
 										disabled={coverUploading}
-										class="rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-900)]/90 px-2 py-1 text-xs font-medium text-[var(--color-surface-text)] shadow-lg backdrop-blur transition-colors hover:bg-[var(--color-surface-800)] disabled:opacity-50"
+										class="rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-900)]/90 px-2 py-1 text-xs font-semibold text-[var(--color-surface-text)] shadow-lg backdrop-blur transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-800)] disabled:opacity-50 disabled:hover:translate-y-0"
 									>
 										Reset
 									</button>
@@ -1079,7 +1100,7 @@
 									type="button"
 									onclick={openCoverPicker}
 									disabled={coverUploading}
-									class="rounded-full bg-[var(--color-primary-500)] px-2 py-1 text-xs font-medium text-white shadow-lg transition-colors hover:bg-[var(--color-primary-600)] disabled:opacity-50"
+									class="cover-accent-action rounded-full px-2 py-1 text-xs font-semibold shadow-lg backdrop-blur transition-all duration-200 ease-out hover:-translate-y-px disabled:opacity-50 disabled:hover:translate-y-0"
 								>
 									{coverUploading ? 'Saving...' : 'Edit'}
 								</button>
@@ -1163,7 +1184,7 @@
 										</button>
 										{:else}
 											<a
-												href={getBookReaderHref(book.id, primaryReadFormat, `/book/${book.id}`)}
+												href={getBookReaderHref(book.id, primaryReadFormat, getCurrentBookDetailUrl())}
 												class="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2 text-sm font-medium transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
 										>
 											<span class="truncate">{getPrimaryReadActionLabel()}</span>
@@ -1204,7 +1225,7 @@
 								<div class="absolute right-0 top-full z-20 mt-2 w-56 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-800)] shadow-lg">
 									{#each readableFormats.filter((format) => format !== primaryReadFormat) as format}
 										<a
-											href={getBookReaderHref(book.id, format, `/book/${book.id}`)}
+											href={getBookReaderHref(book.id, format, getCurrentBookDetailUrl())}
 											onclick={() => formatMenuOpen = false}
 											class="flex items-center justify-between px-3 py-2 text-sm text-[var(--color-surface-text)] transition-colors duration-200 hover:bg-[var(--color-surface-700)]"
 										>
@@ -1231,7 +1252,7 @@
 										</button>
 									{:else}
 										<a
-											href={getSpeedReaderHref(book.id, primarySpeedReadFormat)}
+											href={getSpeedReaderHref(book.id, primarySpeedReadFormat, getCurrentBookDetailUrl())}
 											class="group flex w-full items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
 										>
 											<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-primary-300)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">

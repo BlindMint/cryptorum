@@ -51,7 +51,7 @@
 						type="button"
 						onclick={onResetCover}
 						disabled={coverActionBusy}
-						class="rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-900)]/90 px-2 py-1 text-xs font-medium text-[var(--color-surface-text)] shadow-lg backdrop-blur transition-colors hover:bg-[var(--color-surface-800)] disabled:opacity-50"
+						class="rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-900)]/90 px-2 py-1 text-xs font-semibold text-[var(--color-surface-text)] shadow-lg backdrop-blur transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-800)] disabled:opacity-50 disabled:hover:translate-y-0"
 					>
 						Reset
 					</button>
@@ -61,7 +61,7 @@
 						type="button"
 						onclick={onEditCover}
 						disabled={coverActionBusy}
-						class="rounded-full bg-[var(--color-primary-500)] px-2 py-1 text-xs font-medium text-white shadow-lg transition-colors hover:bg-[var(--color-primary-600)] disabled:opacity-50"
+						class="cover-accent-action rounded-full px-2 py-1 text-xs font-semibold shadow-lg backdrop-blur transition-all duration-200 ease-out hover:-translate-y-px disabled:opacity-50 disabled:hover:translate-y-0"
 					>
 						{coverActionLabel}
 					</button>

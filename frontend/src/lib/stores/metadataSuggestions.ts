@@ -50,8 +50,8 @@ function mergeSuggestionValues(...lists: string[][]): string[] {
 	return values.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 }
 
-function normalizePartialSuggestions(values: Partial<Record<MetadataSuggestionField, string[]>>): Partial<MetadataSuggestionState> {
-	const normalized: Partial<MetadataSuggestionState> = {};
+function normalizeSuggestions(values: Partial<Record<MetadataSuggestionField, string[]>>): MetadataSuggestionState {
+	const normalized = { ...emptySuggestions };
 	for (const field of fields) {
 		normalized[field] = mergeSuggestionValues(values[field] ?? []);
 	}
@@ -59,7 +59,7 @@ function normalizePartialSuggestions(values: Partial<Record<MetadataSuggestionFi
 }
 
 export function addMetadataSuggestions(values: Partial<Record<MetadataSuggestionField, string[]>>) {
-	const normalized = normalizePartialSuggestions(values);
+	const normalized = normalizeSuggestions(values);
 	metadataSuggestions.update((current) => {
 		const next = { ...current };
 		for (const field of fields) {
@@ -67,6 +67,10 @@ export function addMetadataSuggestions(values: Partial<Record<MetadataSuggestion
 		}
 		return next;
 	});
+}
+
+function replaceMetadataSuggestions(values: Partial<Record<MetadataSuggestionField, string[]>>) {
+	metadataSuggestions.set(normalizeSuggestions(values));
 }
 
 export function addMetadataSuggestionsFromPayload(payload: {
@@ -95,7 +99,7 @@ export async function loadMetadataSuggestions(force = false): Promise<void> {
 		.then(async (res) => {
 			if (!res.ok) return;
 			const data = await res.json();
-			addMetadataSuggestions({
+			replaceMetadataSuggestions({
 				authors: extractSuggestionNames(data.authors),
 				series: extractSuggestionNames(data.series),
 				publishers: extractSuggestionNames(data.publishers),
