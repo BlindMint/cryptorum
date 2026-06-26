@@ -82,6 +82,7 @@
 	let selectionSession = $state<MetadataEditSelectionSession | null>(null);
 	let currentBookRouteId: string | null = null;
 	let bookRequestToken = 0;
+	let exitingInlineMetadataEdit = false;
 
 	type CoverMutationResponse = {
 		cover_path?: string;
@@ -180,7 +181,7 @@
 			}
 			if (bookRes?.ok) {
 				book = await bookRes.json();
-				if (shouldOpenInlineMetadataEdit()) {
+				if (shouldOpenInlineMetadataEdit() && !exitingInlineMetadataEdit) {
 					startEditing();
 				} else if (mode !== 'quiet') {
 					editing = false;
@@ -511,6 +512,7 @@
 	}
 
 	function startEditing() {
+		exitingInlineMetadataEdit = false;
 		editForm = createMetadataEditForm(book);
 		authorsList = prepareAuthorRows(parseAuthors(book.authors || '[]'));
 		editing = true;
@@ -589,6 +591,7 @@
 
 	function exitInlineMetadataEdit() {
 		if (!confirmDiscardUnsavedChanges()) return;
+		exitingInlineMetadataEdit = true;
 		cancelEditing();
 		if (book?.id) {
 			goto(getBookDetailContextUrl(book.id, selectionSession, getSelectionIndex()), { replaceState: true });
@@ -775,8 +778,8 @@
 
 			if (res.ok) {
 				await fetchBook({ mode: 'quiet', resetRelated: false });
-				editing = stayEditing;
-				if (stayEditing) {
+				editing = stayEditing && !exitingInlineMetadataEdit;
+				if (editing) {
 					editForm = createMetadataEditForm(book);
 					authorsList = prepareAuthorRows(parseAuthors(book?.authors || '[]'));
 				}
