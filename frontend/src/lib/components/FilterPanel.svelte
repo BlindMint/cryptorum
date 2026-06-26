@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { onDestroy, onMount } from 'svelte';
+	import { filterPanelWidth } from '$lib/stores';
 	import { lenientSearchMatch } from '$lib/utils/search';
 
 	type FilterMode = 'AND' | 'OR' | 'NOT';
 	type FilterOptionSort = 'count' | 'alpha';
-	type FilterOption = { name: string; book_count?: number };
+	type FilterOption = { name: string; value?: string; book_count?: number };
 	type StatusFilterOption = { value: string; label: string };
 
 	type Props = {
@@ -28,6 +30,7 @@
 		isTagSelected: (value: string) => boolean;
 		isFormatSelected: (value: string) => boolean;
 		isStatusSelected: (value: string) => boolean;
+		open?: boolean;
 		showBackdrop?: boolean;
 	};
 
@@ -53,6 +56,7 @@
 		isTagSelected,
 		isFormatSelected,
 		isStatusSelected,
+		open = true,
 		showBackdrop = false
 	}: Props = $props();
 
@@ -79,6 +83,10 @@
 	let tagSearch = $state('');
 	let formatSearch = $state('');
 	let statusSearch = $state('');
+	let isResizing = $state(false);
+	let activeResizePointerId: number | null = null;
+	let tooltip = $state<{ text: string; top: number; right: number } | null>(null);
+	let tooltipTimer: number | null = null;
 
 	let visibleAuthors = $derived(visibleFilterOptions(authors, authorSearch, filterOptionSort));
 	let visibleSeries = $derived(visibleFilterOptions(series, seriesSearch, filterOptionSort));
@@ -111,18 +119,129 @@
 		if (sort === 'count') return filtered;
 		return [...filtered].sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }));
 	}
+
+	function filterOptionValue(option: FilterOption): string {
+		return option.value || option.name;
+	}
+
+	function filterRowClass(selected: boolean, extra = ''): string {
+		const selectedClasses = 'filter-option-selected border-l-2 border-[var(--color-primary-400)] bg-[var(--color-primary-500)]/25 hover:bg-[var(--color-primary-500)]/35';
+		const unselectedClasses = 'border-l-2 border-transparent';
+		return `filter-option-row grid w-full items-center gap-2 px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors ${selected ? selectedClasses : unselectedClasses} ${extra}`;
+	}
+
+	function countClass(selected: boolean): string {
+		return selected
+			? 'text-xs font-semibold text-[var(--color-primary-200)]'
+			: 'text-xs text-[var(--color-surface-text-muted)]';
+	}
+
+	function clearTooltipTimer() {
+		if (tooltipTimer !== null) {
+			window.clearTimeout(tooltipTimer);
+			tooltipTimer = null;
+		}
+	}
+
+	function hideTooltip() {
+		clearTooltipTimer();
+		tooltip = null;
+	}
+
+	function showTooltip(event: Event, text: string, delay = 300) {
+		clearTooltipTimer();
+		const target = event.currentTarget;
+		if (!(target instanceof HTMLElement)) return;
+		tooltipTimer = window.setTimeout(() => {
+			const rect = target.getBoundingClientRect();
+			tooltip = {
+				text,
+				top: Math.max(12, Math.min(window.innerHeight - 96, rect.bottom + 8)),
+				right: Math.max(12, window.innerWidth - rect.right + 8)
+			};
+		}, delay);
+	}
+
+	function handleResizeMove(event: PointerEvent) {
+		if (!isResizing || event.pointerId !== activeResizePointerId) return;
+		filterPanelWidth.setTemporary(window.innerWidth - event.clientX);
+	}
+
+	function stopResize(event?: PointerEvent) {
+		if (!isResizing) return;
+		if (event && activeResizePointerId !== null && event.pointerId !== activeResizePointerId) return;
+
+		isResizing = false;
+		activeResizePointerId = null;
+		window.removeEventListener('pointermove', handleResizeMove);
+		window.removeEventListener('pointerup', stopResize);
+		window.removeEventListener('pointercancel', stopResize);
+		document.documentElement.style.cursor = '';
+		document.body.style.userSelect = '';
+		filterPanelWidth.set($filterPanelWidth);
+	}
+
+	function startResize(event: PointerEvent) {
+		if (event.button !== 0) return;
+
+		event.preventDefault();
+		event.stopPropagation();
+		hideTooltip();
+		stopResize();
+
+		isResizing = true;
+		activeResizePointerId = event.pointerId;
+		filterPanelWidth.setTemporary(window.innerWidth - event.clientX);
+		document.documentElement.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		window.addEventListener('pointermove', handleResizeMove);
+		window.addEventListener('pointerup', stopResize);
+		window.addEventListener('pointercancel', stopResize);
+	}
+
+	onMount(() => {
+		filterPanelWidth.init();
+	});
+
+	onDestroy(() => {
+		hideTooltip();
+		stopResize();
+	});
 </script>
 
-{#if showBackdrop}
+{#if open && showBackdrop}
 	<button
 		type="button"
-		class="fixed inset-x-0 bottom-0 top-20 z-[35] bg-black/80 lg:bg-black/50"
+		class="fixed inset-x-0 bottom-0 top-20 z-[35] bg-black/70 lg:hidden"
 		aria-label="Close filters"
 		onclick={onClose}
 	></button>
 {/if}
 
-<div class="fixed right-0 top-20 z-40 h-[calc(100dvh-5rem)] w-full max-w-80 translate-x-0 overflow-y-auto border-l border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-xl transition-transform duration-300 ease-out">
+<style>
+	.filter-option-row:not(.filter-option-selected):hover,
+	.filter-option-row:not(.filter-option-selected):focus-visible {
+		background: color-mix(in srgb, var(--color-surface-text, #e2e8f0) 8%, transparent);
+	}
+</style>
+
+<div
+	class="fixed right-0 top-20 z-40 h-[calc(100dvh-5rem)] max-w-[calc(100vw-1rem)] overflow-y-auto border-l border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-xl transition-transform duration-300 ease-out {open ? 'translate-x-0' : 'invisible translate-x-full pointer-events-none'}"
+	style={`width: ${$filterPanelWidth}px;`}
+	aria-hidden={!open}
+	inert={!open}
+	onscroll={hideTooltip}
+>
+	<div
+		class="group absolute inset-y-0 left-0 z-20 hidden w-3 cursor-col-resize touch-none select-none lg:flex"
+		title="Drag to resize filters"
+		role="separator"
+		aria-orientation="vertical"
+		aria-label="Resize filters"
+		onpointerdown={startResize}
+	>
+		<div class="h-full w-px bg-transparent transition-colors group-hover:bg-[var(--color-primary-500)]/55 {isResizing ? 'bg-[var(--color-primary-500)]/70' : ''}"></div>
+	</div>
 	<div class="sticky top-0 z-10 border-b border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
 		<div class="flex min-h-16 items-center justify-between gap-3 px-4 py-3">
 			<div class="flex items-center gap-2">
@@ -234,16 +353,25 @@
 				</div>
 				<div class="max-h-48 overflow-y-auto">
 					{#each visibleAuthors as author}
-						<button onclick={() => onToggleAuthor(author.name)} class="grid w-full grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {isAuthorSelected(author.name) ? 'bg-[var(--color-primary-500)]/20' : ''}">
+						{@const authorValue = filterOptionValue(author)}
+						{@const selected = isAuthorSelected(authorValue)}
+						<button
+							onclick={() => onToggleAuthor(authorValue)}
+							onmouseenter={(event) => showTooltip(event, author.name)}
+							onfocus={(event) => showTooltip(event, author.name, 0)}
+							onmouseleave={hideTooltip}
+							onblur={hideTooltip}
+							class={filterRowClass(selected, 'grid-cols-[1rem_minmax(0,1fr)_auto]')}
+						>
 							<span class="flex h-4 w-4 items-center justify-center">
-								{#if isAuthorSelected(author.name)}
+								{#if selected}
 									<svg class="h-4 w-4 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
 									</svg>
 								{/if}
 							</span>
 							<span class="min-w-0 truncate">{author.name}</span>
-							<span class="text-xs text-[var(--color-surface-text-muted)]">{author.book_count}</span>
+							<span class={countClass(selected)}>{author.book_count}</span>
 						</button>
 					{/each}
 					{#if authors.length === 0}
@@ -271,16 +399,24 @@
 				</div>
 				<div class="max-h-48 overflow-y-auto">
 					{#each visibleSeries as serie}
-						<button onclick={() => onToggleSeries(serie.name)} class="grid w-full grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {isSeriesSelected(serie.name) ? 'bg-[var(--color-primary-500)]/20' : ''}">
+						{@const selected = isSeriesSelected(serie.name)}
+						<button
+							onclick={() => onToggleSeries(serie.name)}
+							onmouseenter={(event) => showTooltip(event, serie.name)}
+							onfocus={(event) => showTooltip(event, serie.name, 0)}
+							onmouseleave={hideTooltip}
+							onblur={hideTooltip}
+							class={filterRowClass(selected, 'grid-cols-[1rem_minmax(0,1fr)_auto]')}
+						>
 							<span class="flex h-4 w-4 items-center justify-center">
-								{#if isSeriesSelected(serie.name)}
+								{#if selected}
 									<svg class="h-4 w-4 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
 									</svg>
 								{/if}
 							</span>
 							<span class="min-w-0 truncate">{serie.name}</span>
-							<span class="text-xs text-[var(--color-surface-text-muted)]">{serie.book_count}</span>
+							<span class={countClass(selected)}>{serie.book_count}</span>
 						</button>
 					{/each}
 					{#if series.length === 0}
@@ -308,16 +444,24 @@
 				</div>
 				<div class="max-h-48 overflow-y-auto">
 					{#each visibleTags as tag}
-						<button onclick={() => onToggleTag(tag.name)} class="grid w-full grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {isTagSelected(tag.name) ? 'bg-[var(--color-primary-500)]/20' : ''}">
+						{@const selected = isTagSelected(tag.name)}
+						<button
+							onclick={() => onToggleTag(tag.name)}
+							onmouseenter={(event) => showTooltip(event, tag.name)}
+							onfocus={(event) => showTooltip(event, tag.name, 0)}
+							onmouseleave={hideTooltip}
+							onblur={hideTooltip}
+							class={filterRowClass(selected, 'grid-cols-[1rem_minmax(0,1fr)_auto]')}
+						>
 							<span class="flex h-4 w-4 items-center justify-center">
-								{#if isTagSelected(tag.name)}
+								{#if selected}
 									<svg class="h-4 w-4 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
 									</svg>
 								{/if}
 							</span>
 							<span class="min-w-0 truncate">{tag.name}</span>
-							<span class="text-xs text-[var(--color-surface-text-muted)]">{tag.book_count}</span>
+							<span class={countClass(selected)}>{tag.book_count}</span>
 						</button>
 					{/each}
 					{#if tags.length === 0}
@@ -345,16 +489,24 @@
 				</div>
 				<div class="max-h-48 overflow-y-auto">
 					{#each visibleFormats as format}
-						<button onclick={() => onToggleFormat(format.name)} class="grid w-full grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {isFormatSelected(format.name) ? 'bg-[var(--color-primary-500)]/20' : ''}">
+						{@const selected = isFormatSelected(format.name)}
+						<button
+							onclick={() => onToggleFormat(format.name)}
+							onmouseenter={(event) => showTooltip(event, format.name)}
+							onfocus={(event) => showTooltip(event, format.name, 0)}
+							onmouseleave={hideTooltip}
+							onblur={hideTooltip}
+							class={filterRowClass(selected, 'grid-cols-[1rem_minmax(0,1fr)_auto]')}
+						>
 							<span class="flex h-4 w-4 items-center justify-center">
-								{#if isFormatSelected(format.name)}
+								{#if selected}
 									<svg class="h-4 w-4 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
 									</svg>
 								{/if}
 							</span>
 							<span class="min-w-0 truncate uppercase tracking-[0.08em]">{format.name}</span>
-							<span class="text-xs text-[var(--color-surface-text-muted)]">{format.book_count}</span>
+							<span class={countClass(selected)}>{format.book_count}</span>
 						</button>
 					{/each}
 					{#if formats.length === 0}
@@ -379,9 +531,17 @@
 				</div>
 				<div class="py-1">
 					{#each visibleStatuses as statusOption}
-						<button onclick={() => onToggleStatus(statusOption.value)} class="grid w-full grid-cols-[1rem_minmax(0,1fr)] items-center gap-2 px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {isStatusSelected(statusOption.value) ? 'bg-[var(--color-primary-500)]/20' : ''}">
+						{@const selected = isStatusSelected(statusOption.value)}
+						<button
+							onclick={() => onToggleStatus(statusOption.value)}
+							onmouseenter={(event) => showTooltip(event, statusOption.label)}
+							onfocus={(event) => showTooltip(event, statusOption.label, 0)}
+							onmouseleave={hideTooltip}
+							onblur={hideTooltip}
+							class={filterRowClass(selected, 'grid-cols-[1rem_minmax(0,1fr)]')}
+						>
 							<span class="flex h-4 w-4 items-center justify-center">
-								{#if isStatusSelected(statusOption.value)}
+								{#if selected}
 									<svg class="h-4 w-4 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
 									</svg>
@@ -398,3 +558,13 @@
 		</div>
 	</div>
 </div>
+
+{#if tooltip}
+	<div
+		class="pointer-events-none fixed z-[70] max-w-[min(28rem,calc(100vw-2rem))] rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm leading-snug text-[var(--color-surface-text)] shadow-2xl"
+		style={`top: ${tooltip.top}px; right: ${tooltip.right}px;`}
+		role="tooltip"
+	>
+		{tooltip.text}
+	</div>
+{/if}

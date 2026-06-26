@@ -94,6 +94,13 @@
 
 	onMount(() => {
 		let disposed = false;
+		const desktopMedia = window.matchMedia('(min-width: 1024px)');
+
+		function handleDesktopBreakpointChange(event: MediaQueryListEvent | MediaQueryList) {
+			if (event.matches) {
+				$mobileMenuOpen = false;
+			}
+		}
 
 		async function init() {
 			try {
@@ -115,15 +122,18 @@
 			loading = false;
 		}
 
+		handleDesktopBreakpointChange(desktopMedia);
+		desktopMedia.addEventListener('change', handleDesktopBreakpointChange);
 		void init();
 
 		return () => {
 			disposed = true;
+			desktopMedia.removeEventListener('change', handleDesktopBreakpointChange);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			releaseWakeLock();
 		};
 	});
- </script>
+</script>
 
 {#if loading}
 	<div class="min-h-[100dvh] bg-[var(--color-surface-base)] flex items-center justify-center overflow-x-hidden">

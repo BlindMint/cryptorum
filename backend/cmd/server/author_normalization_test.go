@@ -124,3 +124,77 @@ func TestNormalizedAuthorSQLExpressionRemovesDisplayPunctuation(t *testing.T) {
 		t.Fatalf("SQL normalized author = %q, want %q", got, want)
 	}
 }
+
+func TestNormalizedAuthorSQLExpressionRemovesUnicodeEllipsis(t *testing.T) {
+	previousDB := appDB
+	testDB, err := db.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create test db: %v", err)
+	}
+	appDB = testDB
+	t.Cleanup(func() {
+		_ = testDB.Close()
+		appDB = previousDB
+	})
+
+	author := "… Fifth World Congress on Disaster Management Volume V. Proceedings of the International Conference on Disaster Management"
+	expression := normalizedAuthorSQLExpression(sqlStringLiteral(author))
+	var got string
+	if err := appDB.QueryRow("SELECT " + expression).Scan(&got); err != nil {
+		t.Fatalf("evaluate normalized author SQL expression: %v", err)
+	}
+	if want := normalizedAuthorMatchKey(author); got != want {
+		t.Fatalf("SQL normalized author = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizedAuthorSQLExpressionMatchesGoKeyForProblematicImportedValues(t *testing.T) {
+	previousDB := appDB
+	testDB, err := db.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create test db: %v", err)
+	}
+	appDB = testDB
+	t.Cleanup(func() {
+		_ = testDB.Close()
+		appDB = previousDB
+	})
+
+	authors := []string{
+		"†Ä@_",
+		"©2004 Bruce R. Cordell",
+		"(Imported Author",
+		")Imported Author",
+		"真的老狼 Zhen De Lao Lang",
+	}
+
+	for _, author := range authors {
+		expression := normalizedAuthorSQLExpression(sqlStringLiteral(author))
+		var got string
+		if err := appDB.QueryRow("SELECT " + expression).Scan(&got); err != nil {
+			t.Fatalf("evaluate normalized author SQL expression for %q: %v", author, err)
+		}
+		if want := normalizedAuthorMatchKey(author); got != want {
+			t.Fatalf("SQL normalized author for %q = %q, want %q", author, got, want)
+		}
+	}
+}
+
+func TestAuthorMetadataOptionKeepsRawFilterValue(t *testing.T) {
+	rawAuthor := "… Fifth World Congress on Disaster Management Volume V. Proceedings of the International Conference on Disaster Management"
+	counts := map[string]*authorMetadataOption{}
+	seen := map[string]bool{}
+
+	addAuthorMetadataOption(counts, seen, rawAuthor, 1)
+	options := sortedAuthorMetadataOptions(counts)
+
+	if len(options) != 1 {
+		t.Fatalf("expected one author option, got %d", len(options))
+	}
+	if options[0].Value != rawAuthor {
+		t.Fatalf("author option value = %q, want raw value %q", options[0].Value, rawAuthor)
+	}
+	if options[0].Name == "" {
+		t.Fatal("expected author option display name to be populated")
+	}
+}

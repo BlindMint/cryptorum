@@ -84,6 +84,50 @@ function createGridScaleStore() {
 
 export const gridScale = createGridScaleStore();
 
+export const FILTER_PANEL_MIN_WIDTH = 280;
+export const FILTER_PANEL_MAX_WIDTH = 560;
+export const DEFAULT_FILTER_PANEL_WIDTH = 320;
+
+function clampFilterPanelWidth(value: number): number {
+	return Math.min(FILTER_PANEL_MAX_WIDTH, Math.max(FILTER_PANEL_MIN_WIDTH, Math.round(value)));
+}
+
+function createFilterPanelWidthStore() {
+	const { subscribe, set } = writable<number>(DEFAULT_FILTER_PANEL_WIDTH);
+
+	function persist(value: number) {
+		const nextValue = clampFilterPanelWidth(value);
+		if (browser) {
+			localStorage.setItem('filterPanelWidth', JSON.stringify(nextValue));
+		}
+		set(nextValue);
+	}
+
+	return {
+		subscribe,
+		set: persist,
+		setTemporary: (value: number) => {
+			set(clampFilterPanelWidth(value));
+		},
+		init: () => {
+			if (browser) {
+				const stored = localStorage.getItem('filterPanelWidth');
+				if (stored !== null) {
+					try {
+						persist(JSON.parse(stored));
+						return;
+					} catch {
+						// Ignore invalid localStorage state and restore the default width.
+					}
+				}
+			}
+			set(DEFAULT_FILTER_PANEL_WIDTH);
+		}
+	};
+}
+
+export const filterPanelWidth = createFilterPanelWidthStore();
+
 // Show file format badge on book covers
 function createShowFormatOnCoverStore() {
 	const defaultValue = true;

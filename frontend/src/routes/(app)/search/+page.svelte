@@ -2,7 +2,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { onDestroy, onMount } from 'svelte';
-	import { gridScale, showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { filterPanelWidth, gridScale, showFormatOnCover, getFormatColor } from '$lib/stores';
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { getBookReaderHref, isAudioFormat } from '$lib/utils/book-formats';
@@ -56,6 +56,7 @@
 	let showSortMenu = $state(false);
 	let showDisplayMenu = $state(false);
 	let showFilterPanel = $state(false);
+	let filterPanelBackdrop = $state(false);
 	let availableAuthors = $state<any[]>([]);
 	let availableSeries = $state<any[]>([]);
 	let availableTags = $state<any[]>([]);
@@ -217,6 +218,16 @@
 		gridScale.init();
 		showFormatOnCover.init();
 		void fetchFilterOptions();
+		const filterPanelBackdropMedia = window.matchMedia('(max-width: 1023px)');
+		const updateFilterPanelBackdrop = (event: MediaQueryListEvent | MediaQueryList) => {
+			filterPanelBackdrop = event.matches;
+		};
+		updateFilterPanelBackdrop(filterPanelBackdropMedia);
+		filterPanelBackdropMedia.addEventListener('change', updateFilterPanelBackdrop);
+
+		return () => {
+			filterPanelBackdropMedia.removeEventListener('change', updateFilterPanelBackdrop);
+		};
 	});
 
 	$effect(() => {
@@ -760,7 +771,7 @@
 
 </script>
 
-<div class="space-y-6">
+<div class="space-y-6 transition-all duration-300 {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}" style={`--filter-panel-offset: ${$filterPanelWidth + 24}px;`}>
 	<div class="max-w-2xl mx-auto">
 		<h1 class="text-2xl font-bold text-[var(--color-surface-text)] mb-2">Search</h1>
 		{#if libraryName}
@@ -784,32 +795,31 @@
 		</div>
 	</div>
 
-	{#if showFilterPanel}
-		<FilterPanel
-			authors={availableAuthors}
-			series={availableSeries}
-			tags={availableTags}
-			formats={availableFormats}
-			filterMode={getFilterMode()}
-			valueFilterMode={getValueFilterMode()}
-			hasActiveFilters={hasFilterPanelFilters()}
-			onClose={() => showFilterPanel = false}
-			onClear={clearFilterPanelFilters}
-			onSetFilterMode={setFilterMode}
-			onSetValueFilterMode={setValueFilterMode}
-			onToggleAuthor={(value) => toggleRepeatedFilter('author', value)}
-			onToggleSeries={(value) => toggleRepeatedFilter('series', value)}
-			onToggleTag={toggleTagSelection}
-			onToggleFormat={(value) => toggleRepeatedFilter('format', value)}
-			onToggleStatus={(value) => toggleRepeatedFilter('status', value)}
-			isAuthorSelected={isAuthorSelected}
-			isSeriesSelected={isSeriesSelected}
-			isTagSelected={isTagSelected}
-			isFormatSelected={isFormatSelected}
-			isStatusSelected={isStatusSelected}
-			showBackdrop
-		/>
-	{/if}
+	<FilterPanel
+		authors={availableAuthors}
+		series={availableSeries}
+		tags={availableTags}
+		formats={availableFormats}
+		filterMode={getFilterMode()}
+		valueFilterMode={getValueFilterMode()}
+		hasActiveFilters={hasFilterPanelFilters()}
+		onClose={() => showFilterPanel = false}
+		onClear={clearFilterPanelFilters}
+		onSetFilterMode={setFilterMode}
+		onSetValueFilterMode={setValueFilterMode}
+		onToggleAuthor={(value) => toggleRepeatedFilter('author', value)}
+		onToggleSeries={(value) => toggleRepeatedFilter('series', value)}
+		onToggleTag={toggleTagSelection}
+		onToggleFormat={(value) => toggleRepeatedFilter('format', value)}
+		onToggleStatus={(value) => toggleRepeatedFilter('status', value)}
+		isAuthorSelected={isAuthorSelected}
+		isSeriesSelected={isSeriesSelected}
+		isTagSelected={isTagSelected}
+		isFormatSelected={isFormatSelected}
+		isStatusSelected={isStatusSelected}
+		open={showFilterPanel}
+		showBackdrop={filterPanelBackdrop}
+	/>
 
 	{#if results.length > 0}
 		<div bind:this={gridMeasureElement} class="w-full">
@@ -1229,15 +1239,15 @@
 									</button>
 								</div>
 							{/if}
-						</div>
-						<button
-							onclick={openShelfPicker}
-							disabled={actionInProgress}
-							class="px-4 py-2 text-sm rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
-						>
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-							</svg>
+							</div>
+							<button
+								onclick={openShelfPicker}
+								disabled={actionInProgress}
+								class="accent-action flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+							>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+								</svg>
 							<span>Add to Shelf</span>
 						</button>
 						<button

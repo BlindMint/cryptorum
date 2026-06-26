@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"cryptorum/internal/db"
@@ -148,6 +149,40 @@ func TestBookFiltersCanRequireAllValuesWithinCategory(t *testing.T) {
 	}
 }
 
+func TestBookAuthorFiltersMatchProblematicImportedValues(t *testing.T) {
+	setupFilterOptionsTestDB(t)
+
+	authors := []string{
+		"†Ä@_",
+		"©2004 Bruce R. Cordell",
+		"(Imported Author",
+		")Imported Author",
+		"真的老狼 Zhen De Lao Lang",
+	}
+	for i, author := range authors {
+		title := "Imported Metadata " + author
+		rawAuthors, err := json.Marshal([]string{author})
+		if err != nil {
+			t.Fatalf("marshal authors: %v", err)
+		}
+		insertFilterOptionBook(t, int64(20+i), 1, title, string(rawAuthors), `[]`, `[]`, "epub", "unread")
+	}
+
+	options := fetchFilterOptionsForTest(t, "/api/filter-options?library_id=1")
+	authorValues := optionValues(options["authors"])
+	for _, author := range authors {
+		if !containsString(authorValues, author) {
+			t.Fatalf("author filter option values = %#v, want raw value %q", authorValues, author)
+		}
+
+		books := fetchBooksForTest(t, "/api/books?library_id=1&author="+url.QueryEscape(author))
+		titles := bookTitles(books)
+		if !sameStringSet(titles, []string{"Imported Metadata " + author}) {
+			t.Fatalf("titles for author %q = %#v", author, titles)
+		}
+	}
+}
+
 func TestBookFiltersAcrossORStaysInsideSearchScope(t *testing.T) {
 	setupFilterOptionsTestDB(t)
 
@@ -196,6 +231,14 @@ func optionNames(options []metadataOption) []string {
 		names = append(names, option.Name)
 	}
 	return names
+}
+
+func optionValues(options []metadataOption) []string {
+	values := make([]string, 0, len(options))
+	for _, option := range options {
+		values = append(values, option.Value)
+	}
+	return values
 }
 
 func sameStringSet(left, right []string) bool {

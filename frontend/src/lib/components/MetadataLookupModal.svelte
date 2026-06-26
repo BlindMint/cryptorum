@@ -757,36 +757,36 @@
 											class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 										/>
 									</div>
-									<div>
-										<label for={`lookup-provider-${target.bookId}`} class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">Provider</label>
-										<select bind:value={selectedProvider} class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]">
-										<option value="" class="bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)]">All providers</option>
-										{#each providers as provider}
-											<option value={provider.id} class="bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)]">{provider.name}</option>
-										{/each}
-									</select>
-								</div>
-									<div class="grid grid-cols-2 gap-2 pt-2">
-										<button
-											class="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-primary-600)] disabled:opacity-50"
-											onclick={() => searchTarget(target.bookId)}
-											disabled={target.loading || applying}
-										>
-											{#if target.loading}
-												<span class="inline-flex h-3.5 w-3.5 items-center justify-center" aria-hidden="true">
-													<span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/35 border-t-white"></span>
-												</span>
-											{/if}
-											{target.loading ? 'Searching...' : 'Search'}
-										</button>
-									<button
-										class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-overlay)] disabled:opacity-50"
-										onclick={() => requestApplyMetadata(target.bookId)}
-										disabled={target.loading || applying || target.selectedIndex < 0}
-									>
-										Apply Current
-									</button>
-								</div>
+										<div>
+											<label for={`lookup-provider-${target.bookId}`} class="mb-1 block text-sm font-medium text-[var(--color-surface-text-muted)]">Provider</label>
+											<select bind:value={selectedProvider} class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]">
+												<option value="" class="bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)]">All providers</option>
+												{#each providers as provider}
+													<option value={provider.id} class="bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)]">{provider.name}</option>
+												{/each}
+											</select>
+										</div>
+										<div class="grid grid-cols-2 gap-2 pt-2">
+											<button
+												class="accent-action inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+												onclick={() => searchTarget(target.bookId)}
+												disabled={target.loading || applying}
+											>
+												{#if target.loading}
+													<span class="inline-flex h-3.5 w-3.5 items-center justify-center" aria-hidden="true">
+														<span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--color-primary-500)]/30 border-t-[var(--color-primary-400)]"></span>
+													</span>
+												{/if}
+												{target.loading ? 'Searching...' : 'Search'}
+											</button>
+											<button
+												class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-overlay)] disabled:opacity-50"
+												onclick={() => requestApplyMetadata(target.bookId)}
+												disabled={target.loading || applying || target.selectedIndex < 0}
+											>
+												Apply Current
+											</button>
+										</div>
 								{#if targets.length > 1}
 									<button
 										class="w-full rounded-lg border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/10 px-3 py-2 text-sm font-medium text-[var(--color-primary-300)] transition-colors hover:bg-[var(--color-primary-500)]/20 disabled:opacity-50"
@@ -958,15 +958,15 @@
 						>
 							Apply Current Edits First
 						</button>
-					{/if}
-					<button
-						type="button"
-						onclick={() => continuePendingApply(false)}
-						disabled={applying}
-						class="rounded-lg bg-[var(--color-primary-500)] px-4 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-600)] disabled:opacity-50"
-					>
-						Overwrite Metadata
-					</button>
+						{/if}
+						<button
+							type="button"
+							onclick={() => continuePendingApply(false)}
+							disabled={applying}
+							class="accent-action rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ease-out hover:-translate-y-px"
+						>
+							Overwrite Metadata
+						</button>
 				</div>
 			</div>
 		</div>
