@@ -26,6 +26,7 @@
 	let embedPdfViewerReady = $state(false);
 	let embedPdfScroll: any = null;
 	let embedPdfRestoringInitialPage = false;
+	let embedPdfRestoreSettling = false;
 	let embedPdfRestoreTimers: ReturnType<typeof setTimeout>[] = [];
 	let embedPdfSidebarOpen = $state(false);
 	let pdfLoadRetryToken = $state(0);
@@ -69,6 +70,7 @@
 	const progressSaveDebounceMs = 750;
 	const embedPdfDocumentId = 'cryptorum-pdf';
 	const embedPdfRestoreDelays = [0, 120, 300, 650, 1200, 2200, 3600, 5600, 8200, 11500, 15500];
+	const embedPdfRestoreSettleDelays = [80, 250, 600, 1200, 2200, 3600];
 
 	const viewModeBgColors: Record<PdfViewMode, string> = {
 		light: '#ffffff',
@@ -189,6 +191,7 @@
 	function clearEmbedPdfRestoreTimers() {
 		embedPdfRestoreTimers.forEach((timer) => clearTimeout(timer));
 		embedPdfRestoreTimers = [];
+		embedPdfRestoreSettling = false;
 	}
 
 	function queueProgressSave() {
@@ -331,9 +334,10 @@
 				});
 			} catch (e) {
 				console.warn('Failed to restore saved PDF page:', e);
+				return;
 			}
 
-			if (isFinalAttempt && embedPdfRestoringInitialPage) {
+			if (isFinalAttempt && embedPdfRestoringInitialPage && !embedPdfRestoreSettling) {
 				embedPdfRestoringInitialPage = false;
 			}
 		};
@@ -341,6 +345,40 @@
 		embedPdfRestoreTimers = embedPdfRestoreDelays.map((delay, index) =>
 			setTimeout(
 				() => attemptRestore(index === embedPdfRestoreDelays.length - 1),
+				delay
+			)
+		);
+	}
+
+	function settleEmbedPdfSavedPageRestore() {
+		if (!embedPdfScroll || !embedPdfRestoringInitialPage || embedPdfRestoreSettling) return;
+
+		const targetPage = embedPdfInitialPage;
+		clearEmbedPdfRestoreTimers();
+		embedPdfRestoreSettling = true;
+
+		const attemptSettle = (isFinalAttempt = false) => {
+			if (!embedPdfScroll || !embedPdfRestoringInitialPage) return;
+			try {
+				const scopedScroll = embedPdfScroll.forDocument?.(embedPdfDocumentId);
+				scopedScroll?.scrollToPage?.({
+					pageNumber: targetPage,
+					behavior: 'instant',
+					alignY: 0
+				});
+			} catch (e) {
+				console.warn('Failed to settle restored PDF page:', e);
+			}
+
+			if (isFinalAttempt) {
+				embedPdfRestoringInitialPage = false;
+				embedPdfRestoreSettling = false;
+			}
+		};
+
+		embedPdfRestoreTimers = embedPdfRestoreSettleDelays.map((delay, index) =>
+			setTimeout(
+				() => attemptSettle(index === embedPdfRestoreSettleDelays.length - 1),
 				delay
 			)
 		);
@@ -717,8 +755,14 @@
 		}
 
 		if (embedPdfRestoringInitialPage && pageNum === embedPdfInitialPage) {
-			embedPdfRestoringInitialPage = false;
-			clearEmbedPdfRestoreTimers();
+			if (pageNum !== currentPage) {
+				currentPage = pageNum;
+			}
+			if (total && total > 0 && total !== numPages) {
+				numPages = total;
+			}
+			settleEmbedPdfSavedPageRestore();
+			return;
 		}
 
 		if (pageNum !== currentPage) {
