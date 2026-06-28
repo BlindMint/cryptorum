@@ -219,6 +219,17 @@
 {/if}
 
 <style>
+	.filter-panel-shell {
+		width: var(--filter-panel-width);
+	}
+
+	@media (max-width: 640px) {
+		.filter-panel-shell {
+			width: min(max(var(--filter-panel-width), 22.5rem), calc(100vw - 0.5rem));
+			max-width: calc(100vw - 0.5rem);
+		}
+	}
+
 	.filter-option-row:not(.filter-option-selected):hover,
 	.filter-option-row:not(.filter-option-selected):focus-visible {
 		background: color-mix(in srgb, var(--color-surface-text, #e2e8f0) 8%, transparent);
@@ -226,8 +237,8 @@
 </style>
 
 <div
-	class="fixed right-0 top-20 z-40 h-[calc(100dvh-5rem)] max-w-[calc(100vw-1rem)] overflow-y-auto border-l border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-xl {open ? 'translate-x-0' : 'invisible translate-x-full pointer-events-none'}"
-	style={`width: ${$filterPanelWidth}px;`}
+	class="filter-panel-shell fixed right-0 top-20 z-40 h-[calc(100dvh-5rem)] max-w-[calc(100vw-1rem)] overflow-y-auto border-l border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-xl {open ? 'translate-x-0' : 'invisible translate-x-full pointer-events-none'}"
+	style={`--filter-panel-width: ${$filterPanelWidth}px;`}
 	aria-hidden={!open}
 	inert={!open}
 	onscroll={hideTooltip}

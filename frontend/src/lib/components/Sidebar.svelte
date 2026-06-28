@@ -563,7 +563,7 @@
 	id="app-sidebar"
 	class="
 		fixed lg:static top-[4.75rem] lg:top-0 bottom-0 left-0 z-40
-		w-64 bg-[var(--color-surface-overlay)] shadow-[1px_0_0_rgba(255,255,255,0.03)]
+		w-[min(22rem,calc(100vw-0.75rem))] bg-[var(--color-surface-overlay)] shadow-[1px_0_0_rgba(255,255,255,0.03)]
 		transform overflow-hidden
 		lg:translate-x-0
 		{$desktopSidebarCollapsed ? 'lg:w-0 lg:min-w-0 lg:shadow-none' : 'lg:w-[var(--sidebar-width)] lg:min-w-[240px]'}
