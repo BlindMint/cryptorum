@@ -101,7 +101,7 @@
 	let libraryFilter = $derived($page.url.searchParams.get('library') || '');
 	let librarySearch = $state('');
 	let currentOffset = $state(0);
-	const BATCH_SIZE = 50;
+	const BATCH_SIZE = 80;
 	const BACKGROUND_REFRESH_ACTIVE_INTERVAL_MS = 3000;
 	const BACKGROUND_REFRESH_IDLE_INTERVAL_MS = 30000;
 	const MAX_REFRESH_LIMIT = 200;
@@ -159,7 +159,7 @@
 	}
 
 	function navigateWithFilters(url: URL, replaceState: boolean = false, openFilters: boolean = true) {
-		if (openFilters) showFilterPanel = true;
+		showFilterPanel = openFilters;
 		goto(url.pathname + url.search, {
 			replaceState,
 			noScroll: true,
@@ -483,39 +483,30 @@
 
 	let loadMoreTrigger = $state<HTMLDivElement | null>(null);
 	let observer: IntersectionObserver | null = null;
+	const LOAD_MORE_ROOT_MARGIN = '1400px 0px';
+
+	function getLoadMoreRoot(): Element | null {
+		return loadMoreTrigger?.closest('main') ?? null;
+	}
 
 	function setupObserver() {
-		// Clean up existing observer
 		if (observer) {
-			console.log('Disconnecting existing observer');
 			observer.disconnect();
 			observer = null;
 		}
 
-		// Only set up observer if we have more content to load
 		if (loadMoreTrigger && hasMore) {
-			console.log('Setting up intersection observer, hasMore:', hasMore, 'books count:', books.length);
+			const root = getLoadMoreRoot();
 			observer = new IntersectionObserver(
 				(entries) => {
 					const entry = entries[0];
-					console.log('Intersection observer triggered:', {
-						isIntersecting: entry.isIntersecting,
-						intersectionRatio: entry.intersectionRatio,
-						hasMore,
-						loadingMore,
-						booksCount: books.length
-					});
 					if (entry.isIntersecting && hasMore && !loadingMore) {
-						console.log('Loading more books...');
 						loadMore();
 					}
 				},
-				{ threshold: 0.3, rootMargin: '150px' }
+				{ root, threshold: 0, rootMargin: LOAD_MORE_ROOT_MARGIN }
 			);
 			observer.observe(loadMoreTrigger);
-			console.log('Observer connected to trigger element');
-		} else {
-			console.log('Not setting up observer - loadMoreTrigger:', !!loadMoreTrigger, 'hasMore:', hasMore);
 		}
 	}
 
@@ -1082,14 +1073,14 @@
 			url.searchParams.delete(key);
 			for (const item of values) url.searchParams.append(key, item);
 		}
-		navigateWithFilters(url);
+		navigateWithFilters(url, false, false);
 	}
 
 	function clearAllFilters() {
 		const url = new URL($page.url);
 		for (const key of FILTER_PANEL_PARAM_KEYS) url.searchParams.delete(key);
 		url.searchParams.delete('q');
-		navigateWithFilters(url);
+		navigateWithFilters(url, false, false);
 	}
 
 	function hasFilterPanelFilters(): boolean {
@@ -1099,7 +1090,7 @@
 	function clearFilterPanelFilters() {
 		const url = new URL($page.url);
 		for (const key of FILTER_PANEL_PARAM_KEYS) url.searchParams.delete(key);
-		navigateWithFilters(url, true);
+		navigateWithFilters(url, true, false);
 	}
 
 	function toggleRepeatedFilter(key: string, value: string) {

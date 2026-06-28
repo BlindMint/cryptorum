@@ -27,7 +27,7 @@
 		has_more?: boolean;
 	};
 
-	const BATCH_SIZE = 50;
+	const BATCH_SIZE = 80;
 	const FILTER_PANEL_PARAM_KEYS = ['author', 'series', 'genre', 'genre_mode', 'tags', 'tag_mode', 'format', 'status', 'filter_mode', 'value_filter_mode'];
 	const sortOptions = [
 		{ value: 'relevance', label: 'Relevance' },
@@ -78,6 +78,7 @@
 	let bulkSelectionAnchorId = $state<number | null>(null);
 	let loadMoreTrigger = $state<HTMLDivElement | null>(null);
 	let observer: IntersectionObserver | null = null;
+	const LOAD_MORE_ROOT_MARGIN = '1400px 0px';
 	let formatOnCover = $state(true);
 	let activeBookActions = $state<number | null>(null);
 
@@ -89,6 +90,10 @@
 	let gridStyle = $derived(viewMode === 'grid'
 		? getResponsiveGridStyle(responsiveGridLayout)
 		: '');
+
+	function getLoadMoreRoot(): Element | null {
+		return loadMoreTrigger?.closest('main') ?? null;
+	}
 
 	function updateGridScale(value: number) {
 		gridScale.set(value);
@@ -138,7 +143,8 @@
 		return mode === 'AND' || mode === 'NOT' ? mode : 'OR';
 	}
 
-	function navigateWithSearchParams(url: URL, replaceState: boolean = false) {
+	function navigateWithSearchParams(url: URL, replaceState: boolean = false, openFilters?: boolean) {
+		if (openFilters !== undefined) showFilterPanel = openFilters;
 		goto(url.pathname + url.search, {
 			replaceState,
 			noScroll: true,
@@ -329,13 +335,14 @@
 	function setupObserver() {
 		if (observer) observer.disconnect();
 		if (loadMoreTrigger && hasMore) {
+			const root = getLoadMoreRoot();
 			observer = new IntersectionObserver(
 				(entries) => {
 					if (entries[0].isIntersecting && !loadingMore && !loading) {
 						loadMore();
 					}
 				},
-				{ rootMargin: '200px' }
+				{ root, threshold: 0, rootMargin: LOAD_MORE_ROOT_MARGIN }
 			);
 			observer.observe(loadMoreTrigger);
 		}
@@ -433,7 +440,7 @@
 			url.searchParams.delete(key);
 			for (const item of values) url.searchParams.append(key, item);
 		}
-		navigateWithSearchParams(url);
+		navigateWithSearchParams(url, false, false);
 	}
 
 	function clearAllFilters() {
@@ -449,7 +456,7 @@
 	function clearFilterPanelFilters() {
 		const url = new URL($page.url);
 		for (const key of FILTER_PANEL_PARAM_KEYS) url.searchParams.delete(key);
-		navigateWithSearchParams(url, true);
+		navigateWithSearchParams(url, true, false);
 	}
 
 	function toggleRepeatedFilter(key: string, value: string) {
