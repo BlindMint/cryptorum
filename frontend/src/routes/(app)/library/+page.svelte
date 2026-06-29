@@ -1198,11 +1198,11 @@
   </script>
 
 <div class="pb-20" style={`--filter-panel-offset: ${$filterPanelWidth + 24}px;`}>
-	<div class="sticky top-0 z-30 px-3 py-3 sm:px-6 sm:py-4 bg-[var(--color-surface-base)]/95 backdrop-blur border-b border-[var(--color-surface-border)] shadow-[0_1px_0_rgba(255,255,255,0.04)] {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}">
-		<div class="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:items-center lg:gap-4">
-			<div class="min-w-0 flex-1">
-				<div class="flex items-baseline gap-2 sm:gap-3 min-w-0">
-					<h1 class="text-xl sm:text-2xl font-bold text-[var(--color-surface-text)] truncate">{libraryFilter ? libraryName || 'Library' : 'All Books'}</h1>
+		<div class="sticky top-0 z-30 px-3 py-3 sm:px-6 sm:py-4 bg-[var(--color-surface-base)]/95 backdrop-blur border-b border-[var(--color-surface-border)] shadow-[0_1px_0_rgba(255,255,255,0.04)] {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}">
+			<div class="space-y-3">
+				<div class="min-w-0 flex-1">
+					<div class="flex items-baseline gap-2 sm:gap-3 min-w-0">
+						<h1 class="text-xl sm:text-2xl font-bold text-[var(--color-surface-text)] truncate">{libraryFilter ? libraryName || 'Library' : 'All Books'}</h1>
 					{#if totalBooks > 0}
 						<p class="text-sm text-[var(--color-surface-text-muted)] whitespace-nowrap">{totalBooks} books</p>
 					{/if}
@@ -1211,10 +1211,10 @@
 					<div class="mt-2 inline-flex items-center gap-2 rounded-lg border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/15 px-3 py-1.5 text-sm text-[var(--color-primary-300)]">
 						{scanMessage}
 					</div>
-				{/if}
-			</div>
+					{/if}
+				</div>
 
-			<div class="grid min-w-0 grid-cols-[2.5rem_2.5rem_minmax(0,1fr)_auto_auto] items-center gap-2 lg:w-full lg:justify-self-end">
+				<div class="grid min-w-0 grid-cols-[2.5rem_2.5rem_minmax(0,1fr)_auto_auto] items-center gap-2">
 				<button
 					type="button"
 					onclick={() => viewMode = viewMode === 'grid' ? 'list' : 'grid'}
