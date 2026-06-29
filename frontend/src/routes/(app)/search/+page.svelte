@@ -365,10 +365,31 @@
 		}
 	}
 
+	function clearSearch() {
+		query = '';
+		const url = new URL($page.url);
+		const hadAppliedQuery = url.searchParams.has('q') || results.length > 0;
+		if (!hadAppliedQuery) return;
+		url.searchParams.delete('q');
+		if (url.search === $page.url.search) {
+			void search(true);
+		} else {
+			navigateWithSearchParams(url);
+		}
+	}
+
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'Enter') {
 			submitSearch();
 		}
+	}
+
+	function resultSummary(): string {
+		const resultWord = totalResults === 1 ? 'result' : 'results';
+		if (totalResults > results.length) {
+			return `${results.length} of ${totalResults} ${resultWord} shown`;
+		}
+		return `${results.length} ${resultWord} found`;
 	}
 
 	async function fetchFilterOptions() {
@@ -778,28 +799,45 @@
 </script>
 
 <div class="space-y-6 {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}" style={`--filter-panel-offset: ${$filterPanelWidth + 24}px;`}>
-	<div class="max-w-2xl mx-auto">
-		<h1 class="text-2xl font-bold text-[var(--color-surface-text)] mb-2">Search</h1>
-		{#if libraryName}
-			<p class="mb-4 text-sm text-[var(--color-surface-text-muted)]">Scoped to {libraryName}</p>
-		{/if}
-		<div class="flex flex-col gap-3 sm:flex-row">
-			<input
-				type="text"
-				bind:value={query}
-				onkeydown={handleKeydown}
-				placeholder="Search books by title, author, or description..."
-				class="min-w-0 flex-1 px-4 py-3 border border-[var(--color-surface-border)] rounded-lg bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:ring-2 focus:ring-[var(--color-primary-500)] focus:border-transparent"
-			>
-			<button
-				onclick={submitSearch}
-				disabled={loading}
-				class="px-6 py-3 bg-[var(--color-primary-500)] text-white rounded-lg hover:bg-[var(--color-primary-600)] disabled:opacity-50 transition-colors"
-			>
-				{loading ? 'Searching...' : 'Search'}
-			</button>
+	{#if results.length === 0}
+		<div class="mx-auto max-w-2xl">
+			<h1 class="text-2xl font-bold text-[var(--color-surface-text)] mb-2">Search</h1>
+			{#if libraryName}
+				<p class="mb-4 text-sm text-[var(--color-surface-text-muted)]">Scoped to {libraryName}</p>
+			{/if}
+			<div class="flex flex-col gap-3 sm:flex-row">
+				<div class="relative min-w-0 flex-1">
+					<input
+						type="search"
+						bind:value={query}
+						onkeydown={handleKeydown}
+						placeholder="Search books by title, author, or description..."
+						class="min-w-0 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3 pr-9 text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-transparent focus:ring-2 focus:ring-[var(--color-primary-500)]"
+					>
+					{#if query}
+						<button
+							type="button"
+							onclick={clearSearch}
+							class="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]"
+							aria-label="Clear search"
+						>
+							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+							</svg>
+						</button>
+					{/if}
+				</div>
+				<button
+					type="button"
+					onclick={submitSearch}
+					disabled={loading}
+					class="accent-action rounded-lg px-6 py-3 font-medium transition-colors"
+				>
+					{loading ? 'Searching...' : 'Search'}
+				</button>
+			</div>
 		</div>
-	</div>
+	{/if}
 
 	<FilterPanel
 		authors={availableAuthors}
@@ -828,86 +866,23 @@
 	/>
 
 	{#if results.length > 0}
-		<div class="w-full">
-			<div class="mb-6 flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-				<div class="min-w-0">
-					<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">
-						{#if totalResults > results.length}
-							{results.length} of {totalResults} result{totalResults === 1 ? '' : 's'} shown
-						{:else}
-							{results.length} result{results.length === 1 ? '' : 's'} found
-						{/if}
-					</h2>
-				</div>
-
-				<div class="grid grid-cols-[auto_auto_2.5rem_2.5rem] items-center gap-2 lg:justify-end">
-					<div class="relative">
-						{#if showSortMenu}
-							<button
-								type="button"
-								class="fixed inset-0 z-20"
-								aria-label="Close sort menu"
-								onclick={() => showSortMenu = false}
-							></button>
-						{/if}
-						<div class="inline-flex h-10 max-w-36 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] sm:max-w-48">
-							<button
-								onclick={() => showSortMenu = !showSortMenu}
-								aria-label="Sort results"
-								class="inline-flex min-w-0 items-center px-3 font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] sm:px-4"
-							>
-								<span class="hidden sm:inline">Sort</span>
-								<span class="ml-0 hidden min-w-0 truncate text-sm text-[var(--color-surface-text-muted)] sm:ml-2 md:inline">{currentSortLabel()}</span>
-								<svg class="ml-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-								</svg>
-							</button>
-							<button
-								type="button"
-								onclick={toggleSortDirection}
-								class="inline-flex w-10 items-center justify-center border-l border-[var(--color-surface-border)] text-[var(--color-primary-400)] transition-colors hover:bg-[var(--color-surface-700)]"
-								aria-label="Toggle sort direction"
-								title={sortDirectionLabel()}
-							>
-								{sortDirectionArrow()}
-							</button>
+			<div class="w-full">
+				<div class="mb-4 space-y-3">
+					<div class="min-w-0">
+						<div class="flex min-w-0 items-baseline gap-2 sm:gap-3">
+							<h1 class="truncate text-xl font-bold text-[var(--color-surface-text)] sm:text-2xl">Search</h1>
+							<p class="min-w-0 truncate whitespace-nowrap text-sm text-[var(--color-surface-text-muted)]">{resultSummary()}</p>
 						</div>
-						{#if showSortMenu}
-							<div class="absolute right-0 top-full z-40 mt-2 w-48 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-1 shadow-lg">
-								{#each sortOptions as option}
-									<button
-										onclick={() => setSort(option.value)}
-										class="flex w-full items-center justify-between px-4 py-2 text-left text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)] {sortBy === option.value ? 'text-[var(--color-primary-400)]' : ''}"
-									>
-										<span>{option.label}</span>
-										{#if sortBy === option.value}
-											<span class="text-xs">✓</span>
-										{/if}
-									</button>
-								{/each}
-							</div>
+						{#if libraryName}
+							<p class="mt-0.5 truncate text-xs text-[var(--color-surface-text-muted)]">Scoped to {libraryName}</p>
 						{/if}
 					</div>
 
-					<button
-						onclick={() => showFilterPanel = !showFilterPanel}
-						class="inline-flex h-10 items-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] sm:px-4"
-					>
-						<svg class="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
-						</svg>
-						<span class="hidden sm:inline">Filter</span>
-						{#if getActiveFilters().length > 0}
-							<span class="ml-2 rounded-full bg-[var(--color-primary-500)] px-2 py-0.5 text-xs text-white">
-								{getActiveFilters().length}
-							</span>
-						{/if}
-					</button>
-
-					<button
-						type="button"
-						onclick={() => viewMode = viewMode === 'grid' ? 'list' : 'grid'}
-						class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-primary-400)]"
+					<div class="grid min-w-0 grid-cols-[2.5rem_2.5rem_minmax(0,1fr)_auto_auto_2.5rem] items-center gap-2">
+						<button
+							type="button"
+							onclick={() => viewMode = viewMode === 'grid' ? 'list' : 'grid'}
+							class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-primary-400)]"
 						aria-label={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'}
 						title={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'}
 					>
@@ -943,7 +918,7 @@
 							</svg>
 						</button>
 						{#if showDisplayMenu}
-							<div class="absolute right-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 shadow-lg">
+							<div class="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 shadow-lg">
 								{#if viewMode === 'grid'}
 									<div>
 										<div class="mb-2 flex items-center justify-between gap-3">
@@ -970,8 +945,118 @@
 							</div>
 						{/if}
 					</div>
+
+						<div class="relative min-w-0">
+							<svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"></path>
+							</svg>
+						<input
+							type="search"
+							bind:value={query}
+								onkeydown={handleKeydown}
+								placeholder="Search books..."
+								aria-label="Search books"
+								class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-2 pl-9 pr-9 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none"
+							>
+							{#if query}
+								<button
+									type="button"
+									onclick={clearSearch}
+									class="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]"
+									aria-label="Clear search"
+								>
+									<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+									</svg>
+								</button>
+							{/if}
+						</div>
+
+						<button
+							type="button"
+							onclick={submitSearch}
+							disabled={loading}
+							class="accent-action inline-flex h-10 w-10 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors sm:w-auto sm:px-3"
+							aria-label="Search books"
+							title="Search"
+						>
+						{#if loading}
+							<svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+							</svg>
+						{:else}
+							<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"></path>
+							</svg>
+							{/if}
+							<span class="hidden sm:inline">{loading ? 'Searching...' : 'Search'}</span>
+						</button>
+
+					<div class="relative">
+						{#if showSortMenu}
+							<button
+								type="button"
+								class="fixed inset-0 z-20"
+								aria-label="Close sort menu"
+								onclick={() => showSortMenu = false}
+							></button>
+						{/if}
+						<div class="inline-flex h-10 max-w-32 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] sm:max-w-40 md:max-w-48">
+							<button
+								onclick={() => showSortMenu = !showSortMenu}
+								aria-label="Sort results by {currentSortLabel()}"
+								class="inline-flex min-w-0 items-center px-3 font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] sm:px-4"
+							>
+								<span class="hidden min-w-0 truncate text-sm md:inline">{currentSortLabel()}</span>
+								<svg class="h-4 w-4 md:ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+								</svg>
+							</button>
+							<button
+								type="button"
+								onclick={toggleSortDirection}
+								class="inline-flex w-10 items-center justify-center border-l border-[var(--color-surface-border)] text-[var(--color-primary-400)] transition-colors hover:bg-[var(--color-surface-700)]"
+								aria-label="Toggle sort direction"
+								title={sortDirectionLabel()}
+							>
+								{sortDirectionArrow()}
+							</button>
+						</div>
+						{#if showSortMenu}
+							<div class="absolute right-0 top-full z-40 mt-2 w-48 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-1 shadow-lg">
+								{#each sortOptions as option}
+									<button
+										onclick={() => setSort(option.value)}
+										class="flex w-full items-center justify-between px-4 py-2 text-left text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)] {sortBy === option.value ? 'text-[var(--color-primary-400)]' : ''}"
+									>
+										<span>{option.label}</span>
+										{#if sortBy === option.value}
+											<span class="text-xs">✓</span>
+										{/if}
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</div>
+
+					<button
+						onclick={() => showFilterPanel = !showFilterPanel}
+						class="relative inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-primary-400)]"
+						aria-label="Toggle filters"
+						title="Filters"
+					>
+						<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
+						</svg>
+						{#if getActiveFilters().length > 0}
+							<span class="absolute -right-1 -top-1 min-w-5 rounded-full bg-[var(--color-primary-500)] px-1.5 py-0.5 text-center text-[10px] leading-none text-white">
+								{getActiveFilters().length}
+							</span>
+						{/if}
+						</button>
+					</div>
 				</div>
-			</div>
 
 			{#if getActiveFilters().length > 0}
 				<div class="mb-6 flex flex-wrap items-center gap-2">

@@ -75,6 +75,11 @@ body::before {
 	opacity: 0.5;
 }
 
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+	appearance: none;
+}
+
 .cover-accent-action {
 	border: 1px solid color-mix(in srgb, var(--color-primary-500) 55%, transparent);
 	background: color-mix(in srgb, var(--color-primary-500) 10%, color-mix(in srgb, var(--color-surface-900) 90%, transparent));

@@ -19,10 +19,8 @@
 		if (searchQuery.trim()) {
 			const params = new URLSearchParams();
 			params.set('q', searchQuery.trim());
-			const library = $page.url.searchParams.get('library');
-			if (library) params.set('library', library);
 			closeAllMobilePanels();
-			goto(`/search?${params.toString()}`);
+			goto(`/library?${params.toString()}`);
 			searchQuery = '';
 		}
 	}
