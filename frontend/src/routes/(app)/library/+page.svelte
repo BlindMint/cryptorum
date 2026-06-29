@@ -19,9 +19,10 @@
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
 	import BulkMetadataEditModal from '$lib/components/BulkMetadataEditModal.svelte';
 
-	type FilterMode = 'AND' | 'OR' | 'NOT';
+		type FilterMode = 'AND' | 'OR' | 'NOT';
+		const COMPACT_TOOLBAR_WIDTH = 720;
 
-	let books = $state<any[]>([]);
+		let books = $state<any[]>([]);
   let loading = $state(true);
   let loadingMore = $state(false);
   let scanning = $state(false);
@@ -40,20 +41,36 @@
 	let responsiveGridLayout = $derived(getResponsiveGridLayout(estimatedGridWidth, localGridScale));
 	let responsiveGridColumns = $derived(responsiveGridLayout.columns);
 	let gridStyle = $derived(viewMode === 'grid' ? getResponsiveGridStyle(responsiveGridLayout) : '');
-	let libraryCoverThumbSize = $derived(getLibraryCoverThumbSize(responsiveGridColumns));
-	let showSettingsMenu = $state(false);
-	let formatOnCover = $state(true);
-	let activeBookActions = $state<number | null>(null);
+		let libraryCoverThumbSize = $derived(getLibraryCoverThumbSize(responsiveGridColumns));
+		let showSettingsMenu = $state(false);
+		let formatOnCover = $state(true);
+		let activeBookActions = $state<number | null>(null);
+		let toolbarContainer = $state<HTMLDivElement | null>(null);
+		let toolbarWidth = $state(0);
+		let compactToolbar = $derived(toolbarWidth > 0 && toolbarWidth < COMPACT_TOOLBAR_WIDTH);
 
 	$effect(() => {
 		const unsub = gridScale.subscribe((v: number) => localGridScale = v);
 		return unsub;
 	});
 
-	$effect(() => {
-		const unsub = showFormatOnCover.subscribe((v: boolean) => formatOnCover = v);
-		return unsub;
-	});
+		$effect(() => {
+			const unsub = showFormatOnCover.subscribe((v: boolean) => formatOnCover = v);
+			return unsub;
+		});
+
+		$effect(() => {
+			const element = toolbarContainer;
+			if (!element || typeof ResizeObserver === 'undefined') return;
+
+			const updateWidth = () => {
+				toolbarWidth = element.clientWidth;
+			};
+			const observer = new ResizeObserver(updateWidth);
+			updateWidth();
+			observer.observe(element);
+			return () => observer.disconnect();
+		});
 
 	function updateGridScale(value: number) {
 		gridScale.set(value);
@@ -1199,7 +1216,7 @@
 
 <div class="pb-20" style={`--filter-panel-offset: ${$filterPanelWidth + 24}px;`}>
 		<div class="sticky top-0 z-30 px-3 py-3 sm:px-6 sm:py-4 bg-[var(--color-surface-base)]/95 backdrop-blur border-b border-[var(--color-surface-border)] shadow-[0_1px_0_rgba(255,255,255,0.04)] {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}">
-			<div class="space-y-3">
+				<div bind:this={toolbarContainer} class="space-y-3">
 				<div class="min-w-0 flex-1">
 					<div class="flex items-baseline gap-2 sm:gap-3 min-w-0">
 						<h1 class="text-xl sm:text-2xl font-bold text-[var(--color-surface-text)] truncate">{libraryFilter ? libraryName || 'Library' : 'All Books'}</h1>
@@ -1214,26 +1231,8 @@
 					{/if}
 				</div>
 
-				<div class="grid min-w-0 grid-cols-[2.5rem_2.5rem_minmax(0,1fr)_auto_auto] items-center gap-2">
-				<button
-					type="button"
-					onclick={() => viewMode = viewMode === 'grid' ? 'list' : 'grid'}
-					class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-primary-400)]"
-					aria-label={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'}
-					title={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'}
-				>
-					{#if viewMode === 'grid'}
-						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
-						</svg>
-					{:else}
-						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
-						</svg>
-					{/if}
-				</button>
-
-				<div class="relative">
+				<div class="grid min-w-0 grid-cols-[minmax(0,1fr)_2.5rem_auto_auto] items-center gap-2">
+						<div class="relative col-start-2 row-start-1">
 					{#if showSettingsMenu}
 						<button
 							type="button"
@@ -1251,13 +1250,34 @@
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
 						</svg>
-					</button>
-					{#if showSettingsMenu}
-						<div class="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-3 shadow-lg">
-							{#if viewMode === 'grid'}
+						</button>
+						{#if showSettingsMenu}
+							<div class="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-3 shadow-lg">
 								<div class="px-4 pb-3 border-b border-[var(--color-surface-border)]">
-									<div class="mb-2 flex items-center justify-between gap-3">
-										<label class="text-sm font-medium text-[var(--color-surface-text)]" for="library-grid-scale">Grid Scale</label>
+									<div class="mb-2 text-sm font-medium text-[var(--color-surface-text)]">View</div>
+									<div class="grid grid-cols-2 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
+										<button
+											type="button"
+											onclick={() => viewMode = 'grid'}
+											class="rounded-md px-2 py-1.5 text-sm font-medium transition-colors {viewMode === 'grid' ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-400)] ring-1 ring-inset ring-[var(--color-primary-500)]/45' : 'text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]'}"
+											aria-pressed={viewMode === 'grid'}
+										>
+											Grid
+										</button>
+										<button
+											type="button"
+											onclick={() => viewMode = 'list'}
+											class="rounded-md px-2 py-1.5 text-sm font-medium transition-colors {viewMode === 'list' ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-400)] ring-1 ring-inset ring-[var(--color-primary-500)]/45' : 'text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]'}"
+											aria-pressed={viewMode === 'list'}
+										>
+											List
+										</button>
+									</div>
+								</div>
+								{#if viewMode === 'grid'}
+									<div class="px-4 py-3 border-b border-[var(--color-surface-border)]">
+										<div class="mb-2 flex items-center justify-between gap-3">
+											<label class="text-sm font-medium text-[var(--color-surface-text)]" for="library-grid-scale">Grid Scale</label>
 										<span class="text-xs text-[var(--color-surface-text-muted)]">{responsiveGridColumns} cols</span>
 									</div>
 									<div class="flex items-center space-x-2">
@@ -1308,7 +1328,7 @@
 					{/if}
 				</div>
 
-				<div class="relative min-w-0">
+					<div class="relative col-start-1 row-start-1 min-w-0">
 					<svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"></path>
 					</svg>
@@ -1318,7 +1338,7 @@
 						oninput={(event) => updateScopedSearch(event.currentTarget.value)}
 						placeholder="Search current results"
 						aria-label="Search current library results"
-						class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-2 pl-9 pr-9 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none"
+						class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-2 pl-9 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none {librarySearch ? 'pr-9' : 'pr-3'}"
 					/>
 					{#if librarySearch}
 						<button
@@ -1334,7 +1354,7 @@
 					{/if}
 				</div>
 
-				<div class="relative">
+					<div class="relative col-start-3 row-start-1">
 					{#if showSortMenu}
 						<button
 							type="button"
@@ -1343,14 +1363,14 @@
 							onclick={() => showSortMenu = false}
 						></button>
 					{/if}
-					<div class="inline-flex h-10 max-w-32 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] sm:max-w-40 md:max-w-48">
+					<div class="inline-flex h-10 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] {compactToolbar ? 'max-w-[5.5rem]' : 'max-w-32 sm:max-w-40 md:max-w-48'}">
 						<button
 							onclick={() => showSortMenu = !showSortMenu}
 							aria-label="Sort books by {currentSortLabel()}"
-							class="inline-flex min-w-0 items-center px-3 text-[var(--color-surface-text)] font-medium transition-colors hover:bg-[var(--color-surface-700)] sm:px-4"
+							class="inline-flex min-w-0 items-center text-[var(--color-surface-text)] font-medium transition-colors hover:bg-[var(--color-surface-700)] {compactToolbar ? 'px-2' : 'px-3 sm:px-4'}"
 						>
-							<span class="hidden min-w-0 truncate text-sm md:inline">{currentSortLabel()}</span>
-							<svg class="w-4 h-4 md:ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<span class={compactToolbar ? 'hidden' : 'hidden min-w-0 truncate text-sm sm:inline'}>{currentSortLabel()}</span>
+							<svg class="w-4 h-4 {compactToolbar ? '' : 'sm:ml-2'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 							</svg>
 						</button>
@@ -1381,19 +1401,22 @@
 					{/if}
 				</div>
 
-				<button
-					onclick={() => showFilterPanel = !showFilterPanel}
-					class="inline-flex h-10 items-center rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] px-3 text-[var(--color-surface-text)] font-medium transition-colors sm:px-4"
-				>
-					<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
-					</svg>
-					<span class="hidden sm:inline">Filter</span>
-					{#if getActiveFilters().length > 0}
-						<span class="ml-2 px-2 py-0.5 text-xs rounded-full bg-[var(--color-primary-500)] text-white">
-							{getActiveFilters().length}
-						</span>
-					{/if}
+					<button
+						onclick={() => showFilterPanel = !showFilterPanel}
+						class="relative col-start-4 row-start-1 inline-flex h-10 items-center rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors {compactToolbar ? 'w-10 justify-center px-0 hover:text-[var(--color-primary-400)]' : 'px-3 sm:px-4'}"
+					>
+						<svg class="w-4 h-4 {compactToolbar ? '' : 'mr-2'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
+						</svg>
+						<span class={compactToolbar ? 'hidden' : 'hidden sm:inline'}>Filter</span>
+						{#if getActiveFilters().length > 0}
+							<span class={compactToolbar
+								? 'absolute -right-1 -top-1 min-w-5 rounded-full bg-[var(--color-primary-500)] px-1.5 py-0.5 text-center text-[10px] leading-none text-white'
+								: 'ml-2 px-2 py-0.5 text-xs rounded-full bg-[var(--color-primary-500)] text-white'}
+							>
+								{getActiveFilters().length}
+							</span>
+						{/if}
 				</button>
 
 			</div>
