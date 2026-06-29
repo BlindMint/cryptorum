@@ -42,6 +42,15 @@
 		return star <= activeRating;
 	}
 
+	function statusButtonClass(status: string): string {
+		if (editForm.status === status) {
+			if (status === 'reading') return 'border-blue-500/50 bg-blue-500/15 text-blue-300 shadow-sm';
+			if (status === 'finished') return 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300 shadow-sm';
+			return 'border-[var(--color-primary-500)]/55 bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)] shadow-sm';
+		}
+		return 'border-[var(--color-surface-border)] bg-[var(--color-surface-700)] text-[var(--color-surface-text-muted)] hover:-translate-y-0.5 hover:bg-[var(--color-surface-600)] hover:text-[var(--color-surface-text)] hover:shadow-sm';
+	}
+
 	$effect(() => {
 		authorsList = prepareAuthorRows(authorsList);
 	});
@@ -56,7 +65,8 @@
 					<button
 						type="button"
 						onclick={() => editForm.status = option.value}
-						class="flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all duration-200 ease-out {editForm.status === option.value ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)] text-white shadow-sm' : 'border-[var(--color-surface-border)] bg-[var(--color-surface-700)] text-[var(--color-surface-text)] hover:-translate-y-0.5 hover:bg-[var(--color-surface-600)] hover:shadow-sm'}"
+						class="flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all duration-200 ease-out {statusButtonClass(option.value)} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+						aria-pressed={editForm.status === option.value}
 					>
 						{option.label}
 					</button>

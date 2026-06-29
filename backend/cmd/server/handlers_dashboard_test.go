@@ -124,6 +124,41 @@ func TestDiscoverBooksScopesAndExcludesHiddenLibraries(t *testing.T) {
 	}
 }
 
+func TestDiscoverBooksDeduplicatesExactBookRows(t *testing.T) {
+	setupDashboardHandlerTestDB(t)
+
+	baseFrom := `
+		FROM book b
+		JOIN library l ON b.library_id = l.id
+		JOIN (SELECT 1 AS duplicate_marker UNION ALL SELECT 2) duplicate_rows ON 1 = 1
+		LEFT JOIN book_metadata bm ON b.id = bm.book_id
+		LEFT JOIN reading_progress rp ON b.id = rp.book_id
+		LEFT JOIN (
+			SELECT book_id, MIN(format) AS format
+			FROM book_file
+			WHERE missing_at IS NULL
+			GROUP BY book_id
+		) bf ON b.id = bf.book_id`
+	baseWhere := `
+		WHERE l.owner_user_id = ?
+		  AND l.exclude_from_suggestions = 0
+		  AND EXISTS (
+			SELECT 1 FROM book_file active_bf
+			WHERE active_bf.book_id = b.id AND active_bf.missing_at IS NULL
+		  )`
+
+	books, err := fetchDiscoverBooks(baseFrom, baseWhere, []interface{}{int64(1)}, 1, 10)
+	if err != nil {
+		t.Fatalf("fetch discover books: %v", err)
+	}
+	if len(books) != 1 {
+		t.Fatalf("expected one unique discover book, got %+v", books)
+	}
+	if books[0].ID != 1 {
+		t.Fatalf("expected visible owner book, got %+v", books[0])
+	}
+}
+
 func TestStatsScopesToCurrentUser(t *testing.T) {
 	setupDashboardHandlerTestDB(t)
 

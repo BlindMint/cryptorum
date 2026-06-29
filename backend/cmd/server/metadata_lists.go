@@ -34,6 +34,10 @@ func normalizeMetadataStringList(values []string) []string {
 	return uniqueMetadataStringList(values)
 }
 
+func normalizeMetadataScalar(value string) string {
+	return strings.TrimSpace(value)
+}
+
 func normalizeMetadataTagList(values []string) []string {
 	normalized := uniqueMetadataStringList(values)
 	sort.Slice(normalized, func(i, j int) bool {

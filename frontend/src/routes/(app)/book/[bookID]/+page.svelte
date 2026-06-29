@@ -462,11 +462,20 @@
 	function statusChipClass(status: string) {
 		const current = book?.status || 'unread';
 		if (current === status) {
-			if (status === 'reading') return 'bg-blue-500/20 text-blue-400 border-blue-500/40';
-			if (status === 'finished') return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
-			return 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-300)] border-[var(--color-primary-500)]/40';
+			if (status === 'reading') return 'border-blue-500/50 bg-blue-500/15 text-blue-300 shadow-sm';
+			if (status === 'finished') return 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300 shadow-sm';
+			return 'border-[var(--color-primary-500)]/55 bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)] shadow-sm';
 		}
-		return 'bg-[var(--color-surface-700)]/50 text-[var(--color-surface-text-muted)] border-[var(--color-surface-border)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]';
+		return 'border-[var(--color-surface-border)] bg-[var(--color-surface-700)] text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-600)] hover:text-[var(--color-surface-text)]';
+	}
+
+	function editingStatusChipClass(status: string) {
+		if (editForm.status === status) {
+			if (status === 'reading') return 'border-blue-500/50 bg-blue-500/15 text-blue-300 shadow-sm';
+			if (status === 'finished') return 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300 shadow-sm';
+			return 'border-[var(--color-primary-500)]/55 bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)] shadow-sm';
+		}
+		return 'border-[var(--color-surface-border)] bg-[var(--color-surface-700)] text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-600)] hover:text-[var(--color-surface-text)]';
 	}
 
 	async function updateBookStatus(status: string) {
@@ -1288,7 +1297,8 @@
 										type="button"
 										onclick={() => editing ? editForm.status = option.value : updateBookStatus(option.value)}
 										disabled={!editing && statusSaving}
-										class="rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors duration-200 ease-out {editing ? (editForm.status === option.value ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/30 text-white' : 'border-[var(--color-surface-border)] bg-[var(--color-surface-700)]/50 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]') : statusChipClass(option.value)} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:cursor-wait disabled:opacity-70"
+										class="rounded-lg border px-3 py-1.5 text-xs font-medium transition-all duration-200 ease-out {editing ? editingStatusChipClass(option.value) : statusChipClass(option.value)} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:cursor-wait disabled:opacity-70"
+										aria-pressed={(editing ? editForm.status : book.status || 'unread') === option.value}
 									>
 										{option.label}
 									</button>
