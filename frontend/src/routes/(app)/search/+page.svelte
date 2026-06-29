@@ -28,6 +28,7 @@
 	};
 
 	const BATCH_SIZE = 80;
+	const COMPACT_TOOLBAR_WIDTH = 720;
 	const FILTER_PANEL_PARAM_KEYS = ['author', 'series', 'genre', 'genre_mode', 'tags', 'tag_mode', 'format', 'status', 'filter_mode', 'value_filter_mode'];
 	const sortOptions = [
 		{ value: 'relevance', label: 'Relevance' },
@@ -81,9 +82,12 @@
 	const LOAD_MORE_ROOT_MARGIN = '1400px 0px';
 	let formatOnCover = $state(true);
 	let activeBookActions = $state<number | null>(null);
+	let toolbarContainer = $state<HTMLDivElement | null>(null);
+	let toolbarWidth = $state(0);
 
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
 	let hasMore = $derived(serverHasMore);
+	let compactToolbar = $derived(toolbarWidth > 0 && toolbarWidth < COMPACT_TOOLBAR_WIDTH);
 	let estimatedGridWidth = $derived(typeof window === 'undefined' ? 1920 : window.innerWidth);
 	let responsiveGridLayout = $derived(getResponsiveGridLayout(estimatedGridWidth, localGridScale));
 	let responsiveGridColumns = $derived(responsiveGridLayout.columns);
@@ -250,6 +254,19 @@
 	$effect(() => {
 		const unsub = showFormatOnCover.subscribe((value: boolean) => formatOnCover = value);
 		return unsub;
+	});
+
+	$effect(() => {
+		const element = toolbarContainer;
+		if (!element || typeof ResizeObserver === 'undefined') return;
+
+		const updateWidth = () => {
+			toolbarWidth = element.clientWidth;
+		};
+		const observer = new ResizeObserver(updateWidth);
+		updateWidth();
+		observer.observe(element);
+		return () => observer.disconnect();
 	});
 
 	$effect(() => {
@@ -812,7 +829,7 @@
 						bind:value={query}
 						onkeydown={handleKeydown}
 						placeholder="Search books by title, author, or description..."
-						class="min-w-0 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3 pr-9 text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-transparent focus:ring-2 focus:ring-[var(--color-primary-500)]"
+						class="min-w-0 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-3 pl-4 text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-transparent focus:ring-2 focus:ring-[var(--color-primary-500)] {query ? 'pr-9' : 'pr-4'}"
 					>
 					{#if query}
 						<button
@@ -867,7 +884,7 @@
 
 	{#if results.length > 0}
 			<div class="w-full">
-				<div class="mb-4 space-y-3">
+				<div bind:this={toolbarContainer} class="mb-4 space-y-3">
 					<div class="min-w-0">
 						<div class="flex min-w-0 items-baseline gap-2 sm:gap-3">
 							<h1 class="truncate text-xl font-bold text-[var(--color-surface-text)] sm:text-2xl">Search</h1>
@@ -878,26 +895,8 @@
 						{/if}
 					</div>
 
-					<div class="grid min-w-0 grid-cols-[2.5rem_2.5rem_minmax(0,1fr)_auto_auto_2.5rem] items-center gap-2">
-						<button
-							type="button"
-							onclick={() => viewMode = viewMode === 'grid' ? 'list' : 'grid'}
-							class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-primary-400)]"
-						aria-label={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'}
-						title={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'}
-					>
-						{#if viewMode === 'grid'}
-							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
-							</svg>
-						{:else}
-							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
-							</svg>
-						{/if}
-					</button>
-
-					<div class="relative">
+						<div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_2.5rem_auto_2.5rem] items-center gap-2">
+						<div class="relative col-start-3 row-start-1">
 						{#if showDisplayMenu}
 							<button
 								type="button"
@@ -916,13 +915,34 @@
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
 							</svg>
-						</button>
-						{#if showDisplayMenu}
-							<div class="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 shadow-lg">
-								{#if viewMode === 'grid'}
-									<div>
-										<div class="mb-2 flex items-center justify-between gap-3">
-											<label class="text-sm font-medium text-[var(--color-surface-text)]" for="search-grid-scale">Grid Scale</label>
+							</button>
+							{#if showDisplayMenu}
+								<div class="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 shadow-lg">
+									<div class="mb-4">
+										<div class="mb-2 text-sm font-medium text-[var(--color-surface-text)]">View</div>
+										<div class="grid grid-cols-2 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
+											<button
+												type="button"
+												onclick={() => viewMode = 'grid'}
+												class="rounded-md px-2 py-1.5 text-sm font-medium transition-colors {viewMode === 'grid' ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-400)] ring-1 ring-inset ring-[var(--color-primary-500)]/45' : 'text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]'}"
+												aria-pressed={viewMode === 'grid'}
+											>
+												Grid
+											</button>
+											<button
+												type="button"
+												onclick={() => viewMode = 'list'}
+												class="rounded-md px-2 py-1.5 text-sm font-medium transition-colors {viewMode === 'list' ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-400)] ring-1 ring-inset ring-[var(--color-primary-500)]/45' : 'text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]'}"
+												aria-pressed={viewMode === 'list'}
+											>
+												List
+											</button>
+										</div>
+									</div>
+									{#if viewMode === 'grid'}
+										<div>
+											<div class="mb-2 flex items-center justify-between gap-3">
+												<label class="text-sm font-medium text-[var(--color-surface-text)]" for="search-grid-scale">Grid Scale</label>
 											<span class="text-xs text-[var(--color-surface-text-muted)]">{responsiveGridColumns} cols</span>
 										</div>
 										<div class="flex items-center gap-2">
@@ -936,17 +956,15 @@
 												oninput={(event) => updateGridScale(Number(event.currentTarget.value))}
 												class="flex-1"
 											>
-											<span class="w-12 text-right text-sm text-[var(--color-surface-text)]">{localGridScale}%</span>
+												<span class="w-12 text-right text-sm text-[var(--color-surface-text)]">{localGridScale}%</span>
+											</div>
 										</div>
-									</div>
-								{:else}
-									<p class="text-sm text-[var(--color-surface-text-muted)]">Grid scale is available in grid view.</p>
-								{/if}
-							</div>
-						{/if}
+									{/if}
+								</div>
+							{/if}
 					</div>
 
-						<div class="relative min-w-0">
+						<div class="relative col-start-1 row-start-1 min-w-0">
 							<svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"></path>
 							</svg>
@@ -956,7 +974,7 @@
 								onkeydown={handleKeydown}
 								placeholder="Search books..."
 								aria-label="Search books"
-								class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-2 pl-9 pr-9 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none"
+								class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-2 pl-9 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none {query ? 'pr-9' : 'pr-3'}"
 							>
 							{#if query}
 								<button
@@ -976,7 +994,7 @@
 							type="button"
 							onclick={submitSearch}
 							disabled={loading}
-							class="accent-action inline-flex h-10 w-10 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors sm:w-auto sm:px-3"
+								class="accent-action col-start-2 row-start-1 inline-flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors {compactToolbar ? 'w-10 px-0' : 'w-10 sm:w-auto sm:px-3'}"
 							aria-label="Search books"
 							title="Search"
 						>
@@ -990,10 +1008,10 @@
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"></path>
 							</svg>
 							{/if}
-							<span class="hidden sm:inline">{loading ? 'Searching...' : 'Search'}</span>
+							<span class={compactToolbar ? 'hidden' : 'hidden sm:inline'}>{loading ? 'Searching...' : 'Search'}</span>
 						</button>
 
-					<div class="relative">
+						<div class="relative col-start-4 row-start-1">
 						{#if showSortMenu}
 							<button
 								type="button"
@@ -1002,14 +1020,14 @@
 								onclick={() => showSortMenu = false}
 							></button>
 						{/if}
-						<div class="inline-flex h-10 max-w-32 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] sm:max-w-40 md:max-w-48">
+						<div class="inline-flex h-10 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] {compactToolbar ? 'max-w-[5.5rem]' : 'max-w-32 sm:max-w-40 md:max-w-48'}">
 							<button
 								onclick={() => showSortMenu = !showSortMenu}
 								aria-label="Sort results by {currentSortLabel()}"
-								class="inline-flex min-w-0 items-center px-3 font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] sm:px-4"
+								class="inline-flex min-w-0 items-center font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {compactToolbar ? 'px-2' : 'px-3 sm:px-4'}"
 							>
-								<span class="hidden min-w-0 truncate text-sm md:inline">{currentSortLabel()}</span>
-								<svg class="h-4 w-4 md:ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<span class={compactToolbar ? 'hidden' : 'hidden min-w-0 truncate text-sm sm:inline'}>{currentSortLabel()}</span>
+								<svg class="h-4 w-4 {compactToolbar ? '' : 'sm:ml-2'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 								</svg>
 							</button>
@@ -1042,7 +1060,7 @@
 
 					<button
 						onclick={() => showFilterPanel = !showFilterPanel}
-						class="relative inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-primary-400)]"
+							class="relative col-start-5 row-start-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-primary-400)]"
 						aria-label="Toggle filters"
 						title="Filters"
 					>
