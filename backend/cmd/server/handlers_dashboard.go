@@ -134,18 +134,19 @@ func getDiscoverBooksHandler(w http.ResponseWriter, r *http.Request) {
 
 func fetchDiscoverBooks(baseFrom, baseWhere string, ownerArgs []interface{}, anchor int64, limit int) ([]dashboardBookResponse, error) {
 	books := make([]dashboardBookResponse, 0, limit)
-	if err := appendDiscoverBooks(&books, baseFrom, baseWhere+" AND b.id >= ?", append(append([]interface{}{}, ownerArgs...), anchor), limit); err != nil {
+	seenBookIDs := make(map[int64]bool, limit)
+	if err := appendDiscoverBooks(&books, seenBookIDs, baseFrom, baseWhere+" AND b.id >= ?", append(append([]interface{}{}, ownerArgs...), anchor), limit); err != nil {
 		return nil, err
 	}
 	if len(books) < limit {
-		if err := appendDiscoverBooks(&books, baseFrom, baseWhere+" AND b.id < ?", append(append([]interface{}{}, ownerArgs...), anchor), limit-len(books)); err != nil {
+		if err := appendDiscoverBooks(&books, seenBookIDs, baseFrom, baseWhere+" AND b.id < ?", append(append([]interface{}{}, ownerArgs...), anchor), limit-len(books)); err != nil {
 			return nil, err
 		}
 	}
 	return books, nil
 }
 
-func appendDiscoverBooks(books *[]dashboardBookResponse, baseFrom, whereClause string, args []interface{}, limit int) error {
+func appendDiscoverBooks(books *[]dashboardBookResponse, seenBookIDs map[int64]bool, baseFrom, whereClause string, args []interface{}, limit int) error {
 	if limit <= 0 {
 		return nil
 	}
@@ -177,6 +178,10 @@ func appendDiscoverBooks(books *[]dashboardBookResponse, baseFrom, whereClause s
 		if err := rows.Scan(&book.ID, &book.LibraryID, &book.AddedAt, &book.Title, &book.Authors, &book.CoverPath, &book.CoverUpdatedOn, &book.Status, &book.Percent, &opened, &book.LastReadAt, &book.Format); err != nil {
 			return err
 		}
+		if seenBookIDs[book.ID] {
+			continue
+		}
+		seenBookIDs[book.ID] = true
 		book.Opened = opened == 1
 		*books = append(*books, book)
 	}

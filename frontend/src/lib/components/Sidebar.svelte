@@ -624,12 +624,17 @@
 	<nav class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-4 custom-scrollbar">
 		<div>
 			<div class="flex items-center justify-between px-3 py-2">
-				<div class="flex items-center space-x-2 text-xs font-semibold text-[var(--color-surface-text-muted)] uppercase tracking-wider">
+				<a
+					href="/libraries"
+					onclick={closeMobileNavigation}
+					class="flex items-center space-x-2 rounded-md text-xs font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
+					aria-label="View libraries"
+				>
 					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z"></path>
 					</svg>
 					<span>Libraries</span>
-				</div>
+				</a>
 				<div class="flex items-center gap-1">
 					<div class="relative">
 						<div class="inline-flex h-7 overflow-hidden rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-700)]">

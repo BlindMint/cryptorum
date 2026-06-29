@@ -255,11 +255,29 @@
 		event.preventDefault();
 		activeDashboardBookActions = activeDashboardBookActions === bookId ? null : bookId;
 	}
+
+	function handleDashboardRowWheel(event: WheelEvent) {
+		const row = event.currentTarget as HTMLDivElement;
+		if (!row || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+
+		const maxScrollLeft = row.scrollWidth - row.clientWidth;
+		if (maxScrollLeft <= 0) return;
+
+		const atStart = row.scrollLeft <= 0;
+		const atEnd = row.scrollLeft >= maxScrollLeft - 1;
+		const scrollingRight = event.deltaY > 0;
+		const scrollingLeft = event.deltaY < 0;
+
+		if ((scrollingRight && atEnd) || (scrollingLeft && atStart)) return;
+
+		event.preventDefault();
+		row.scrollLeft = Math.max(0, Math.min(maxScrollLeft, row.scrollLeft + event.deltaY));
+	}
 </script>
 
 <div class="flex min-h-full flex-col gap-4 overflow-x-hidden overflow-y-auto">
 	<div class="hidden sm:grid grid-cols-2 lg:grid-cols-4 gap-3">
-		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)]">
+		<a href="/library" class="block rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-colors hover:border-[var(--color-primary-500)]/50 hover:bg-[var(--color-surface-overlay)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]" aria-label="View all books">
 			<div class="flex items-center justify-between">
 				<div>
 					<p class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">Total Books</p>
@@ -271,9 +289,9 @@
 					</svg>
 				</div>
 			</div>
-		</div>
+		</a>
 
-		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)]">
+		<a href="/library?status=reading" class="block rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-colors hover:border-[var(--color-primary-500)]/50 hover:bg-[var(--color-surface-overlay)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]" aria-label="View currently reading books">
 			<div class="flex items-center justify-between">
 				<div>
 					<p class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">Reading</p>
@@ -285,9 +303,9 @@
 					</svg>
 				</div>
 			</div>
-		</div>
+		</a>
 
-		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)]">
+		<a href="/library?status=finished" class="block rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-colors hover:border-[var(--color-primary-500)]/50 hover:bg-[var(--color-surface-overlay)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]" aria-label="View already read books">
 			<div class="flex items-center justify-between">
 				<div>
 					<p class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">Finished</p>
@@ -299,9 +317,9 @@
 					</svg>
 				</div>
 			</div>
-		</div>
+		</a>
 
-		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)]">
+		<a href="/libraries" class="block rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-colors hover:border-[var(--color-primary-500)]/50 hover:bg-[var(--color-surface-overlay)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]" aria-label="View libraries">
 			<div class="flex items-center justify-between">
 				<div>
 					<p class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">Libraries</p>
@@ -313,7 +331,7 @@
 					</svg>
 				</div>
 			</div>
-		</div>
+		</a>
 	</div>
 
 	<!-- Continue Reading Section -->
@@ -328,6 +346,7 @@
 					bind:this={continueReadingRowEl}
 					class="dashboard-book-row"
 					style="--dashboard-book-card-width: {dashboardBookCardWidth}px; --dashboard-book-row-gap: {dashboardBookRowGap}px;"
+					onwheel={handleDashboardRowWheel}
 				>
 					{#each continueReadingBooks.slice(0, dashboardConfig.continueReadingLimit) as book (book.id)}
 						{@const readerUrl = getReaderUrl(book)}
@@ -411,6 +430,7 @@
 					bind:this={recentBooksRowEl}
 					class="dashboard-book-row"
 					style="--dashboard-book-card-width: {dashboardBookCardWidth}px; --dashboard-book-row-gap: {dashboardBookRowGap}px;"
+					onwheel={handleDashboardRowWheel}
 				>
 					{#each recentBooks.slice(0, dashboardConfig.recentlyAddedLimit) as book (book.id)}
 						{@const readerUrl = getReaderUrl(book)}
@@ -493,6 +513,7 @@
 					bind:this={discoverBooksRowEl}
 					class="dashboard-book-row"
 					style="--dashboard-book-card-width: {dashboardBookCardWidth}px; --dashboard-book-row-gap: {dashboardBookRowGap}px;"
+					onwheel={handleDashboardRowWheel}
 				>
 					{#each discoverBooks.slice(0, dashboardConfig.discoverLimit) as book (book.id)}
 						{@const readerUrl = getReaderUrl(book)}

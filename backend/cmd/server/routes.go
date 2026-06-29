@@ -1260,6 +1260,16 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.Title = normalizeMetadataScalar(req.Title)
+	req.Series = normalizeMetadataScalar(req.Series)
+	req.Publisher = normalizeMetadataScalar(req.Publisher)
+	req.PubDate = normalizeMetadataScalar(req.PubDate)
+	req.Description = normalizeMetadataScalar(req.Description)
+	req.Status = normalizeMetadataScalar(req.Status)
+	req.ISBN = normalizeMetadataScalar(req.ISBN)
+	req.ASIN = normalizeMetadataScalar(req.ASIN)
+	req.Language = normalizeMetadataScalar(req.Language)
+
 	seriesNumber, seriesNumberDisplay, err := seriesnum.ParseJSON(req.SeriesNumber)
 	if err != nil {
 		errorResponse(w, http.StatusBadRequest, err.Error())

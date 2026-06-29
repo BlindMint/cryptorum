@@ -42,12 +42,19 @@ func TestUpdateBookHandlerDeduplicatesMetadataLists(t *testing.T) {
 	setupMetadataUpdateTestDB(t)
 
 	body := `{
-		"title": "Updated",
+		"title": " Updated ",
 		"authors": ["Author", " author ", "Second Author"],
+		"series": " Series Name ",
 		"series_number": "",
+		"publisher": " Publisher ",
+		"pub_date": " 2024 ",
+		"description": " Description ",
 		"status": "reading",
 		"genres": ["Warhammer", " warhammer ", "Science Fiction"],
-		"tags": ["zeta", " Alpha ", "beta", "alpha"]
+		"tags": ["zeta", " Alpha ", "beta", "alpha"],
+		"isbn": " 9781234567890 ",
+		"asin": " B000123 ",
+		"language": " en "
 	}`
 	req := httptest.NewRequest(http.MethodPut, "/api/books/1", strings.NewReader(body))
 	req = req.WithContext(authContextWithUser(req.Context(), &AppUser{ID: 1, IsAdmin: true}))
@@ -71,6 +78,30 @@ func TestUpdateBookHandlerDeduplicatesMetadataLists(t *testing.T) {
 	}
 	if response.Status != "ok" {
 		t.Fatalf("status = %q, want ok", response.Status)
+	}
+	if response.Book.Title != "Updated" {
+		t.Fatalf("title = %q, want trimmed title", response.Book.Title)
+	}
+	if response.Book.Series != "Series Name" {
+		t.Fatalf("series = %q, want trimmed series", response.Book.Series)
+	}
+	if response.Book.Publisher != "Publisher" {
+		t.Fatalf("publisher = %q, want trimmed publisher", response.Book.Publisher)
+	}
+	if response.Book.PubDate != "2024" {
+		t.Fatalf("pub_date = %q, want trimmed pub_date", response.Book.PubDate)
+	}
+	if response.Book.Description != "Description" {
+		t.Fatalf("description = %q, want trimmed description", response.Book.Description)
+	}
+	if response.Book.ISBN != "9781234567890" {
+		t.Fatalf("isbn = %q, want trimmed isbn", response.Book.ISBN)
+	}
+	if response.Book.ASIN != "B000123" {
+		t.Fatalf("asin = %q, want trimmed asin", response.Book.ASIN)
+	}
+	if response.Book.Language != "en" {
+		t.Fatalf("language = %q, want trimmed language", response.Book.Language)
 	}
 
 	var authors []string
