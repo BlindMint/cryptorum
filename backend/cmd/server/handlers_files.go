@@ -809,13 +809,17 @@ func ServeEpubResourceHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			defer rc.Close()
 
+			// EPUB content is untrusted book data. Prevent script execution in the app origin.
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+
 			// Set content type based on extension
 			ext := strings.ToLower(filepath.Ext(resourcePath))
 			contentTypes := map[string]string{
 				".html":  "text/html",
 				".xhtml": "application/xhtml+xml",
 				".css":   "text/css",
-				".js":    "application/javascript",
+				".js":    "application/octet-stream",
 				".jpg":   "image/jpeg",
 				".jpeg":  "image/jpeg",
 				".png":   "image/png",
@@ -1293,6 +1297,8 @@ func ServeContinuousBookHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Write([]byte(htmlContent))
 }
 
@@ -1365,6 +1371,8 @@ func ServeContinuousMediaHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data: blob:; style-src 'none'; script-src 'none'; object-src 'none'; base-uri 'none'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeFile(w, r, cleanFilePath)
 }
 
@@ -1530,6 +1538,8 @@ func ServeContinuousStylesHandler(w http.ResponseWriter, r *http.Request) {
 	cssPath := getTextBookCachePaths(bookID, format).CSSCachePath
 	if _, err := os.Stat(cssPath); os.IsNotExist(err) {
 		w.Header().Set("Content-Type", "text/css")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("/* No preserved styles available */"))
 		return
@@ -1537,6 +1547,8 @@ func ServeContinuousStylesHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/css")
 	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data: blob:; font-src 'self' data:; script-src 'none'; object-src 'none'; base-uri 'none'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeFile(w, r, cssPath)
 }
 

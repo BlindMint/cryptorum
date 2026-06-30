@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -26,6 +28,26 @@ import (
 )
 
 type filterList []string
+
+const (
+	loginRequestBodyLimit = 16 << 10
+	loginAttemptWindow    = 5 * time.Minute
+	loginBlockDuration    = 5 * time.Minute
+	loginMaxFailures      = 8
+)
+
+type loginThrottleEntry struct {
+	failures     int
+	firstFailure time.Time
+	blockedUntil time.Time
+}
+
+var loginThrottle = struct {
+	sync.Mutex
+	entries map[string]loginThrottleEntry
+}{
+	entries: make(map[string]loginThrottleEntry),
+}
 
 func (f *filterList) UnmarshalJSON(data []byte) error {
 	if strings.TrimSpace(string(data)) == "null" {
@@ -181,12 +203,12 @@ func combineFilterGroups(groups []sqlFilterGroup, filterMode string) (string, []
 
 func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []interface{}) {
 	query := `
-		SELECT b.id
-		FROM book b
-		JOIN library l ON b.library_id = l.id
-		LEFT JOIN book_metadata bm ON b.id = bm.book_id
-		LEFT JOIN reading_progress rp ON b.id = rp.book_id`
-	var args []interface{}
+			SELECT b.id
+			FROM book b
+			JOIN library l ON b.library_id = l.id
+			LEFT JOIN book_metadata bm ON b.id = bm.book_id
+			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?`
+	args := []interface{}{userIDForScopedRows(user)}
 	var conditions []string
 	var filterGroups []sqlFilterGroup
 
@@ -269,6 +291,8 @@ func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []inter
 }
 
 func initRoutes(r *chi.Mux) {
+	r.Use(securityHeadersMiddleware)
+
 	// Health check - public
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -423,6 +447,7 @@ func initRoutes(r *chi.Mux) {
 
 		// Settings
 		r.Get("/settings", getSettingsHandler)
+		r.Get("/settings/reader", getReaderSettingsHandler)
 		r.Put("/settings/reader", updateReaderSettingsHandler)
 		r.Put("/settings/book-covers", updateBookCoverSettingsHandler)
 		r.Post("/settings/book-covers/regenerate", regenerateBookCoversHandler)
@@ -470,6 +495,16 @@ func initRoutes(r *chi.Mux) {
 
 	// Frontend SPA
 	r.Get("/*", serveSPAHandler)
+}
+
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // FileServer sets up a static file server
@@ -557,18 +592,18 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	baseQuery := `
-		FROM book b
-		LEFT JOIN library l ON b.library_id = l.id
-		LEFT JOIN book_metadata bm ON b.id = bm.book_id
-		LEFT JOIN reading_progress rp ON b.id = rp.book_id
-		LEFT JOIN (
-			SELECT book_id, MIN(format) AS format
-			FROM book_file
+			FROM book b
+			LEFT JOIN library l ON b.library_id = l.id
+			LEFT JOIN book_metadata bm ON b.id = bm.book_id
+			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
+			LEFT JOIN (
+				SELECT book_id, MIN(format) AS format
+				FROM book_file
 			WHERE missing_at IS NULL
 			GROUP BY book_id
 		) bf ON b.id = bf.book_id`
 
-	var args []interface{}
+	args := []interface{}{userIDForScopedRows(current)}
 	var conditions []string
 	var filterGroups []sqlFilterGroup
 
@@ -844,18 +879,18 @@ func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
 	filterMode = normalizeAcrossFilterMode(filterMode)
 
 	baseQuery := `
-		FROM book b
-		LEFT JOIN library l ON b.library_id = l.id
-		LEFT JOIN book_metadata bm ON b.id = bm.book_id
-		LEFT JOIN reading_progress rp ON b.id = rp.book_id
-		LEFT JOIN (
-			SELECT book_id, MIN(format) AS format
-			FROM book_file
+			FROM book b
+			LEFT JOIN library l ON b.library_id = l.id
+			LEFT JOIN book_metadata bm ON b.id = bm.book_id
+			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
+			LEFT JOIN (
+				SELECT book_id, MIN(format) AS format
+				FROM book_file
 			WHERE missing_at IS NULL
 			GROUP BY book_id
 		) bf ON b.id = bf.book_id`
 
-	var args []interface{}
+	args := []interface{}{userIDForScopedRows(current)}
 	var conditions []string
 	var filterGroups []sqlFilterGroup
 
@@ -1127,7 +1162,7 @@ type BookDetail struct {
 	LibraryPaths        []string `json:"library_paths"`
 }
 
-func fetchBookDetail(bookID int64) (BookDetail, error) {
+func fetchBookDetail(bookID int64, user *AppUser) (BookDetail, error) {
 	var book BookDetail
 	var opened int
 	err := appDB.QueryRow(`
@@ -1156,12 +1191,12 @@ func fetchBookDetail(bookID int64) (BookDetail, error) {
 		       COALESCE(rp.percent, 0) as percent,
 		       COALESCE(rp.speed_reader_percent, 0) as speed_reader_percent,
 		       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened
-		FROM book b
-		LEFT JOIN library l ON b.library_id = l.id
-		LEFT JOIN book_metadata bm ON b.id = bm.book_id
-		LEFT JOIN reading_progress rp ON b.id = rp.book_id
-		WHERE b.id = ?
-	`, bookID).Scan(
+			FROM book b
+			LEFT JOIN library l ON b.library_id = l.id
+			LEFT JOIN book_metadata bm ON b.id = bm.book_id
+			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
+			WHERE b.id = ?
+		`, userIDForScopedRows(user), bookID).Scan(
 		&book.ID, &book.LibraryID, &book.AddedAt, &book.LibraryName,
 		&book.Title, &book.Authors, &book.Series, &book.SeriesNumber,
 		&book.SeriesNumberDisplay, &book.Publisher, &book.PubDate, &book.Description, &book.CoverPath, &book.CoverSource,
@@ -1209,7 +1244,7 @@ func getBookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	book, err := fetchBookDetail(bookIDInt)
+	book, err := fetchBookDetail(bookIDInt, current)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Book not found")
 		return
@@ -1329,7 +1364,7 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 		_, err = appDB.Exec(`
 			INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
 			VALUES (?, ?, 0, ?, ?)
-			ON CONFLICT(book_id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, owner_user_id = excluded.owner_user_id
+			ON CONFLICT(book_id, owner_user_id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at
 		`, bookIDInt, req.Status, time.Now().Unix(), current.ID)
 		if err != nil {
 			errorResponse(w, http.StatusInternalServerError, "Failed to update reading status")
@@ -1337,7 +1372,7 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updatedBook, err := fetchBookDetail(bookIDInt)
+	updatedBook, err := fetchBookDetail(bookIDInt, current)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to load updated book metadata")
 		return
@@ -1378,12 +1413,11 @@ func updateBookStatusHandler(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().Unix()
 	_, err = appDB.Exec(`
-		INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
-		VALUES (?, ?, 0, ?, ?)
-		ON CONFLICT(book_id) DO UPDATE SET
-			status = excluded.status,
-			updated_at = excluded.updated_at,
-			owner_user_id = excluded.owner_user_id
+			INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
+			VALUES (?, ?, 0, ?, ?)
+			ON CONFLICT(book_id, owner_user_id) DO UPDATE SET
+				status = excluded.status,
+				updated_at = excluded.updated_at
 	`, bookIDInt, req.Status, now, current.ID)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to update reading status")
@@ -2098,15 +2132,15 @@ func getLibraryBooksHandler(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(rp.status, 'unread') as status,
 		       COALESCE(rp.percent, 0) as percent
-		FROM book b
-		JOIN library l ON b.library_id = l.id
-		LEFT JOIN book_metadata bm ON b.id = bm.book_id
-		LEFT JOIN reading_progress rp ON b.id = rp.book_id
-		WHERE b.library_id = ? AND `+ownerClause+`
+			FROM book b
+			JOIN library l ON b.library_id = l.id
+			LEFT JOIN book_metadata bm ON b.id = bm.book_id
+			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
+			WHERE b.library_id = ? AND `+ownerClause+`
 		  AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL)
 		ORDER BY b.added_at DESC
 		LIMIT ? OFFSET ?
-	`, append([]interface{}{libraryID}, append(ownerArgs, limit, offset)...)...)
+		`, append([]interface{}{userIDForScopedRows(current), libraryID}, append(ownerArgs, limit, offset)...)...)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch books")
 		return
@@ -2921,6 +2955,12 @@ func scanLibraryHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func getDirectoriesHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionManageLibraries) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		path = "/"
@@ -3747,21 +3787,42 @@ func getMetadataSuggestionsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var query string
+	var args []interface{}
+	ownerClause, ownerArgs := userOwnershipClause(current, "l")
 	switch field {
 	case "genres":
-		query = `SELECT DISTINCT genres FROM book_metadata WHERE genres IS NOT NULL AND genres != '[]' AND genres != ''`
+		query = `
+			SELECT DISTINCT bm.genres
+			FROM book_metadata bm
+			JOIN book b ON b.id = bm.book_id
+			JOIN library l ON l.id = b.library_id
+			WHERE bm.genres IS NOT NULL AND bm.genres != '[]' AND bm.genres != ''
+			  AND ` + ownerClause
+		args = append(args, ownerArgs...)
 	case "tags":
 		query = `
-			SELECT tags FROM book_metadata WHERE tags IS NOT NULL AND tags != '[]' AND tags != ''
+			SELECT bm.tags
+			FROM book_metadata bm
+			JOIN book b ON b.id = bm.book_id
+			JOIN library l ON l.id = b.library_id
+			WHERE bm.tags IS NOT NULL AND bm.tags != '[]' AND bm.tags != ''
+			  AND ` + ownerClause + `
 			UNION ALL
-			SELECT genres FROM book_metadata WHERE genres IS NOT NULL AND genres != '[]' AND genres != ''
+			SELECT bm.genres
+			FROM book_metadata bm
+			JOIN book b ON b.id = bm.book_id
+			JOIN library l ON l.id = b.library_id
+			WHERE bm.genres IS NOT NULL AND bm.genres != '[]' AND bm.genres != ''
+			  AND ` + ownerClause + `
 		`
+		args = append(args, ownerArgs...)
+		args = append(args, ownerArgs...)
 	default:
 		errorResponse(w, http.StatusBadRequest, "Invalid field. Use 'genres' or 'tags'")
 		return
 	}
 
-	rows, err := appDB.Query(query)
+	rows, err := appDB.Query(query, args...)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch suggestions")
 		return
@@ -3797,7 +3858,67 @@ func getMetadataSuggestionsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Settings handlers
+func loadReaderSettingsResponse() map[string]interface{} {
+	readerSettings := map[string]interface{}{
+		"keepScreenOnWhileReading": true,
+		"keepScreenOnWhileAppOpen": false,
+		"readerTheme":              "catppuccin",
+		"showCurrentSection":       true,
+		"settingsUpdatedAt":        int64(0),
+		"epub": map[string]interface{}{
+			"fontFamily":     "serif",
+			"fontSize":       16,
+			"lineHeight":     1.5,
+			"margin":         20,
+			"textAlign":      "justify",
+			"theme":          "catppuccin",
+			"flow":           "scrolled",
+			"continuousMode": true,
+		},
+		"pdf": map[string]interface{}{
+			"pageFit":         "auto",
+			"zoomLevel":       100,
+			"scrollDirection": "vertical",
+			"scrollMode":      "continuous-vertical",
+		},
+		"cbx": map[string]interface{}{
+			"readerMode": "single",
+			"direction":  "ltr",
+		},
+		"audio": map[string]interface{}{
+			"playbackSpeed": 1.0,
+			"autoAdvance":   false,
+		},
+		"speedReader": map[string]interface{}{
+			"theme": "catppuccin",
+		},
+	}
+
+	var storedReaderSettings string
+	if err := appDB.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, "reader_settings").Scan(&storedReaderSettings); err == nil && strings.TrimSpace(storedReaderSettings) != "" {
+		var stored map[string]interface{}
+		if err := json.Unmarshal([]byte(storedReaderSettings), &stored); err == nil {
+			readerSettings = stored
+		}
+	}
+
+	return readerSettings
+}
+
+func getReaderSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"reader": loadReaderSettingsResponse(),
+	})
+}
+
 func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionViewAdmin) && !requirePermission(current, PermissionManageLibraries) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+	ownerClause, ownerArgs := userOwnershipClause(current, "l")
+
 	// Fetch libraries from DB
 	rows, err := appDB.Query(`
 		SELECT l.id, l.name, COALESCE(l.icon, '') as icon,
@@ -3807,9 +3928,10 @@ func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		FROM library l
 		LEFT JOIN book b ON l.id = b.library_id
 		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
+		WHERE `+ownerClause+`
 		GROUP BY l.id, l.name, l.icon, l.exclude_from_suggestions, l.comic_spread_fallback
 		ORDER BY l.name
-	`)
+	`, ownerArgs...)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch libraries")
 		return
@@ -3862,54 +3984,11 @@ func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("Settings library rows ended with error", "error", err)
 	}
 
-	// Default reader settings
-	readerSettings := map[string]interface{}{
-		"keepScreenOnWhileReading": true,
-		"keepScreenOnWhileAppOpen": false,
-		"readerTheme":              "catppuccin",
-		"showCurrentSection":       true,
-		"settingsUpdatedAt":        int64(0),
-		"epub": map[string]interface{}{
-			"fontFamily":     "serif",
-			"fontSize":       16,
-			"lineHeight":     1.5,
-			"margin":         20,
-			"textAlign":      "justify",
-			"theme":          "catppuccin",
-			"flow":           "scrolled",
-			"continuousMode": true,
-		},
-		"pdf": map[string]interface{}{
-			"pageFit":         "auto",
-			"zoomLevel":       100,
-			"scrollDirection": "vertical",
-			"scrollMode":      "continuous-vertical",
-		},
-		"cbx": map[string]interface{}{
-			"readerMode": "single",
-			"direction":  "ltr",
-		},
-		"audio": map[string]interface{}{
-			"playbackSpeed": 1.0,
-			"autoAdvance":   false,
-		},
-		"speedReader": map[string]interface{}{
-			"theme": "catppuccin",
-		},
-	}
-	var storedReaderSettings string
-	if err := appDB.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, "reader_settings").Scan(&storedReaderSettings); err == nil && strings.TrimSpace(storedReaderSettings) != "" {
-		var stored map[string]interface{}
-		if err := json.Unmarshal([]byte(storedReaderSettings), &stored); err == nil {
-			readerSettings = stored
-		}
-	}
-
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"libraries":   libraries,
 		"bookdrop":    appConfig.Bookdrop,
 		"metadata":    appConfig.Metadata,
-		"reader":      readerSettings,
+		"reader":      loadReaderSettingsResponse(),
 		"book_covers": loadBookCoverSettingsResponse(),
 	})
 }
@@ -3982,10 +4061,20 @@ func updateBookdropHandler(w http.ResponseWriter, r *http.Request) {
 func getCbxPageCountHandler(w http.ResponseWriter, r *http.Request) {
 	bookID := chi.URLParam(r, "bookID")
 	requestedFormat := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	current := getUserFromContext(r.Context())
 
 	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
 	if err != nil {
 		errorResponse(w, http.StatusBadRequest, "Invalid book ID")
+		return
+	}
+	allowed, err := canAccessBook(current, bookIDInt)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
+		return
+	}
+	if !allowed {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
 		return
 	}
 
@@ -4076,6 +4165,12 @@ func getPdfPageCountHandler(w http.ResponseWriter, r *http.Request) {
 
 // BookDrop handlers
 func getBookdropFilesHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionManageLibraries) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
 	rows, err := appDB.Query(`
 		SELECT id, filename, path, status, COALESCE(error, '') as error, added_at
 		FROM bookdrop_file
@@ -4110,6 +4205,12 @@ func getBookdropFilesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func importBookdropFileHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionManageLibraries) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
 	fileID := chi.URLParam(r, "id")
 
 	var filePath, filename string
@@ -4120,10 +4221,14 @@ func importBookdropFileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Run import in background
+	ownerID := current.ID
+	if userCanAccessAllData(current) {
+		ownerID = 1
+	}
 	go func() {
 		for _, lib := range appConfig.Libraries {
 			var libraryID int64
-			if err := appDB.QueryRow("SELECT id FROM library WHERE name = ? AND owner_user_id = ?", lib.Name, 1).Scan(&libraryID); err != nil {
+			if err := appDB.QueryRow("SELECT id FROM library WHERE name = ? AND owner_user_id = ?", lib.Name, ownerID).Scan(&libraryID); err != nil {
 				continue
 			}
 			appScanner.ScanLibrary(libraryID, []string{filePath})
@@ -4136,6 +4241,12 @@ func importBookdropFileHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteBookdropFileHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionManageLibraries) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
 	fileID := chi.URLParam(r, "id")
 	appDB.Exec("UPDATE bookdrop_file SET status = 'rejected' WHERE id = ?", fileID)
 	w.WriteHeader(http.StatusNoContent)
@@ -4440,11 +4551,70 @@ func getUserFromContext(ctx context.Context) *AppUser {
 	return user
 }
 
+func loginThrottleKey(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil && host != "" {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+func loginRetryAfter(key string) (time.Duration, bool) {
+	now := time.Now()
+	loginThrottle.Lock()
+	defer loginThrottle.Unlock()
+
+	for entryKey, entry := range loginThrottle.entries {
+		if !entry.blockedUntil.IsZero() && now.Before(entry.blockedUntil) {
+			continue
+		}
+		if entry.blockedUntil.IsZero() && now.Sub(entry.firstFailure) < loginAttemptWindow {
+			continue
+		}
+		delete(loginThrottle.entries, entryKey)
+	}
+
+	entry, ok := loginThrottle.entries[key]
+	if !ok || entry.blockedUntil.IsZero() || now.After(entry.blockedUntil) {
+		return 0, false
+	}
+	return time.Until(entry.blockedUntil), true
+}
+
+func recordLoginFailure(key string) {
+	now := time.Now()
+	loginThrottle.Lock()
+	defer loginThrottle.Unlock()
+
+	entry := loginThrottle.entries[key]
+	if entry.firstFailure.IsZero() || now.Sub(entry.firstFailure) > loginAttemptWindow {
+		entry = loginThrottleEntry{firstFailure: now}
+	}
+	entry.failures++
+	if entry.failures >= loginMaxFailures {
+		entry.blockedUntil = now.Add(loginBlockDuration)
+	}
+	loginThrottle.entries[key] = entry
+}
+
+func clearLoginFailures(key string) {
+	loginThrottle.Lock()
+	defer loginThrottle.Unlock()
+	delete(loginThrottle.entries, key)
+}
+
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	if appConfig.Auth.Mode != "password" {
 		jsonResponse(w, http.StatusOK, map[string]string{"status": "auth_disabled"})
 		return
 	}
+	throttleKey := loginThrottleKey(r)
+	if retryAfter, blocked := loginRetryAfter(throttleKey); blocked {
+		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
+		errorResponse(w, http.StatusTooManyRequests, "Too many login attempts")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, loginRequestBodyLimit)
 
 	var req struct {
 		Username string `json:"username"`
@@ -4479,9 +4649,11 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if user == nil {
+		recordLoginFailure(throttleKey)
 		errorResponse(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
+	clearLoginFailures(throttleKey)
 
 	if sessionStore == nil {
 		errorResponse(w, http.StatusInternalServerError, "Session store unavailable")

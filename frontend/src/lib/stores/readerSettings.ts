@@ -449,7 +449,7 @@ function createReaderSettingsStore() {
 		syncWithBackend: async () => {
 			if (!browser) return;
 			try {
-				const res = await fetch('/api/settings', { cache: 'no-store' });
+				const res = await fetch('/api/settings/reader', { cache: 'no-store' });
 				if (res.ok) {
 					const data = await res.json();
 					if (data.reader) {

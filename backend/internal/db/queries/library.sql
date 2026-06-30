@@ -108,19 +108,22 @@ INSERT INTO book_shelf (book_id, shelf_id) VALUES (?, ?);
 DELETE FROM book_shelf WHERE book_id = ? AND shelf_id = ?;
 
 -- name: GetReadingProgress :one
-SELECT * FROM reading_progress WHERE book_id = ?;
+SELECT * FROM reading_progress WHERE book_id = ? AND owner_user_id = ?;
 
 -- name: CreateReadingProgress :exec
-INSERT INTO reading_progress (book_id, file_id, percent, cfi, page, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO reading_progress (book_id, file_id, percent, cfi, page, status, updated_at, owner_user_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: UpdateReadingProgress :exec
-UPDATE reading_progress SET file_id = ?, percent = ?, cfi = ?, page = ?, status = ?, updated_at = ? WHERE book_id = ?;
+UPDATE reading_progress SET file_id = ?, percent = ?, cfi = ?, page = ?, status = ?, updated_at = ?
+WHERE book_id = ? AND owner_user_id = ?;
 
 -- name: UpdateSpeedReaderProgress :exec
-UPDATE reading_progress SET speed_reader_word_index = ?, speed_reader_percent = ?, updated_at = ? WHERE book_id = ?;
+UPDATE reading_progress SET speed_reader_word_index = ?, speed_reader_percent = ?, updated_at = ?
+WHERE book_id = ? AND owner_user_id = ?;
 
 -- name: DeleteReadingProgress :exec
-DELETE FROM reading_progress WHERE book_id = ?;
+DELETE FROM reading_progress WHERE book_id = ? AND owner_user_id = ?;
 
 -- name: GetReadingSession :one
 SELECT * FROM reading_session WHERE id = ?;
@@ -139,8 +142,8 @@ SELECT rs.*, bm.title, bm.authors, bm.cover_path, rp.percent, rp.status
 FROM reading_session rs
 JOIN book b ON rs.book_id = b.id
 LEFT JOIN book_metadata bm ON b.id = bm.book_id
-LEFT JOIN reading_progress rp ON b.id = rp.book_id
-WHERE rs.started_at > ?
+LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
+WHERE rs.started_at > ? AND rs.owner_user_id = ?
 ORDER BY rs.started_at DESC;
 
 -- name: GetBookmark :one

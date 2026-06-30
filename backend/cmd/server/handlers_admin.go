@@ -462,15 +462,15 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 
 	if err == sql.ErrNoRows {
 		_, err = appDB.Exec(`
-			INSERT INTO book_metadata (
-				book_id, title, authors, series, series_number, publisher,
-				pub_date, description, rating, genres, tags, isbn, asin, cover_path,
-				cover_updated_on, page_count, language, locked_fields
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, bookID, candidate.Title, nullString(authorsJSON), candidate.Series,
+				INSERT INTO book_metadata (
+					book_id, title, authors, series, series_number, publisher,
+					pub_date, description, rating, genres, tags, isbn, asin, cover_path,
+					cover_updated_on, page_count, language, locked_fields, owner_user_id
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT owner_user_id FROM book WHERE id = ?), 1))
+			`, bookID, candidate.Title, nullString(authorsJSON), candidate.Series,
 			0, candidate.Publisher, candidate.PubDate, candidate.Description,
 			candidate.Rating, nullString(emptyJSON), nullString(candidateTagsJSON), candidate.ISBN, candidate.ASIN, "",
-			0, candidate.PageCount, candidate.Language, "[]")
+			0, candidate.PageCount, candidate.Language, "[]", bookID)
 		if err != nil {
 			return err
 		}
@@ -597,6 +597,21 @@ func QueueMetadataApplyJobHandler(w http.ResponseWriter, r *http.Request) {
 	if len(req.Items) == 0 {
 		errorResponse(w, http.StatusBadRequest, "No metadata items provided")
 		return
+	}
+	for _, item := range req.Items {
+		if item.BookID <= 0 {
+			errorResponse(w, http.StatusBadRequest, "Invalid book ID")
+			return
+		}
+		allowed, err := canAccessBook(current, item.BookID)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
+			return
+		}
+		if !allowed {
+			errorResponse(w, http.StatusForbidden, "Permission denied")
+			return
+		}
 	}
 
 	title := fmt.Sprintf("Bulk metadata update (%d books)", len(req.Items))
