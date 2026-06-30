@@ -234,6 +234,13 @@ func userCanAccessAllData(user *AppUser) bool {
 	return user != nil && (user.IsAdmin || user.IsBootstrapAdmin)
 }
 
+func userIDForScopedRows(user *AppUser) int64 {
+	if user == nil {
+		return 0
+	}
+	return user.ID
+}
+
 func userOwnershipClause(user *AppUser, alias string) (string, []interface{}) {
 	if userCanAccessAllData(user) {
 		return "1 = 1", nil
@@ -254,6 +261,9 @@ func canAccessLibrary(user *AppUser, libraryID int64) (bool, error) {
 	if userCanAccessAllData(user) {
 		return true, nil
 	}
+	if user == nil {
+		return false, nil
+	}
 
 	var exists bool
 	if err := appDB.QueryRow(
@@ -268,6 +278,9 @@ func canAccessLibrary(user *AppUser, libraryID int64) (bool, error) {
 func canAccessBook(user *AppUser, bookID int64) (bool, error) {
 	if userCanAccessAllData(user) {
 		return true, nil
+	}
+	if user == nil {
+		return false, nil
 	}
 
 	var exists bool
@@ -286,6 +299,9 @@ func canAccessBook(user *AppUser, bookID int64) (bool, error) {
 func canAccessShelf(user *AppUser, shelfID int64) (bool, error) {
 	if userCanAccessAllData(user) {
 		return true, nil
+	}
+	if user == nil {
+		return false, nil
 	}
 
 	var exists bool

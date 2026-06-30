@@ -98,7 +98,7 @@ func TestDashboardSummaryAdminSeesAllLibraries(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&summary); err != nil {
 		t.Fatalf("decode summary: %v", err)
 	}
-	if summary.TotalBooks != 3 || summary.Libraries != 3 || summary.Reading != 2 || summary.Finished != 1 {
+	if summary.TotalBooks != 3 || summary.Libraries != 3 || summary.Reading != 2 || summary.Finished != 0 {
 		t.Fatalf("unexpected admin summary: %+v", summary)
 	}
 }
@@ -132,7 +132,7 @@ func TestDiscoverBooksDeduplicatesExactBookRows(t *testing.T) {
 		JOIN library l ON b.library_id = l.id
 		JOIN (SELECT 1 AS duplicate_marker UNION ALL SELECT 2) duplicate_rows ON 1 = 1
 		LEFT JOIN book_metadata bm ON b.id = bm.book_id
-		LEFT JOIN reading_progress rp ON b.id = rp.book_id
+			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
 		LEFT JOIN (
 			SELECT book_id, MIN(format) AS format
 			FROM book_file
@@ -147,7 +147,7 @@ func TestDiscoverBooksDeduplicatesExactBookRows(t *testing.T) {
 			WHERE active_bf.book_id = b.id AND active_bf.missing_at IS NULL
 		  )`
 
-	books, err := fetchDiscoverBooks(baseFrom, baseWhere, []interface{}{int64(1)}, 1, 10)
+	books, err := fetchDiscoverBooks(baseFrom, baseWhere, []interface{}{int64(1)}, 1, 1, 10)
 	if err != nil {
 		t.Fatalf("fetch discover books: %v", err)
 	}

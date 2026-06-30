@@ -170,15 +170,17 @@ func evaluateMagicShelfRules(shelfID string, rulesJSON string, user *AppUser) (*
 		       COALESCE(bm.authors, '[]') as authors,
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(rp.status, 'unread') as status
-		FROM book b
-		JOIN library l ON b.library_id = l.id
-		LEFT JOIN book_metadata bm ON b.id = bm.book_id
-		LEFT JOIN reading_progress rp ON b.id = rp.book_id
-		WHERE (%s) AND %s
-		ORDER BY bm.title
-	`, whereClause, ownerClause)
+			FROM book b
+			JOIN library l ON b.library_id = l.id
+			LEFT JOIN book_metadata bm ON b.id = bm.book_id
+			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
+			WHERE (%s) AND %s
+			ORDER BY bm.title
+		`, whereClause, ownerClause)
 
-	return appDB.Query(query, append(args, ownerArgs...)...)
+	queryArgs := append([]interface{}{userIDForScopedRows(user)}, args...)
+	queryArgs = append(queryArgs, ownerArgs...)
+	return appDB.Query(query, queryArgs...)
 }
 
 func createShelfHandler(w http.ResponseWriter, r *http.Request) {
@@ -347,13 +349,13 @@ func getShelfBooksHandler(w http.ResponseWriter, r *http.Request) {
 			       COALESCE(bm.cover_path, '') as cover_path,
 			       COALESCE(rp.status, 'unread') as status
 			FROM book_shelf bs
-			JOIN book b ON bs.book_id = b.id
-			JOIN library l ON b.library_id = l.id
-			LEFT JOIN book_metadata bm ON b.id = bm.book_id
-			LEFT JOIN reading_progress rp ON b.id = rp.book_id
-			WHERE bs.shelf_id = ? AND `+ownerClause+`
-			ORDER BY bm.title
-		`, append([]interface{}{shelfID}, ownerArgs...)...)
+				JOIN book b ON bs.book_id = b.id
+				JOIN library l ON b.library_id = l.id
+				LEFT JOIN book_metadata bm ON b.id = bm.book_id
+				LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
+				WHERE bs.shelf_id = ? AND `+ownerClause+`
+				ORDER BY bm.title
+			`, append([]interface{}{userIDForScopedRows(current), shelfID}, ownerArgs...)...)
 	}
 
 	if err != nil {
