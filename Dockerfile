@@ -5,7 +5,7 @@ RUN npm ci
 COPY frontend .
 RUN rm -rf build .svelte-kit && npm run build
 
-FROM golang:1.25-alpine AS api-build
+FROM golang:1.25.11-alpine AS api-build
 WORKDIR /app
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download

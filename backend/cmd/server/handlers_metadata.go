@@ -1040,6 +1040,15 @@ func ApplyMetadataHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	allowed, err := canAccessBook(current, req.BookID)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
+		return
+	}
+	if !allowed {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
 
 	if err := applyMetadataCandidateToBook(req.BookID, req.Metadata, true); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {

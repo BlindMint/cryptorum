@@ -15,11 +15,73 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ledongthuc/pdf"
 )
+
+const statsResponseCacheTTL = 30 * time.Second
+
+type cachedStatsResponse struct {
+	payload   []byte
+	expiresAt time.Time
+}
+
+var statsResponseCache = struct {
+	sync.Mutex
+	entries map[string]cachedStatsResponse
+}{
+	entries: make(map[string]cachedStatsResponse),
+}
+
+func statsResponseCacheKey(user *AppUser) string {
+	if user == nil {
+		return fmt.Sprintf("%p:anonymous", appDB)
+	}
+	if userCanAccessAllData(user) {
+		return fmt.Sprintf("%p:admin:%d", appDB, user.ID)
+	}
+	return fmt.Sprintf("%p:user:%d", appDB, user.ID)
+}
+
+func getCachedStatsResponse(key string) ([]byte, bool) {
+	now := time.Now()
+	statsResponseCache.Lock()
+	defer statsResponseCache.Unlock()
+
+	entry, ok := statsResponseCache.entries[key]
+	if !ok {
+		return nil, false
+	}
+	if now.After(entry.expiresAt) {
+		delete(statsResponseCache.entries, key)
+		return nil, false
+	}
+	return append([]byte(nil), entry.payload...), true
+}
+
+func setCachedStatsResponse(key string, payload []byte) {
+	statsResponseCache.Lock()
+	defer statsResponseCache.Unlock()
+
+	statsResponseCache.entries[key] = cachedStatsResponse{
+		payload:   append([]byte(nil), payload...),
+		expiresAt: time.Now().Add(statsResponseCacheTTL),
+	}
+}
+
+func writeJSONBytes(w http.ResponseWriter, status int, payload []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	if w.Header().Get("Cache-Control") == "" {
+		w.Header().Set("Cache-Control", "no-store, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(payload)
+}
 
 // GetStatsHandler returns library and reading statistics
 func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
@@ -101,6 +163,12 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 
 	var stats StatsResponse
 	current := getUserFromContext(r.Context())
+	cacheKey := statsResponseCacheKey(current)
+	if payload, ok := getCachedStatsResponse(cacheKey); ok {
+		writeJSONBytes(w, http.StatusOK, payload)
+		return
+	}
+
 	ownerClause, ownerArgs := userOwnershipClause(current, "l")
 	withOwnerArgs := func(extra ...interface{}) []interface{} {
 		args := append([]interface{}{}, ownerArgs...)
@@ -152,15 +220,15 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		FROM reading_progress rp
 		JOIN book b ON rp.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause+activeBookExists+` AND rp.status = 'reading'
-	`, ownerArgs...).Scan(&stats.Reading)
+		WHERE rp.owner_user_id = ? AND `+ownerClause+activeBookExists+` AND rp.status = 'reading'
+	`, append([]interface{}{userIDForScopedRows(current)}, ownerArgs...)...).Scan(&stats.Reading)
 	appDB.QueryRow(`
 		SELECT COUNT(DISTINCT rp.book_id)
 		FROM reading_progress rp
 		JOIN book b ON rp.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause+activeBookExists+` AND rp.status = 'finished'
-	`, ownerArgs...).Scan(&stats.Finished)
+		WHERE rp.owner_user_id = ? AND `+ownerClause+activeBookExists+` AND rp.status = 'finished'
+	`, append([]interface{}{userIDForScopedRows(current)}, ownerArgs...)...).Scan(&stats.Finished)
 	stats.Unread = stats.TotalBooks - stats.Reading - stats.Finished
 	if stats.Unread < 0 {
 		stats.Unread = 0
@@ -563,7 +631,13 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	jsonResponse(w, http.StatusOK, stats)
+	payload, err := json.Marshal(stats)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to encode stats")
+		return
+	}
+	setCachedStatsResponse(cacheKey, payload)
+	writeJSONBytes(w, http.StatusOK, payload)
 }
 
 func countDistinctStatsJSONValues(column, ownerClause string, ownerArgs []interface{}, activeBookExists string) int64 {

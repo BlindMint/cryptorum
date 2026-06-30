@@ -93,15 +93,14 @@ type readingProgressExecutor interface {
 func touchReadingProgressForSession(exec readingProgressExecutor, bookID, ownerUserID, updatedAt int64) error {
 	_, err := exec.Exec(`
 		INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
-		VALUES (?, 'reading', 0, ?, ?)
-		ON CONFLICT(book_id) DO UPDATE SET
-			updated_at = excluded.updated_at,
-			status = CASE
-				WHEN reading_progress.status = 'finished' THEN reading_progress.status
-				ELSE 'reading'
-			END,
-			owner_user_id = excluded.owner_user_id
-	`, bookID, updatedAt, ownerUserID)
+			VALUES (?, 'reading', 0, ?, ?)
+			ON CONFLICT(book_id, owner_user_id) DO UPDATE SET
+				updated_at = excluded.updated_at,
+				status = CASE
+					WHEN reading_progress.status = 'finished' THEN reading_progress.status
+					ELSE 'reading'
+				END
+		`, bookID, updatedAt, ownerUserID)
 	return err
 }
 
@@ -146,7 +145,7 @@ func GetReadingProgressHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	progress, err := loadReadingProgress(bookID)
+	progress, err := loadReadingProgress(bookID, current.ID)
 	if err != nil {
 		slog.Error("GetReadingProgressHandler failed", "book_id", bookID, "error", err)
 		errorResponse(w, http.StatusInternalServerError, "Failed to get reading progress")
@@ -156,7 +155,7 @@ func GetReadingProgressHandler(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, progress)
 }
 
-func loadReadingProgress(bookID string) (ReadingProgress, error) {
+func loadReadingProgress(bookID string, ownerUserID int64) (ReadingProgress, error) {
 	const maxAttempts = 5
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -173,9 +172,9 @@ func loadReadingProgress(bookID string) (ReadingProgress, error) {
 		err := appDB.QueryRow(`
 			SELECT id, book_id, file_id, percent, cfi, page, status,
 			       speed_reader_word_index, speed_reader_percent, updated_at
-			FROM reading_progress
-			WHERE book_id = ?
-		`, bookID).Scan(
+				FROM reading_progress
+				WHERE book_id = ? AND owner_user_id = ?
+			`, bookID, ownerUserID).Scan(
 			&progress.ID, &progress.BookID, &fileID, &percent,
 			&cfi, &page, &status, &speedReaderWordIndex,
 			&speedReaderPercent, &updatedAt,
@@ -269,7 +268,7 @@ func UpdateReadingProgressHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, err := loadReadingProgress(bookID)
+	existing, err := loadReadingProgress(bookID, current.ID)
 	if err != nil {
 		slog.Error("UpdateReadingProgressHandler failed to load existing progress", "book_id", bookID, "error", err)
 		errorResponse(w, http.StatusInternalServerError, "Failed to load reading progress")
@@ -320,17 +319,16 @@ func UpdateReadingProgressHandler(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().Unix()
 
 	_, err = appDB.Exec(`
-		INSERT INTO reading_progress (book_id, file_id, percent, cfi, page, status, updated_at, owner_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(book_id) DO UPDATE SET
-			file_id = excluded.file_id,
-			percent = excluded.percent,
-			cfi = excluded.cfi,
-			page = excluded.page,
-			status = excluded.status,
-			updated_at = excluded.updated_at,
-			owner_user_id = excluded.owner_user_id
-	`, bookIDInt, fileIDValue, percent, cfiValue, pageValue, status, now, current.ID)
+			INSERT INTO reading_progress (book_id, file_id, percent, cfi, page, status, updated_at, owner_user_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(book_id, owner_user_id) DO UPDATE SET
+				file_id = excluded.file_id,
+				percent = excluded.percent,
+				cfi = excluded.cfi,
+				page = excluded.page,
+				status = excluded.status,
+				updated_at = excluded.updated_at
+		`, bookIDInt, fileIDValue, percent, cfiValue, pageValue, status, now, current.ID)
 
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to update reading progress")
@@ -372,12 +370,12 @@ func UpdateSpeedReaderProgressHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = appDB.Exec(`
 		INSERT INTO reading_progress (
 			book_id, status, percent, speed_reader_word_index, speed_reader_percent, updated_at, owner_user_id
-		)
-		VALUES (?, 'reading', 0, ?, ?, ?, ?)
-		ON CONFLICT(book_id) DO UPDATE SET
-			speed_reader_word_index = excluded.speed_reader_word_index,
-			speed_reader_percent = excluded.speed_reader_percent,
-			updated_at = excluded.updated_at
+			)
+			VALUES (?, 'reading', 0, ?, ?, ?, ?)
+			ON CONFLICT(book_id, owner_user_id) DO UPDATE SET
+				speed_reader_word_index = excluded.speed_reader_word_index,
+				speed_reader_percent = excluded.speed_reader_percent,
+				updated_at = excluded.updated_at
 	`, bookIDInt, req.WordIndex, req.Percent, now, current.ID)
 
 	if err != nil {
@@ -784,11 +782,11 @@ func GetReadingHistoryHandler(w http.ResponseWriter, r *http.Request) {
 		FROM reading_session rs
 		JOIN book b ON rs.book_id = b.id
 		LEFT JOIN book_metadata bm ON b.id = bm.book_id
-		LEFT JOIN reading_progress rp ON b.id = rp.book_id
-		WHERE rs.started_at > ? AND rs.owner_user_id = ?
-		ORDER BY rs.started_at DESC
-		LIMIT 50
-	`, since, current.ID)
+			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
+			WHERE rs.started_at > ? AND rs.owner_user_id = ?
+			ORDER BY rs.started_at DESC
+			LIMIT 50
+		`, current.ID, since, current.ID)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to get reading history")
 		return

@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/microcosm-cc/bluemonday"
 )
 
 // ConversionResult is the canonical processed representation for text-first ebooks.
@@ -43,7 +45,10 @@ type textBookCachePaths struct {
 	TocCachePath   string
 	MetaCachePath  string
 	CSSCachePath   string
+	VersionPath    string
 }
+
+const processedTextBookCacheVersion = "2"
 
 type epubContainerDocument struct {
 	Rootfiles []struct {
@@ -136,6 +141,7 @@ func getTextBookCachePaths(bookID, format string) textBookCachePaths {
 		TocCachePath:   filepath.Join(baseDir, "toc.json"),
 		MetaCachePath:  filepath.Join(baseDir, "metadata.json"),
 		CSSCachePath:   filepath.Join(baseDir, "styles.css"),
+		VersionPath:    filepath.Join(baseDir, "cache-version"),
 	}
 }
 
@@ -168,6 +174,7 @@ func isProcessedTextBookCacheValid(paths textBookCachePaths, sourcePath string) 
 		paths.TocCachePath,
 		paths.MetaCachePath,
 		paths.CSSCachePath,
+		paths.VersionPath,
 	}
 
 	var newestCacheModTime int64
@@ -183,6 +190,10 @@ func isProcessedTextBookCacheValid(paths textBookCachePaths, sourcePath string) 
 
 	sourceInfo, err := os.Stat(sourcePath)
 	if err != nil {
+		return false
+	}
+	version, err := os.ReadFile(paths.VersionPath)
+	if err != nil || strings.TrimSpace(string(version)) != processedTextBookCacheVersion {
 		return false
 	}
 
@@ -278,6 +289,9 @@ func writeProcessedTextBookCache(result *ConversionResult, paths textBookCachePa
 	}
 	if metaData, err := json.Marshal(result.Metadata); err == nil {
 		_ = os.WriteFile(paths.MetaCachePath, metaData, 0644)
+	}
+	if err := os.WriteFile(paths.VersionPath, []byte(processedTextBookCacheVersion), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write cache version: %w", err)
 	}
 
 	return result, nil
@@ -551,7 +565,7 @@ func aggregateSpineContent(explodedDir, opfPath string, pkg *OPFDocument, bookID
 			sectionDirRel = ""
 		}
 
-		rewrittenBody := rewriteHTMLResourcePaths(bodyContent, bookID, filepath.ToSlash(sectionDirRel))
+		rewrittenBody := sanitizeContinuousHTML(rewriteHTMLResourcePaths(bodyContent, bookID, filepath.ToSlash(sectionDirRel)))
 		combinedHTML.WriteString(rewrittenBody)
 		combinedHTML.WriteString("\n")
 		plainText.WriteString(stripHTMLTags(rewrittenBody))
@@ -589,7 +603,7 @@ func aggregateAllHTMLContent(explodedDir, bookID string) (string, string) {
 		if err != nil {
 			sectionDirRel = ""
 		}
-		rewrittenBody := rewriteHTMLResourcePaths(bodyContent, bookID, filepath.ToSlash(sectionDirRel))
+		rewrittenBody := sanitizeContinuousHTML(rewriteHTMLResourcePaths(bodyContent, bookID, filepath.ToSlash(sectionDirRel)))
 		combinedHTML.WriteString(rewrittenBody)
 		combinedHTML.WriteString("\n")
 		plainText.WriteString(stripHTMLTags(rewrittenBody))
@@ -719,7 +733,7 @@ func buildCombinedStylesheet(explodedDir, opfPath string, pkg *OPFDocument, outp
 			sectionDirRel = ""
 		}
 
-		combined.WriteString(rewriteCSSResourcePaths(string(data), bookID, filepath.ToSlash(sectionDirRel)))
+		combined.WriteString(sanitizeContinuousCSS(rewriteCSSResourcePaths(string(data), bookID, filepath.ToSlash(sectionDirRel))))
 		combined.WriteString("\n")
 	}
 
@@ -755,12 +769,26 @@ func rewriteHTMLResourcePaths(content, bookID, sectionDir string) string {
 			quote = `'`
 		}
 
-		lower := strings.ToLower(rawValue)
+		lower := strings.ToLower(strings.TrimSpace(rawValue))
 		if strings.HasPrefix(lower, "http://") ||
 			strings.HasPrefix(lower, "https://") ||
-			strings.HasPrefix(lower, "data:") ||
-			strings.HasPrefix(lower, "mailto:") ||
-			strings.HasPrefix(lower, "#") {
+			strings.HasPrefix(lower, "mailto:") {
+			if strings.EqualFold(attr, "href") {
+				return match
+			}
+			return fmt.Sprintf(`%s=%s%s`, attr, quote, quote)
+		}
+		if strings.HasPrefix(lower, "data:") ||
+			strings.HasPrefix(lower, "javascript:") {
+			return fmt.Sprintf(`%s=%s%s`, attr, quote, quote)
+		}
+		if strings.HasPrefix(lower, "#") {
+			if strings.EqualFold(attr, "href") {
+				return match
+			}
+			return fmt.Sprintf(`%s=%s%s`, attr, quote, quote)
+		}
+		if strings.HasPrefix(lower, "tel:") && strings.EqualFold(attr, "href") {
 			return match
 		}
 
@@ -792,13 +820,56 @@ func rewriteCSSResourcePaths(content, bookID, sectionDir string) string {
 			strings.HasPrefix(lower, "http://") ||
 			strings.HasPrefix(lower, "https://") ||
 			strings.HasPrefix(lower, "data:") ||
+			strings.HasPrefix(lower, "javascript:") ||
 			strings.HasPrefix(lower, "#") {
-			return match
+			return `url("")`
 		}
 
 		cleanPath := normalizeRelativeAssetPath(sectionDir, raw)
 		return fmt.Sprintf(`url("/api/books/%s/continuous/media/%s")`, bookID, cleanPath)
 	})
+}
+
+var continuousHTMLPolicy = buildContinuousHTMLPolicy()
+
+func buildContinuousHTMLPolicy() *bluemonday.Policy {
+	policy := bluemonday.NewPolicy()
+	policy.AllowStandardURLs()
+
+	policy.AllowElements(
+		"a", "abbr", "article", "aside", "b", "blockquote", "br", "caption", "cite", "code",
+		"col", "colgroup", "dd", "del", "dfn", "div", "dl", "dt", "em", "figcaption", "figure",
+		"h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "img", "ins", "kbd", "li", "main",
+		"mark", "ol", "p", "pre", "q", "rp", "rt", "ruby", "s", "samp", "section", "small",
+		"span", "strong", "sub", "sup", "table", "tbody", "td", "tfoot", "th", "thead", "tr",
+		"u", "ul", "var",
+	)
+	policy.AllowAttrs("id", "class", "title", "lang", "dir").Globally()
+	policy.AllowAttrs("href", "title").OnElements("a")
+	policy.AllowAttrs("src", "alt", "title", "width", "height").OnElements("img")
+	policy.AllowAttrs("colspan", "rowspan").OnElements("td", "th")
+	policy.AllowAttrs("scope").OnElements("th")
+	policy.AllowAttrs("start", "type").OnElements("ol")
+	policy.AllowAttrs("type").OnElements("ul")
+
+	return policy
+}
+
+func sanitizeContinuousHTML(content string) string {
+	return continuousHTMLPolicy.Sanitize(content)
+}
+
+func sanitizeContinuousCSS(content string) string {
+	importRe := regexp.MustCompile(`(?is)@import\s+[^;]+;?`)
+	content = importRe.ReplaceAllString(content, "")
+
+	dangerousPropertyRe := regexp.MustCompile(`(?is)(behavior|-moz-binding)\s*:\s*[^;]+;?`)
+	content = dangerousPropertyRe.ReplaceAllString(content, "")
+
+	expressionRe := regexp.MustCompile(`(?is)expression\s*\([^)]*\)`)
+	content = expressionRe.ReplaceAllString(content, "")
+
+	return content
 }
 
 func normalizeRelativeAssetPath(baseDir, rawPath string) string {
