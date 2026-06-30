@@ -196,7 +196,8 @@ func queryFTSBookCandidates(ftsQuery string, libraryID string, current *AppUser,
 	}
 	filterClause, filterArgs := buildBookSearchFilterClause(filters)
 
-	args := append(append([]interface{}{}, ownerArgs...), libraryArgs...)
+	args := append([]interface{}{userIDForScopedRows(current)}, ownerArgs...)
+	args = append(args, libraryArgs...)
 	args = append(args, filterArgs...)
 	args = append(args, ftsQuery, searchCandidateLimit)
 	rows, err := appDB.Query(`
@@ -220,7 +221,7 @@ func queryFTSBookCandidates(ftsQuery string, libraryID string, current *AppUser,
 		JOIN book_metadata bm ON bm.id = book_fts.rowid
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		LEFT JOIN reading_progress rp ON b.id = rp.book_id
+			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
 		WHERE (`+ownerClause+`)`+libraryClause+filterClause+` AND book_fts MATCH ?
 		ORDER BY rank
 		LIMIT ?
@@ -286,7 +287,8 @@ func queryTokenLikeBookCandidates(
 		` + activeFileSearchTextSQL + `
 	)`
 	tokenConditions := make([]string, 0, len(queryTokens))
-	args := append(append([]interface{}{}, ownerArgs...), libraryArgs...)
+	args := append([]interface{}{userIDForScopedRows(current)}, ownerArgs...)
+	args = append(args, libraryArgs...)
 	args = append(args, filterArgs...)
 	for _, token := range queryTokens {
 		tokenConditions = append(tokenConditions, searchText+" LIKE ?")
@@ -313,7 +315,7 @@ func queryTokenLikeBookCandidates(
 		FROM book_metadata bm
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		LEFT JOIN reading_progress rp ON b.id = rp.book_id
+			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
 		WHERE (`+ownerClause+`)`+libraryClause+filterClause+` AND `+strings.Join(tokenConditions, " AND ")+`
 		ORDER BY
 			CASE WHEN LOWER(COALESCE(bm.title, '')) LIKE ? THEN 0 ELSE 1 END,
@@ -362,7 +364,8 @@ func queryFallbackBookCandidates(libraryID string, current *AppUser, filters Boo
 	}
 	filterClause, filterArgs := buildBookSearchFilterClause(filters)
 
-	args := append(append([]interface{}{}, ownerArgs...), libraryArgs...)
+	args := append([]interface{}{userIDForScopedRows(current)}, ownerArgs...)
+	args = append(args, libraryArgs...)
 	args = append(args, filterArgs...)
 	args = append(args, searchFallbackScanLimit)
 	rows, err := appDB.Query(`
@@ -384,7 +387,7 @@ func queryFallbackBookCandidates(libraryID string, current *AppUser, filters Boo
 		FROM book_metadata bm
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		LEFT JOIN reading_progress rp ON b.id = rp.book_id
+			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
 		WHERE (`+ownerClause+`)`+libraryClause+filterClause+`
 		ORDER BY b.added_at DESC
 		LIMIT ?

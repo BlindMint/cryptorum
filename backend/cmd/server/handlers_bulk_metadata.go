@@ -334,13 +334,12 @@ func applyBulkMetadataUpdate(bookID int64, ownerUserID int64, req bulkMetadataRe
 			return fmt.Errorf("invalid reading status")
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
-			VALUES (?, ?, 0, ?, ?)
-			ON CONFLICT(book_id) DO UPDATE SET
-				status = excluded.status,
-				updated_at = excluded.updated_at,
-				owner_user_id = excluded.owner_user_id
-		`, bookID, status, time.Now().Unix(), ownerUserID); err != nil {
+				INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
+				VALUES (?, ?, 0, ?, ?)
+				ON CONFLICT(book_id, owner_user_id) DO UPDATE SET
+					status = excluded.status,
+					updated_at = excluded.updated_at
+			`, bookID, status, time.Now().Unix(), ownerUserID); err != nil {
 			return err
 		}
 	}

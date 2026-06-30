@@ -187,7 +187,7 @@ func TestFetchBookDetailMergesLegacyGenresIntoTags(t *testing.T) {
 		VALUES (1, 'Legacy', '["Military","Space.Opera"]', '["Favorite","military"]', 1)
 	`)
 
-	book, err := fetchBookDetail(1)
+	book, err := fetchBookDetail(1, &AppUser{ID: 1, IsAdmin: true})
 	if err != nil {
 		t.Fatalf("fetch book detail: %v", err)
 	}

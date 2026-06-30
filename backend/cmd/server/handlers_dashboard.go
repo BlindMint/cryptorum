@@ -66,7 +66,7 @@ func getDashboardSummaryHandler(w http.ResponseWriter, r *http.Request) {
 		FROM library l
 		WHERE `+ownerClause, ownerArgs...).Scan(&summary.Libraries)
 
-	progressArgs := append([]interface{}{}, ownerArgs...)
+	progressArgs := append([]interface{}{userIDForScopedRows(current)}, ownerArgs...)
 	_ = appDB.QueryRow(`
 		SELECT
 			COUNT(DISTINCT CASE WHEN rp.status = 'reading' THEN rp.book_id END),
@@ -74,7 +74,7 @@ func getDashboardSummaryHandler(w http.ResponseWriter, r *http.Request) {
 		FROM reading_progress rp
 		JOIN book b ON rp.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause+`
+		WHERE rp.owner_user_id = ? AND `+ownerClause+`
 		  AND EXISTS (
 			SELECT 1 FROM book_file bf
 			WHERE bf.book_id = b.id AND bf.missing_at IS NULL
@@ -93,7 +93,7 @@ func getDiscoverBooksHandler(w http.ResponseWriter, r *http.Request) {
 		FROM book b
 		JOIN library l ON b.library_id = l.id
 		LEFT JOIN book_metadata bm ON b.id = bm.book_id
-		LEFT JOIN reading_progress rp ON b.id = rp.book_id
+		LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
 		LEFT JOIN (
 			SELECT book_id, MIN(format) AS format
 			FROM book_file
@@ -118,7 +118,7 @@ func getDiscoverBooksHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	anchor := time.Now().UnixNano()%maxID + 1
-	books, err := fetchDiscoverBooks(baseFrom, baseWhere, ownerArgs, anchor, limit)
+	books, err := fetchDiscoverBooks(baseFrom, baseWhere, ownerArgs, userIDForScopedRows(current), anchor, limit)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch discovery books")
 		return
@@ -132,14 +132,14 @@ func getDiscoverBooksHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func fetchDiscoverBooks(baseFrom, baseWhere string, ownerArgs []interface{}, anchor int64, limit int) ([]dashboardBookResponse, error) {
+func fetchDiscoverBooks(baseFrom, baseWhere string, ownerArgs []interface{}, progressOwnerID int64, anchor int64, limit int) ([]dashboardBookResponse, error) {
 	books := make([]dashboardBookResponse, 0, limit)
 	seenBookIDs := make(map[int64]bool, limit)
-	if err := appendDiscoverBooks(&books, seenBookIDs, baseFrom, baseWhere+" AND b.id >= ?", append(append([]interface{}{}, ownerArgs...), anchor), limit); err != nil {
+	if err := appendDiscoverBooks(&books, seenBookIDs, baseFrom, baseWhere+" AND b.id >= ?", append(append([]interface{}{progressOwnerID}, ownerArgs...), anchor), limit); err != nil {
 		return nil, err
 	}
 	if len(books) < limit {
-		if err := appendDiscoverBooks(&books, seenBookIDs, baseFrom, baseWhere+" AND b.id < ?", append(append([]interface{}{}, ownerArgs...), anchor), limit-len(books)); err != nil {
+		if err := appendDiscoverBooks(&books, seenBookIDs, baseFrom, baseWhere+" AND b.id < ?", append(append([]interface{}{progressOwnerID}, ownerArgs...), anchor), limit-len(books)); err != nil {
 			return nil, err
 		}
 	}

@@ -17,14 +17,15 @@ func setupReadingProgressTestDB(t *testing.T) *sql.DB {
 	t.Cleanup(func() { db.Close() })
 
 	_, err = db.Exec(`
-		CREATE TABLE reading_progress (
-			id INTEGER PRIMARY KEY,
-			book_id INTEGER NOT NULL UNIQUE,
-			percent REAL,
-			status TEXT NOT NULL DEFAULT 'unread',
-			updated_at INTEGER NOT NULL,
-			owner_user_id INTEGER NOT NULL DEFAULT 1
-		)
+			CREATE TABLE reading_progress (
+				id INTEGER PRIMARY KEY,
+				book_id INTEGER NOT NULL,
+				percent REAL,
+				status TEXT NOT NULL DEFAULT 'unread',
+				updated_at INTEGER NOT NULL,
+				owner_user_id INTEGER NOT NULL DEFAULT 1,
+				UNIQUE(book_id, owner_user_id)
+			)
 	`)
 	if err != nil {
 		t.Fatalf("create reading_progress: %v", err)
@@ -44,9 +45,9 @@ func TestTouchReadingProgressForSessionCreatesReadingProgress(t *testing.T) {
 	var percent float64
 	var updatedAt, ownerUserID int64
 	if err := db.QueryRow(`
-		SELECT status, percent, updated_at, owner_user_id
-		FROM reading_progress
-		WHERE book_id = 12
+			SELECT status, percent, updated_at, owner_user_id
+			FROM reading_progress
+			WHERE book_id = 12 AND owner_user_id = 7
 	`).Scan(&status, &percent, &updatedAt, &ownerUserID); err != nil {
 		t.Fatalf("query reading progress: %v", err)
 	}
@@ -75,9 +76,9 @@ func TestTouchReadingProgressForSessionRefreshesReadingOrder(t *testing.T) {
 	var percent float64
 	var updatedAt int64
 	if err := db.QueryRow(`
-		SELECT status, percent, updated_at
-		FROM reading_progress
-		WHERE book_id = 12
+			SELECT status, percent, updated_at
+			FROM reading_progress
+			WHERE book_id = 12 AND owner_user_id = 7
 	`).Scan(&status, &percent, &updatedAt); err != nil {
 		t.Fatalf("query reading progress: %v", err)
 	}
@@ -106,9 +107,9 @@ func TestTouchReadingProgressForSessionPreservesFinishedStatus(t *testing.T) {
 	var percent float64
 	var updatedAt int64
 	if err := db.QueryRow(`
-		SELECT status, percent, updated_at
-		FROM reading_progress
-		WHERE book_id = 12
+			SELECT status, percent, updated_at
+			FROM reading_progress
+			WHERE book_id = 12 AND owner_user_id = 7
 	`).Scan(&status, &percent, &updatedAt); err != nil {
 		t.Fatalf("query reading progress: %v", err)
 	}
