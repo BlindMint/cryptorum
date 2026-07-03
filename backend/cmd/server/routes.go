@@ -2495,6 +2495,8 @@ func processLibraryScanJob(jobID, libraryID int64, libraryName string, paths []s
 			"unchanged_files": progress.UnchangedFiles,
 			"missing_files":   progress.MissingFiles,
 			"changed_files":   progress.ChangedFiles,
+			"relinked_files":  progress.RelinkedFiles,
+			"duplicate_files": progress.DuplicateFiles,
 			"status_counts":   statusCounts,
 			"recent_items":    recentItems,
 			"phase":           progress.Phase,
