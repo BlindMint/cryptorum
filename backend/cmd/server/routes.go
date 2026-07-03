@@ -372,6 +372,7 @@ func initRoutes(r *chi.Mux) {
 		r.Route("/shelves", func(r chi.Router) {
 			r.Get("/", getShelvesHandler)
 			r.Post("/", createShelfHandler)
+			r.Patch("/order", updateShelfOrderHandler)
 			r.Route("/{shelfID}", func(r chi.Router) {
 				r.Get("/", getShelfHandler)
 				r.Put("/", updateShelfHandler)
