@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { parseLibraryIcon } from '$lib/utils/library-icons';
 
 	interface Shelf {
 		id: number;
@@ -7,6 +8,7 @@
 		icon: string;
 		is_magic: number;
 		book_count: number;
+		sort_order?: number;
 	}
 
 	let shelves = $state<Shelf[]>([]);
@@ -14,7 +16,7 @@
 
 	onMount(async () => {
 		try {
-			const res = await fetch('/api/shelves');
+			const res = await fetch('/api/shelves', { cache: 'no-store' });
 			if (res.ok) shelves = await res.json();
 		} catch (e) {
 			console.error('Failed to fetch shelves:', e);
@@ -33,7 +35,7 @@
 		<div class="flex flex-wrap gap-3">
 			<a
 				href="/shelves/new"
-				class="inline-flex items-center px-4 py-2 bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] text-[var(--color-surface-text)] font-medium rounded-lg transition-colors border border-[var(--color-surface-border)]"
+				class="inline-flex items-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-2 font-medium text-[var(--color-surface-text)] transition-colors hover:border-[var(--color-primary-500)]/45 hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-400)]"
 			>
 				<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
@@ -42,7 +44,7 @@
 			</a>
 			<a
 				href="/shelves/new?magic=true"
-				class="inline-flex items-center px-4 py-2 bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white font-medium rounded-lg transition-colors"
+				class="accent-action inline-flex items-center rounded-lg px-4 py-2 font-medium transition-colors"
 			>
 				<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
@@ -67,34 +69,32 @@
 	{:else}
 		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 			{#each shelves as shelf}
-				<a href="/shelves/{shelf.id}" class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-6 hover:border-[var(--color-primary-500)]/50 transition-colors group relative">
+				{@const parsedIcon = parseLibraryIcon(shelf.icon || (shelf.is_magic === 1 ? 'sparkles' : 'bookmark'))}
+				<a href="/shelves/{shelf.id}" class="group relative overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 transition-colors hover:border-[var(--color-primary-500)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
 					{#if shelf.is_magic === 1}
-						<div class="absolute top-3 right-3 flex items-center space-x-1 bg-purple-500/20 text-purple-400 px-2 py-1 rounded-full text-xs font-medium">
+						<div class="absolute top-3 right-3 flex items-center space-x-1 rounded-full border border-purple-400/30 bg-purple-500/15 px-2 py-1 text-xs font-medium text-purple-300">
 							<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
 							</svg>
 							<span>Magic</span>
 						</div>
 					{/if}
-					<div class="flex items-center space-x-4">
-						<div class="w-12 h-12 rounded-lg {shelf.is_magic === 1 ? 'bg-purple-500/20' : 'bg-[var(--color-primary-500)]/20'} flex items-center justify-center">
-							{#if shelf.is_magic === 1}
-								<svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
-								</svg>
+					<div class="flex items-center gap-4 pr-7">
+						<div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg {shelf.is_magic === 1 ? 'bg-purple-500/15 text-purple-300' : 'bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)]'}">
+							{#if parsedIcon?.svg}
+								<div class="shelf-icon h-6 w-6">{@html parsedIcon.svg}</div>
 							{:else}
-								<svg class="w-6 h-6 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
-								</svg>
+								<span class="text-sm font-semibold uppercase">{(parsedIcon?.name || shelf.name || '?').slice(0, 1)}</span>
 							{/if}
 						</div>
-						<div class="flex-1">
-							<h3 class="font-semibold text-[var(--color-surface-text)] group-hover:text-[var(--color-primary-400)] transition-colors">{shelf.name}</h3>
-							<p class="text-sm text-[var(--color-surface-text-muted)]">
-								{shelf.book_count} books • {shelf.is_magic === 1 ? 'Smart rules' : 'Manual'}
+						<div class="min-w-0 flex-1">
+							<h3 class="truncate font-semibold text-[var(--color-surface-text)] transition-colors group-hover:text-[var(--color-primary-400)]">{shelf.name}</h3>
+							<p class="mt-0.5 text-sm text-[var(--color-surface-text-muted)]">{shelf.book_count} books</p>
+							<p class="mt-1 text-xs font-medium uppercase tracking-wide {shelf.is_magic === 1 ? 'text-purple-300' : 'text-[var(--color-primary-400)]'}">
+								{shelf.is_magic === 1 ? 'Smart rules' : 'Manual'}
 							</p>
 						</div>
-						<svg class="w-5 h-5 text-[var(--color-surface-500)] group-hover:text-[var(--color-primary-400)] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<svg class="absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[var(--color-surface-text-muted)] opacity-0 transition-all group-hover:translate-x-0.5 group-hover:text-[var(--color-primary-400)] group-hover:opacity-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
 						</svg>
 					</div>
@@ -103,3 +103,10 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.shelf-icon :global(svg) {
+		height: 100%;
+		width: 100%;
+	}
+</style>

@@ -22,6 +22,9 @@
 		id: number;
 		name: string;
 		icon: string;
+		is_magic?: number;
+		book_count: number;
+		sort_order?: number;
 	}
 
 	let libraries = $state<Library[]>([]);
@@ -41,6 +44,9 @@
 	let libraryDropTargetId = $state<number | null>(null);
 	let libraryDropPosition = $state<'before' | 'after'>('before');
 	let showLibrarySortMenu = $state(false);
+	let draggedShelfId = $state<number | null>(null);
+	let shelfDropTargetId = $state<number | null>(null);
+	let shelfDropPosition = $state<'before' | 'after'>('before');
 
 	// Library modal state
 	let showLibraryModal = $state(false);
@@ -555,6 +561,59 @@
 		void persistLibraryOrder(current);
 	}
 
+	async function persistShelfOrder(nextShelves: Shelf[]) {
+		shelves = nextShelves;
+		try {
+			await fetch('/api/shelves/order', {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ shelf_ids: nextShelves.map((shelf) => shelf.id) })
+			});
+		} catch (e) {
+			console.error('Failed to save shelf order:', e);
+			await loadData();
+		}
+	}
+
+	function handleShelfDragStart(event: DragEvent, shelf: Shelf) {
+		draggedShelfId = shelf.id;
+		shelfDropTargetId = null;
+		event.dataTransfer?.setData('text/plain', String(shelf.id));
+		if (event.currentTarget instanceof Element) {
+			event.dataTransfer?.setDragImage(event.currentTarget, 12, 12);
+		}
+	}
+
+	function handleShelfDragOver(event: DragEvent, targetShelf: Shelf) {
+		if (!draggedShelfId || draggedShelfId === targetShelf.id) return;
+		event.preventDefault();
+		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		shelfDropTargetId = targetShelf.id;
+		shelfDropPosition = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+	}
+
+	function clearShelfDragState() {
+		draggedShelfId = null;
+		shelfDropTargetId = null;
+	}
+
+	function handleShelfDrop(event: DragEvent, targetShelf: Shelf) {
+		event.preventDefault();
+		const sourceId = draggedShelfId ?? Number(event.dataTransfer?.getData('text/plain'));
+		const dropPosition = shelfDropPosition;
+		clearShelfDragState();
+		if (!sourceId || sourceId === targetShelf.id) return;
+		const current = [...shelves];
+		const sourceIndex = current.findIndex((shelf) => shelf.id === sourceId);
+		const targetIndex = current.findIndex((shelf) => shelf.id === targetShelf.id);
+		if (sourceIndex === -1 || targetIndex === -1) return;
+		const [moved] = current.splice(sourceIndex, 1);
+		const adjustedTargetIndex = current.findIndex((shelf) => shelf.id === targetShelf.id);
+		const insertIndex = dropPosition === 'after' ? adjustedTargetIndex + 1 : adjustedTargetIndex;
+		current.splice(insertIndex, 0, moved);
+		void persistShelfOrder(current);
+	}
+
 </script>
 
 
@@ -698,6 +757,7 @@
 			</div>
 
 			{#each libraries as library}
+				{@const parsedLibraryIcon = parseLibraryIcon(library.icon || 'book')}
 				<div
 					role="listitem"
 					draggable="true"
@@ -720,9 +780,15 @@
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
 								</svg>
 							{:else}
-								<svg class="w-5 h-5 text-[var(--color-primary-500)] flex-shrink-0 transition-transform duration-200 group-hover/library-row:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-								</svg>
+								<div class="sidebar-icon-svg h-5 w-5 flex-shrink-0 text-[var(--color-primary-500)] transition-transform duration-200 group-hover/library-row:hidden">
+									{#if parsedLibraryIcon?.svg}
+										{@html parsedLibraryIcon.svg}
+									{:else}
+										<svg class="h-full w-full" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+										</svg>
+									{/if}
+								</div>
 								<svg class="hidden h-5 w-5 flex-shrink-0 cursor-grab text-[var(--color-surface-text-muted)] group-hover/library-row:block" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 									<circle cx="9" cy="7" r="1.5"></circle>
 									<circle cx="15" cy="7" r="1.5"></circle>
@@ -756,17 +822,22 @@
 
 		<div>
 			<div class="flex items-center justify-between px-3 py-2">
-				<div class="flex items-center space-x-2 text-xs font-semibold text-[var(--color-surface-text-muted)] uppercase tracking-wider">
+				<a
+					href="/shelves"
+					onclick={closeMobileNavigation}
+					class="flex items-center space-x-2 rounded-md text-xs font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
+					aria-label="View shelves"
+				>
 					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
 					</svg>
 					<span>Shelves</span>
-				</div>
+				</a>
 				<a
-					href="/shelves"
+					href="/shelves/new"
 					onclick={closeMobileNavigation}
 					class="p-1 rounded text-[var(--color-surface-text-muted)] hover:text-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)] transition-colors"
-					title="Manage Shelves"
+					title="Create Shelf"
 				>
 					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
@@ -775,18 +846,47 @@
 			</div>
 
 			{#each shelves as shelf}
-				<a
-					href="/shelves/{shelf.id}"
-					class="flex items-center px-3 py-2 rounded-lg transition-all duration-200 {isActive('/shelves/' + shelf.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
-					onclick={closeMobileNavigation}
+				{@const parsedShelfIcon = parseLibraryIcon(shelf.icon || (shelf.is_magic === 1 ? 'sparkles' : 'bookmark'))}
+				<div
+					role="listitem"
+					draggable="true"
+					ondragstart={(event) => handleShelfDragStart(event, shelf)}
+					ondragend={clearShelfDragState}
+					ondragover={(event) => handleShelfDragOver(event, shelf)}
+					ondrop={(event) => handleShelfDrop(event, shelf)}
+					class="group/shelf-row relative flex items-center rounded-lg transition-all duration-200 {draggedShelfId === shelf.id ? 'opacity-50' : ''} {isActive('/shelves/' + shelf.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
 				>
-					<div class="flex items-center space-x-3 flex-1 min-w-0">
-						<svg class="w-5 h-5 text-[var(--color-primary-400)] flex-shrink-0 transition-transform duration-200 {isActive('/shelves/' + shelf.id) ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
+					{#if shelfDropTargetId === shelf.id && draggedShelfId !== shelf.id}
+						<div class="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded-full bg-[var(--color-primary-400)] shadow-[0_0_10px_var(--color-primary-500)] {shelfDropPosition === 'before' ? '-top-1' : '-bottom-1'}"></div>
+					{/if}
+					<a
+						href="/shelves/{shelf.id}"
+						class="flex min-w-0 flex-1 items-center space-x-3 px-3 py-2"
+						onclick={closeMobileNavigation}
+					>
+						<div class="sidebar-icon-svg h-5 w-5 flex-shrink-0 text-[var(--color-primary-400)] transition-transform duration-200 group-hover/shelf-row:hidden">
+							{#if parsedShelfIcon?.svg}
+								{@html parsedShelfIcon.svg}
+							{:else}
+								<svg class="h-full w-full" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
+								</svg>
+							{/if}
+						</div>
+						<svg class="hidden h-5 w-5 flex-shrink-0 cursor-grab text-[var(--color-surface-text-muted)] group-hover/shelf-row:block" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<circle cx="9" cy="7" r="1.5"></circle>
+							<circle cx="15" cy="7" r="1.5"></circle>
+							<circle cx="9" cy="12" r="1.5"></circle>
+							<circle cx="15" cy="12" r="1.5"></circle>
+							<circle cx="9" cy="17" r="1.5"></circle>
+							<circle cx="15" cy="17" r="1.5"></circle>
 						</svg>
 						<span class="truncate flex-1 min-w-0">{shelf.name}</span>
-					</div>
-				</a>
+					</a>
+					<span class="mr-2 inline-flex h-7 min-w-8 flex-shrink-0 items-center justify-center rounded-md bg-[var(--color-surface-700)] px-2 text-xs font-medium text-[var(--color-surface-500)]">
+						{shelf.book_count}
+					</span>
+				</div>
 			{/each}
 		</div>
 	</nav>
@@ -1167,6 +1267,13 @@
   {/if}
 
 <style>
+	.sidebar-icon-svg :global(svg) {
+		display: block;
+		width: 100%;
+		height: 100%;
+		overflow: visible;
+	}
+
 	.library-icon-preview :global(svg) {
 		display: block;
 		width: 100%;

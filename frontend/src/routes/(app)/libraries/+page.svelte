@@ -49,10 +49,10 @@
 		});
 	}
 
-	function libraryStatusLabel(library: Library): string {
+	function libraryStatusLabel(library: Library): string | null {
 		if (library.is_importing) return 'Scanning';
 		if (library.exclude_from_suggestions) return 'Hidden from suggestions';
-		return 'Library';
+		return null;
 	}
 </script>
 
@@ -115,10 +115,11 @@
 							<p class="text-sm text-[var(--color-surface-text-muted)]">{library.book_count} books</p>
 						</div>
 					</div>
-					<div class="flex items-center justify-between gap-3 text-xs text-[var(--color-surface-text-muted)]">
-						<span>{libraryStatusLabel(library)}</span>
-						<span class="font-medium text-[var(--color-primary-400)]">Open</span>
-					</div>
+					{#if libraryStatusLabel(library)}
+						<div class="mt-3 inline-flex rounded-full border border-[var(--color-primary-500)]/35 bg-[var(--color-primary-500)]/10 px-2.5 py-1 text-xs font-medium text-[var(--color-primary-400)]">
+							{libraryStatusLabel(library)}
+						</div>
+					{/if}
 				</a>
 			{/each}
 			{#if getVisibleLibraries().length === 0}

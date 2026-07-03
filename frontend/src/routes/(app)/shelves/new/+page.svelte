@@ -2,14 +2,18 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import LibraryIconPicker from '$lib/components/LibraryIconPicker.svelte';
+	import { parseLibraryIcon } from '$lib/utils/library-icons';
 
 	let shelfName = $state('');
 	let shelfIcon = $state('bookmark');
+	let showShelfIconPicker = $state(false);
 	let isMagicShelf = $state(false);
 	let conditions = $state<any[]>([
 		{ field: 'status', operator: 'equals', value: 'unread' }
 	]);
 	let isSubmitting = $state(false);
+	let currentShelfIcon = $derived(parseLibraryIcon(shelfIcon));
 
 	const fieldOptions = [
 		{ value: 'status', label: 'Reading Status' },
@@ -76,6 +80,7 @@
 			});
 
 			if (response.ok) {
+				await (window as any).refreshSidebar?.();
 				goto('/shelves');
 			} else {
 				console.error('Failed to create shelf');
@@ -100,6 +105,14 @@
 		if (field === 'status') return statusOptions;
 		return [];
 	}
+
+	function selectShelfIcon(iconValue: string) {
+		shelfIcon = iconValue;
+	}
+
+	function clearShelfIcon() {
+		shelfIcon = '';
+	}
 </script>
 
 <div class="space-y-6">
@@ -117,14 +130,14 @@
 			<button
 				type="button"
 				onclick={() => isMagicShelf = false}
-				class="rounded-md px-3 py-2 text-sm font-medium transition-colors {isMagicShelf ? 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]' : 'bg-[var(--color-primary-500)] text-white'}"
+				class="rounded-md border px-3 py-2 text-sm font-medium transition-colors {isMagicShelf ? 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]' : 'border-[var(--color-primary-500)]/45 bg-[var(--color-primary-500)]/10 text-[var(--color-primary-400)]'}"
 			>
 				Regular Shelf
 			</button>
 			<button
 				type="button"
 				onclick={() => isMagicShelf = true}
-				class="rounded-md px-3 py-2 text-sm font-medium transition-colors {isMagicShelf ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+				class="rounded-md border px-3 py-2 text-sm font-medium transition-colors {isMagicShelf ? 'border-[var(--color-primary-500)]/45 bg-[var(--color-primary-500)]/10 text-[var(--color-primary-400)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 			>
 				Magic Shelf
 			</button>
@@ -147,20 +160,57 @@
 						>
 					</div>
 					<div>
-						<label for="shelf-icon" class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
+						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
 							Icon
-						</label>
-						<select
-							id="shelf-icon"
-							bind:value={shelfIcon}
-							class="w-full px-3 py-2 bg-[var(--color-surface-overlay)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-						>
-						<option value="bookmark">📚 Bookmark</option>
-						<option value="star">⭐ Star</option>
-						<option value="heart">❤️ Heart</option>
-						<option value="fire">🔥 Fire</option>
-						<option value="magic">✨ Magic</option>
-					</select>
+						</div>
+						{#if currentShelfIcon}
+							<div class="flex items-center gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2">
+								<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[var(--color-surface-overlay)] text-[var(--color-primary-400)]">
+									{#if currentShelfIcon.svg}
+										<div class="shelf-icon-preview h-5 w-5">{@html currentShelfIcon.svg}</div>
+									{:else}
+										<span class="text-xs font-semibold uppercase">{currentShelfIcon.name.slice(0, 1) || '?'}</span>
+									{/if}
+								</div>
+								<div class="min-w-0 flex-1">
+									<div class="truncate text-sm font-medium text-[var(--color-surface-text)]">{currentShelfIcon.label}</div>
+									<div class="text-xs text-[var(--color-surface-text-muted)]">
+										{currentShelfIcon.source === 'custom' ? 'Custom SVG' : currentShelfIcon.source === 'svg' ? 'SVG Library' : 'Prime Icons'}
+									</div>
+								</div>
+								<button
+									type="button"
+									onclick={() => showShelfIconPicker = true}
+									class="inline-flex h-8 items-center rounded-md border border-[var(--color-surface-border)] px-2 text-xs font-medium text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)]"
+								>
+									Change
+								</button>
+								<button
+									type="button"
+									onclick={clearShelfIcon}
+									class="inline-flex h-8 w-8 items-center justify-center rounded-md text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+									title="Remove icon"
+									aria-label="Remove icon"
+								>
+									<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+										<path d="M18 6 6 18"></path>
+										<path d="m6 6 12 12"></path>
+									</svg>
+								</button>
+							</div>
+						{:else}
+							<button
+								type="button"
+								onclick={() => showShelfIconPicker = true}
+								class="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-3 text-sm font-medium text-[var(--color-primary-400)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)]"
+							>
+								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<path d="M12 5v14"></path>
+									<path d="M5 12h14"></path>
+								</svg>
+								Select icon
+							</button>
+						{/if}
 				</div>
 			</div>
 
@@ -171,7 +221,7 @@
 							<button
 								type="button"
 								onclick={addCondition}
-								class="px-3 py-1 bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white rounded-lg text-sm transition-colors"
+								class="accent-action rounded-lg px-3 py-1 text-sm font-medium transition-colors"
 							>
 							Add Rule
 						</button>
@@ -293,7 +343,7 @@
 						type="button"
 						onclick={createShelf}
 						disabled={!shelfName.trim() || isSubmitting}
-						class="px-4 py-2 bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+						class="accent-action rounded-lg px-4 py-2 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 					{#if isSubmitting}
 						Creating...
@@ -307,3 +357,17 @@
 		</div>
 	</div>
 </div>
+
+<LibraryIconPicker
+	open={showShelfIconPicker}
+	selectedIcon={shelfIcon}
+	onSelect={selectShelfIcon}
+	onClose={() => showShelfIconPicker = false}
+/>
+
+<style>
+	.shelf-icon-preview :global(svg) {
+		height: 100%;
+		width: 100%;
+	}
+</style>

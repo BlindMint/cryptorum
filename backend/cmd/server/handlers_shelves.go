@@ -19,43 +19,72 @@ type ShelfResponse struct {
 	RulesJSON string `json:"rules_json,omitempty"`
 	SortBy    string `json:"sort_by,omitempty"`
 	SortDir   string `json:"sort_dir,omitempty"`
+	SortOrder int64  `json:"sort_order"`
 	BookCount int64  `json:"book_count"`
 }
 
 func getShelvesHandler(w http.ResponseWriter, r *http.Request) {
 	current := getUserFromContext(r.Context())
 	ownerClause, ownerArgs := userOwnershipClause(current, "s")
+	libraryOwnerClause, libraryOwnerArgs := userOwnershipClause(current, "l")
+	queryArgs := append([]interface{}{}, libraryOwnerArgs...)
+	queryArgs = append(queryArgs, ownerArgs...)
 	rows, err := appDB.Query(`
 		SELECT s.id, s.name, COALESCE(s.icon, '') as icon, s.is_magic,
 		       COALESCE(s.rules_json, '') as rules_json,
 		       COALESCE(s.sort_by, '') as sort_by,
 		       COALESCE(s.sort_dir, '') as sort_dir,
-		       COUNT(bs.book_id) as book_count
+		       COALESCE(s.sort_order, 0) as sort_order,
+		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL AND `+libraryOwnerClause+` THEN b.id END) as book_count
 		FROM shelf s
 		LEFT JOIN book_shelf bs ON s.id = bs.shelf_id
+		LEFT JOIN book b ON bs.book_id = b.id
+		LEFT JOIN library l ON b.library_id = l.id
+		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
 		WHERE `+ownerClause+`
-		GROUP BY s.id
-		ORDER BY s.name
-	`, ownerArgs...)
+		GROUP BY s.id, s.name, s.icon, s.is_magic, s.rules_json, s.sort_by, s.sort_dir, s.sort_order
+		ORDER BY CASE WHEN COALESCE(s.sort_order, 0) = 0 THEN 1 ELSE 0 END, s.sort_order, s.name COLLATE NOCASE
+	`, queryArgs...)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch shelves")
 		return
 	}
-	defer rows.Close()
 
 	shelves := []ShelfResponse{}
 	for rows.Next() {
 		var s ShelfResponse
-		if err := rows.Scan(&s.ID, &s.Name, &s.Icon, &s.IsMagic, &s.RulesJSON, &s.SortBy, &s.SortDir, &s.BookCount); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Icon, &s.IsMagic, &s.RulesJSON, &s.SortBy, &s.SortDir, &s.SortOrder, &s.BookCount); err != nil {
 			continue
 		}
 		shelves = append(shelves, s)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		errorResponse(w, http.StatusInternalServerError, "Failed to fetch shelves")
+		return
+	}
+	rows.Close()
+
+	for index := range shelves {
+		if shelves[index].IsMagic != 1 {
+			continue
+		}
+		count, err := countMagicShelfBooks(shelves[index].RulesJSON, current)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to count magic shelf books")
+			return
+		}
+		shelves[index].BookCount = count
 	}
 
 	jsonResponse(w, http.StatusOK, shelves)
 }
 
-func evaluateMagicShelfRules(shelfID string, rulesJSON string, user *AppUser) (*sql.Rows, error) {
+func buildMagicShelfConditions(rulesJSON string) (string, []interface{}, error) {
+	if strings.TrimSpace(rulesJSON) == "" {
+		return "1 = 1", nil, nil
+	}
+
 	// Parse rules
 	var rules struct {
 		Conditions []struct {
@@ -66,7 +95,7 @@ func evaluateMagicShelfRules(shelfID string, rulesJSON string, user *AppUser) (*
 	}
 
 	if err := json.Unmarshal([]byte(rulesJSON), &rules); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	// Build WHERE clause from conditions
@@ -100,7 +129,7 @@ func evaluateMagicShelfRules(shelfID string, rulesJSON string, user *AppUser) (*
 				args = append(args, condition.Value)
 			case "contains":
 				conditions = append(conditions, "COALESCE(bm.series, '') LIKE ?")
-				args = append(args, "%"+condition.Value.(string)+"%")
+				args = append(args, "%"+fmt.Sprintf("%v", condition.Value)+"%")
 			}
 		case "genres", "tags":
 			switch condition.Operator {
@@ -119,7 +148,7 @@ func evaluateMagicShelfRules(shelfID string, rulesJSON string, user *AppUser) (*
 				args = append(args, condition.Value)
 			case "contains":
 				conditions = append(conditions, "COALESCE(bm.publisher, '') LIKE ?")
-				args = append(args, "%"+condition.Value.(string)+"%")
+				args = append(args, "%"+fmt.Sprintf("%v", condition.Value)+"%")
 			}
 		case "language":
 			switch condition.Operator {
@@ -162,6 +191,15 @@ func evaluateMagicShelfRules(shelfID string, rulesJSON string, user *AppUser) (*
 	if len(conditions) > 0 {
 		whereClause = strings.Join(conditions, " AND ")
 	}
+
+	return whereClause, args, nil
+}
+
+func evaluateMagicShelfRules(shelfID string, rulesJSON string, user *AppUser) (*sql.Rows, error) {
+	whereClause, args, err := buildMagicShelfConditions(rulesJSON)
+	if err != nil {
+		return nil, err
+	}
 	ownerClause, ownerArgs := userOwnershipClause(user, "l")
 
 	query := fmt.Sprintf(`
@@ -175,12 +213,39 @@ func evaluateMagicShelfRules(shelfID string, rulesJSON string, user *AppUser) (*
 			LEFT JOIN book_metadata bm ON b.id = bm.book_id
 			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
 			WHERE (%s) AND %s
+			  AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL)
 			ORDER BY bm.title
 		`, whereClause, ownerClause)
 
 	queryArgs := append([]interface{}{userIDForScopedRows(user)}, args...)
 	queryArgs = append(queryArgs, ownerArgs...)
 	return appDB.Query(query, queryArgs...)
+}
+
+func countMagicShelfBooks(rulesJSON string, user *AppUser) (int64, error) {
+	whereClause, args, err := buildMagicShelfConditions(rulesJSON)
+	if err != nil {
+		return 0, err
+	}
+	ownerClause, ownerArgs := userOwnershipClause(user, "l")
+
+	query := fmt.Sprintf(`
+		SELECT COUNT(DISTINCT b.id)
+		FROM book b
+		JOIN library l ON b.library_id = l.id
+		LEFT JOIN book_metadata bm ON b.id = bm.book_id
+		LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
+		WHERE (%s) AND %s
+		  AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL)
+	`, whereClause, ownerClause)
+
+	queryArgs := append([]interface{}{userIDForScopedRows(user)}, args...)
+	queryArgs = append(queryArgs, ownerArgs...)
+	var count int64
+	if err := appDB.QueryRow(query, queryArgs...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func createShelfHandler(w http.ResponseWriter, r *http.Request) {
@@ -202,10 +267,12 @@ func createShelfHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var nextSortOrder int64
+	_ = appDB.QueryRow(`SELECT COALESCE(MAX(sort_order), 0) + 1 FROM shelf WHERE owner_user_id = ?`, current.ID).Scan(&nextSortOrder)
 	result, err := appDB.Exec(`
-		INSERT INTO shelf (name, icon, is_magic, rules_json, sort_by, sort_dir, owner_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, req.Name, req.Icon, req.IsMagic, req.RulesJSON, req.SortBy, req.SortDir, current.ID)
+		INSERT INTO shelf (name, icon, is_magic, rules_json, sort_by, sort_dir, owner_user_id, sort_order)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, req.Name, req.Icon, req.IsMagic, req.RulesJSON, req.SortBy, req.SortDir, current.ID, nextSortOrder)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to create shelf")
 		return
@@ -213,10 +280,11 @@ func createShelfHandler(w http.ResponseWriter, r *http.Request) {
 
 	id, _ := result.LastInsertId()
 	jsonResponse(w, http.StatusCreated, ShelfResponse{
-		ID:      id,
-		Name:    req.Name,
-		Icon:    req.Icon,
-		IsMagic: req.IsMagic,
+		ID:        id,
+		Name:      req.Name,
+		Icon:      req.Icon,
+		IsMagic:   req.IsMagic,
+		SortOrder: nextSortOrder,
 	})
 }
 
@@ -234,23 +302,87 @@ func getShelfHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var s ShelfResponse
+	libraryOwnerClause, libraryOwnerArgs := userOwnershipClause(current, "l")
 	err = appDB.QueryRow(`
 		SELECT s.id, s.name, COALESCE(s.icon, '') as icon, s.is_magic,
 		       COALESCE(s.rules_json, '') as rules_json,
 		       COALESCE(s.sort_by, '') as sort_by,
 		       COALESCE(s.sort_dir, '') as sort_dir,
-		       COUNT(bs.book_id) as book_count
+		       COALESCE(s.sort_order, 0) as sort_order,
+		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL AND `+libraryOwnerClause+` THEN b.id END) as book_count
 		FROM shelf s
 		LEFT JOIN book_shelf bs ON s.id = bs.shelf_id
+		LEFT JOIN book b ON bs.book_id = b.id
+		LEFT JOIN library l ON b.library_id = l.id
+		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
 		WHERE s.id = ?
-		GROUP BY s.id
-	`, shelfID).Scan(&s.ID, &s.Name, &s.Icon, &s.IsMagic, &s.RulesJSON, &s.SortBy, &s.SortDir, &s.BookCount)
+		GROUP BY s.id, s.name, s.icon, s.is_magic, s.rules_json, s.sort_by, s.sort_dir, s.sort_order
+	`, append(libraryOwnerArgs, shelfID)...).Scan(&s.ID, &s.Name, &s.Icon, &s.IsMagic, &s.RulesJSON, &s.SortBy, &s.SortDir, &s.SortOrder, &s.BookCount)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Shelf not found")
 		return
 	}
+	if s.IsMagic == 1 {
+		count, err := countMagicShelfBooks(s.RulesJSON, current)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to count magic shelf books")
+			return
+		}
+		s.BookCount = count
+	}
 
 	jsonResponse(w, http.StatusOK, s)
+}
+
+func updateShelfOrderHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionManageLibraries) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+	if current == nil {
+		errorResponse(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	var req struct {
+		ShelfIDs []int64 `json:"shelf_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.ShelfIDs) == 0 {
+		errorResponse(w, http.StatusBadRequest, "Invalid shelf order")
+		return
+	}
+
+	tx, err := appDB.Begin()
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to start transaction")
+		return
+	}
+	defer tx.Rollback()
+
+	for index, id := range req.ShelfIDs {
+		query := `UPDATE shelf SET sort_order = ? WHERE id = ?`
+		args := []interface{}{index + 1, id}
+		if !userCanAccessAllData(current) {
+			query += ` AND owner_user_id = ?`
+			args = append(args, current.ID)
+		}
+		result, err := tx.Exec(query, args...)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to update shelf order")
+			return
+		}
+		if affected, _ := result.RowsAffected(); affected == 0 {
+			errorResponse(w, http.StatusForbidden, "Permission denied")
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to save shelf order")
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func updateShelfHandler(w http.ResponseWriter, r *http.Request) {
@@ -354,15 +486,11 @@ func getShelfBooksHandler(w http.ResponseWriter, r *http.Request) {
 				LEFT JOIN book_metadata bm ON b.id = bm.book_id
 				LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
 				WHERE bs.shelf_id = ? AND `+ownerClause+`
+				  AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL)
 				ORDER BY bm.title
 			`, append([]interface{}{userIDForScopedRows(current), shelfID}, ownerArgs...)...)
 	}
 
-	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to fetch shelf books")
-		return
-	}
-	defer rows.Close()
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch shelf books")
 		return
