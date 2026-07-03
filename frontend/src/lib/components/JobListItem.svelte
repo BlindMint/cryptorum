@@ -86,6 +86,11 @@
 			const phase = job.result?.phase;
 			const counts = job.result?.status_counts ?? {};
 			if (typeof imported === 'number') details.push(`${imported} imported`);
+			if (typeof counts.moved_library === 'number' && counts.moved_library > 0) details.push(`${counts.moved_library} moved`);
+			if (typeof counts.relinked === 'number' && counts.relinked > 0) details.push(`${counts.relinked} relinked`);
+			if (typeof counts.restored === 'number' && counts.restored > 0) details.push(`${counts.restored} restored`);
+			if (typeof counts.changed === 'number' && counts.changed > 0) details.push(`${counts.changed} changed`);
+			if (typeof counts.duplicate === 'number' && counts.duplicate > 0) details.push(`${counts.duplicate} duplicates`);
 			if (typeof counts.updated === 'number' && counts.updated > 0) details.push(`${counts.updated} updated`);
 			if (typeof counts.unchanged === 'number' && counts.unchanged > 0) details.push(`${counts.unchanged} unchanged`);
 			if (typeof counts.skipped === 'number' && counts.skipped > 0) details.push(`${counts.skipped} skipped`);
