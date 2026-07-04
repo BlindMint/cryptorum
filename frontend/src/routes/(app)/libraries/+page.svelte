@@ -92,12 +92,17 @@
 
 		{#if libraries.length > 0}
 			<div class="catalog-page-controls">
-				<input
-					type="search"
-					bind:value={searchQuery}
-					placeholder="Search libraries"
-					class="catalog-page-control"
-				>
+				<div class="catalog-search-field">
+					<svg class="catalog-search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"></path>
+					</svg>
+					<input
+						type="search"
+						bind:value={searchQuery}
+						placeholder="Search libraries"
+						class="catalog-page-control catalog-search-control"
+					>
+				</div>
 				<select
 					bind:value={sortBy}
 					class="catalog-page-control"

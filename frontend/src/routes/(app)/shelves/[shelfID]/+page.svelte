@@ -45,6 +45,7 @@
 	let suppressNextClickBookId: number | null = null;
 	let longPressTouchStart: { x: number; y: number } | null = null;
 	const LONG_PRESS_MOVE_TOLERANCE = 10;
+	const SHELF_SUMMARY_CACHE_KEY = 'cryptorumShelfSummaries';
 	let bulkSelectionAnchorId = $state<number | null>(null);
 
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
@@ -75,6 +76,9 @@
 
 		activeShelfId = shelfId;
 		resetShelfRouteState();
+		if (!shelf) {
+			seedShelfFromCache(shelfId);
+		}
 		void fetchShelfBooks(shelfId);
 	});
 
@@ -101,7 +105,7 @@
 
 	async function fetchShelfBooks(shelfId = $page.params.shelfID) {
 		const requestToken = ++shelfRequestToken;
-		loading = !shelf;
+		loading = true;
 		try {
 			const [shelfRes, booksRes] = await Promise.all([
 				fetch(`/api/shelves/${shelfId}`),
@@ -115,6 +119,9 @@
 
 			shelf = nextShelf;
 			books = nextBooks;
+			if (nextShelf) {
+				cacheShelfSummary(nextShelf);
+			}
 			applyShelfSortDefaults(nextShelf);
 		} catch (error) {
 			if (requestToken !== shelfRequestToken) return;
@@ -126,6 +133,28 @@
 				loading = false;
 				restoreRouteScrollPosition();
 			}
+		}
+	}
+
+	function seedShelfFromCache(shelfId: string) {
+		try {
+			const cached = JSON.parse(sessionStorage.getItem(SHELF_SUMMARY_CACHE_KEY) || '[]') as any[];
+			const cachedShelf = Array.isArray(cached) ? cached.find((item) => String(item.id) === shelfId) : null;
+			if (cachedShelf) {
+				shelf = cachedShelf;
+			}
+		} catch {
+			// Ignore cache failures; fetchShelfBooks will load the shelf.
+		}
+	}
+
+	function cacheShelfSummary(nextShelf: any) {
+		try {
+			const cached = JSON.parse(sessionStorage.getItem(SHELF_SUMMARY_CACHE_KEY) || '[]') as any[];
+			const shelves = Array.isArray(cached) ? cached.filter((item) => String(item.id) !== String(nextShelf.id)) : [];
+			sessionStorage.setItem(SHELF_SUMMARY_CACHE_KEY, JSON.stringify([...shelves, nextShelf]));
+		} catch {
+			// Ignore storage failures; this is only a render cache.
 		}
 	}
 
@@ -487,11 +516,7 @@
 </script>
 
 <div class="catalog-page-shell space-y-6">
-	{#if loading}
-		<div class="flex justify-center py-12">
-			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
-		</div>
-	{:else if shelf}
+	{#if shelf}
 		<div class="catalog-page-header">
 			<div class="catalog-page-header-row">
 				<div class="catalog-page-title-row">
@@ -546,11 +571,14 @@
 
 			<div class="grid min-w-0 grid-cols-[minmax(0,1fr)_2.5rem_auto] items-center gap-2">
 				<div class="relative min-w-0">
+					<svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"></path>
+					</svg>
 					<input
 						type="search"
 						bind:value={shelfSearch}
 						placeholder="Search this shelf"
-						class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 pr-9 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+						class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-2 pl-9 pr-9 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 					>
 					{#if shelfSearch}
 						<button
@@ -679,7 +707,11 @@
 			<div class="-mt-3 text-sm font-medium text-[var(--color-surface-text-muted)]">{selectedBooks.size} selected</div>
 		{/if}
 
-		{#if books.length === 0}
+		{#if loading && books.length === 0}
+			<div class="flex justify-center py-12">
+				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
+			</div>
+		{:else if books.length === 0}
 			<div class="text-center py-16 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">
 				<svg class="w-16 h-16 text-[var(--color-surface-text-muted)] mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
@@ -913,6 +945,10 @@
 				</div>
 			</div>
 		</div>
+	</div>
+{:else if loading}
+	<div class="flex justify-center py-12">
+		<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
 	</div>
 {/if}
 
