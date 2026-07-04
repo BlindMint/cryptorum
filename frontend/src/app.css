@@ -167,6 +167,27 @@ body::before {
 	box-shadow: 0 0 0 2px var(--color-primary-500);
 }
 
+.catalog-search-field {
+	position: relative;
+	min-width: 0;
+}
+
+.catalog-search-icon {
+	pointer-events: none;
+	position: absolute;
+	left: 0.75rem;
+	top: 50%;
+	height: 1rem;
+	width: 1rem;
+	transform: translateY(-50%);
+	color: var(--color-surface-text-muted);
+}
+
+.catalog-search-control {
+	width: 100%;
+	padding-left: 2.25rem;
+}
+
 .catalog-page-action {
 	display: inline-flex;
 	height: 2.5rem;

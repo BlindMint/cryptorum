@@ -56,6 +56,7 @@
 	const SIDEBAR_MAX_WIDTH = 400;
 	const SIDEBAR_STORAGE_KEY = 'sidebarWidth';
 	const LIBRARY_NAME_CACHE_KEY = 'cryptorumLibraryNames';
+	const SHELF_SUMMARY_CACHE_KEY = 'cryptorumShelfSummaries';
 
 	function clampSidebarWidth(width: number): number {
 		return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -333,7 +334,10 @@
 
 			if (shelvesRes.ok) {
 				const sh = await shelvesRes.json();
-				if (sh) shelves = sh;
+				if (sh) {
+					shelves = sh;
+					cacheShelfSummaries(sh);
+				}
 			}
 			await appActivity.refresh();
 		} catch (e) {
@@ -349,6 +353,14 @@
 			sessionStorage.setItem(LIBRARY_NAME_CACHE_KEY, JSON.stringify(names));
 		} catch {
 			// Ignore storage failures; the library page will still fetch the name.
+		}
+	}
+
+	function cacheShelfSummaries(nextShelves: Shelf[]) {
+		try {
+			sessionStorage.setItem(SHELF_SUMMARY_CACHE_KEY, JSON.stringify(nextShelves));
+		} catch {
+			// Ignore storage failures; shelf pages will still fetch fresh data.
 		}
 	}
 

@@ -19,20 +19,45 @@
 	let createMagicShelf = $state(false);
 	let searchQuery = $state('');
 	let sortBy = $state<'custom' | 'name' | 'count' | 'type'>('custom');
+	const SHELF_SUMMARY_CACHE_KEY = 'cryptorumShelfSummaries';
 
 	onMount(async () => {
+		seedShelvesFromCache();
 		await fetchShelves();
 	});
 
 	async function fetchShelves() {
-		loading = true;
+		loading = shelves.length === 0;
 		try {
 			const res = await fetch('/api/shelves', { cache: 'no-store' });
-			if (res.ok) shelves = await res.json();
+			if (res.ok) {
+				shelves = await res.json();
+				cacheShelfSummaries(shelves);
+			}
 		} catch (e) {
 			console.error('Failed to fetch shelves:', e);
 		} finally {
 			loading = false;
+		}
+	}
+
+	function seedShelvesFromCache() {
+		try {
+			const cached = JSON.parse(sessionStorage.getItem(SHELF_SUMMARY_CACHE_KEY) || '[]') as Shelf[];
+			if (Array.isArray(cached) && cached.length > 0) {
+				shelves = cached;
+				loading = false;
+			}
+		} catch {
+			// Ignore cache failures; the network fetch below will populate shelves.
+		}
+	}
+
+	function cacheShelfSummaries(nextShelves: Shelf[]) {
+		try {
+			sessionStorage.setItem(SHELF_SUMMARY_CACHE_KEY, JSON.stringify(nextShelves));
+		} catch {
+			// Ignore storage failures; this is only a render cache.
 		}
 	}
 
@@ -105,12 +130,17 @@
 
 		{#if shelves.length > 0}
 			<div class="catalog-page-controls">
-				<input
-					type="search"
-					bind:value={searchQuery}
-					placeholder="Search shelves"
-					class="catalog-page-control"
-				>
+				<div class="catalog-search-field">
+					<svg class="catalog-search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"></path>
+					</svg>
+					<input
+						type="search"
+						bind:value={searchQuery}
+						placeholder="Search shelves"
+						class="catalog-page-control catalog-search-control"
+					>
+				</div>
 				<select
 					bind:value={sortBy}
 					class="catalog-page-control"
