@@ -743,6 +743,17 @@
 							<circle cx="15" cy="17" r="1.5"></circle>
 						</svg>
 						<span class="truncate flex-1 min-w-0">{shelf.name}</span>
+						{#if shelf.is_magic === 1}
+							<span
+								class="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-purple-300"
+								title="Magic shelf"
+								aria-label="Magic shelf"
+							>
+								<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+								</svg>
+							</span>
+						{/if}
 					</a>
 					<span class="mr-2 inline-flex h-7 min-w-8 flex-shrink-0 items-center justify-center rounded-md bg-[var(--color-surface-700)] px-2 text-xs font-medium text-[var(--color-surface-500)]">
 						{shelf.book_count}

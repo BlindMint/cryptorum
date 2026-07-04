@@ -280,7 +280,7 @@
 	}
 
 	function getShelfTypeLabel(): string {
-		return shelf?.is_magic === 1 ? 'Smart rules' : 'Manual';
+		return shelf?.is_magic === 1 ? 'Magic' : 'Manual';
 	}
 
 	function getShelfTypeClass(): string {
@@ -499,8 +499,13 @@
 				<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">{shelf.name}</h1>
 				<p class="mt-1 text-[var(--color-surface-text-muted)]">
 					{getSearchCountLabel()}
-					<span class="ml-2 text-xs font-medium uppercase tracking-wide {getShelfTypeClass()}">
-						{getShelfTypeLabel()}
+					<span class="ml-2 inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide {getShelfTypeClass()}">
+						{#if shelf.is_magic === 1}
+							<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+							</svg>
+						{/if}
+						<span>{getShelfTypeLabel()}</span>
 					</span>
 				</p>
 			</div>
