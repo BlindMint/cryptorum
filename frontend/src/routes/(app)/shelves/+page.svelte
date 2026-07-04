@@ -71,19 +71,19 @@
 	}
 </script>
 
-<div class="space-y-6">
-	<div class="space-y-3">
-		<div class="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-			<div class="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
-				<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">Shelves</h1>
-				<p class="whitespace-nowrap text-sm text-[var(--color-surface-text-muted)]">{getShelfCountLabel()}</p>
+<div class="catalog-page-shell space-y-6">
+	<div class="catalog-page-header">
+		<div class="catalog-page-header-row">
+			<div class="catalog-page-title-row">
+				<h1 class="catalog-page-title">Shelves</h1>
+				<p class="catalog-page-count">{getShelfCountLabel()}</p>
 			</div>
 
-			<div class="flex flex-wrap gap-3 lg:justify-end">
+			<div class="catalog-page-actions">
 				<button
 					type="button"
 					onclick={() => openCreateShelf(false)}
-					class="inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-2 font-medium text-[var(--color-surface-text)] transition-colors hover:border-[var(--color-primary-500)]/45 hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-400)]"
+					class="catalog-page-action catalog-page-action-secondary"
 				>
 					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
@@ -93,7 +93,7 @@
 				<button
 					type="button"
 					onclick={() => openCreateShelf(true)}
-					class="accent-action inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 font-medium transition-colors"
+					class="accent-action catalog-page-action"
 				>
 					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
@@ -104,16 +104,16 @@
 		</div>
 
 		{#if shelves.length > 0}
-			<div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+			<div class="catalog-page-controls">
 				<input
 					type="search"
 					bind:value={searchQuery}
 					placeholder="Search shelves"
-					class="min-w-0 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+					class="catalog-page-control"
 				>
 				<select
 					bind:value={sortBy}
-					class="min-w-0 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+					class="catalog-page-control"
 				>
 					<option value="custom">Sidebar order</option>
 					<option value="name">Sort by name</option>

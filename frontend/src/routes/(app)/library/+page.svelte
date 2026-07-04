@@ -150,6 +150,7 @@
 	const BACKGROUND_REFRESH_IDLE_INTERVAL_MS = 30000;
 	const MAX_REFRESH_LIMIT = 200;
 	const BULK_SELECTION_STORAGE_KEY = 'cryptorumLibraryBulkSelection';
+	const LIBRARY_NAME_CACHE_KEY = 'cryptorumLibraryNames';
 	const FILTER_PANEL_PARAM_KEYS = ['author', 'series', 'genre', 'genre_mode', 'tags', 'tag_mode', 'format', 'status', 'filter_mode', 'value_filter_mode'];
 	const LATIN_CONFUSABLE_SORT_MAP: Record<string, string> = {
 		'Α': 'A', 'А': 'A', 'Β': 'B', 'В': 'B', 'Ε': 'E', 'Е': 'E', 'Ζ': 'Z',
@@ -228,14 +229,38 @@
 			libraryName = '';
 			return;
 		}
+		const requestedLibraryId = libraryFilter;
+		const cachedName = getCachedLibraryName(requestedLibraryId);
+		libraryName = cachedName;
 		try {
-			const res = await fetch(`/api/libraries/${libraryFilter}`);
+			const res = await fetch(`/api/libraries/${requestedLibraryId}`);
 			if (res.ok) {
 				const data = await res.json();
+				if (libraryFilter !== requestedLibraryId) return;
 				libraryName = data.name || '';
+				cacheLibraryName(requestedLibraryId, libraryName);
 			}
 		} catch (e) {
 			console.error('Failed to fetch library name:', e);
+		}
+	}
+
+	function getCachedLibraryName(libraryId: string): string {
+		try {
+			const names = JSON.parse(sessionStorage.getItem(LIBRARY_NAME_CACHE_KEY) || '{}') as Record<string, string>;
+			return names[libraryId] || '';
+		} catch {
+			return '';
+		}
+	}
+
+	function cacheLibraryName(libraryId: string, name: string) {
+		try {
+			const names = JSON.parse(sessionStorage.getItem(LIBRARY_NAME_CACHE_KEY) || '{}') as Record<string, string>;
+			names[libraryId] = name;
+			sessionStorage.setItem(LIBRARY_NAME_CACHE_KEY, JSON.stringify(names));
+		} catch {
+			// Ignore storage failures; this is only a render cache.
 		}
 	}
 
@@ -1333,10 +1358,10 @@
 <div class="pb-20" style={`--filter-panel-offset: ${$filterPanelWidth + 24}px;`}>
 		<div class="sticky top-0 z-30 px-3 py-3 transition-all duration-200 sm:px-6 sm:py-4 {toolbarScrolled ? 'border-b border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/80 shadow-[0_1px_0_rgba(255,255,255,0.04),0_10px_24px_rgba(0,0,0,0.16)] backdrop-blur-md' : 'border-b border-transparent bg-transparent shadow-none backdrop-blur-0'} {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}">
 				<div bind:this={toolbarContainer} class="space-y-3">
-				<div class="flex min-w-0 items-start justify-between gap-3">
+				<div class="relative flex min-w-0 items-start justify-between gap-3 {libraryFilter ? 'pr-12 sm:pr-36' : ''}">
 					<div class="min-w-0">
 						<div class="flex min-w-0 items-baseline gap-2 sm:gap-3">
-							<h1 class="truncate text-xl font-bold text-[var(--color-surface-text)] sm:text-2xl">{libraryFilter ? libraryName || 'Library' : 'All Books'}</h1>
+							<h1 class="truncate text-xl font-bold text-[var(--color-surface-text)] sm:text-2xl">{libraryFilter ? libraryName : 'All Books'}</h1>
 							{#if totalBooks > 0}
 								<p class="whitespace-nowrap text-sm text-[var(--color-surface-text-muted)]">{totalBooks} books</p>
 							{/if}
@@ -1351,7 +1376,7 @@
 						<button
 							type="button"
 							onclick={openEditLibraryModal}
-							class="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:border-[var(--color-primary-500)]/50 hover:text-[var(--color-primary-400)]"
+							class="absolute right-0 top-0 inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:border-[var(--color-primary-500)]/50 hover:text-[var(--color-primary-400)]"
 							title="Edit Library"
 						>
 							<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

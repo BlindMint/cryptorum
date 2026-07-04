@@ -91,6 +91,133 @@ body::before {
 	opacity: 0.5;
 }
 
+.catalog-page-shell {
+	padding: 0.75rem 0.75rem 5rem;
+}
+
+.catalog-page-header {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+
+.catalog-page-header-row {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+
+.catalog-page-title-row {
+	display: flex;
+	min-width: 0;
+	flex-wrap: wrap;
+	align-items: baseline;
+	column-gap: 0.75rem;
+	row-gap: 0.25rem;
+}
+
+.catalog-page-title {
+	min-width: 0;
+	font-size: 1.25rem;
+	line-height: 1.75rem;
+	font-weight: 700;
+	color: var(--color-surface-text);
+}
+
+.catalog-page-count {
+	white-space: nowrap;
+	font-size: 0.875rem;
+	line-height: 1.25rem;
+	color: var(--color-surface-text-muted);
+}
+
+.catalog-page-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+.catalog-page-controls {
+	display: grid;
+	min-width: 0;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.catalog-page-control {
+	height: 2.5rem;
+	min-width: 0;
+	border: 1px solid var(--color-surface-border);
+	border-radius: 0.5rem;
+	background: var(--color-surface-overlay);
+	padding: 0 0.75rem;
+	font-size: 0.875rem;
+	line-height: 1.25rem;
+	color: var(--color-surface-text);
+}
+
+.catalog-page-control::placeholder {
+	color: var(--color-surface-text-muted);
+}
+
+.catalog-page-control:focus {
+	outline: none;
+	box-shadow: 0 0 0 2px var(--color-primary-500);
+}
+
+.catalog-page-action {
+	display: inline-flex;
+	height: 2.5rem;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	border-radius: 0.5rem;
+	padding: 0 0.75rem;
+	font-size: 0.875rem;
+	line-height: 1.25rem;
+	font-weight: 500;
+	transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+	transition-duration: 150ms;
+}
+
+.catalog-page-action-secondary {
+	border: 1px solid var(--color-surface-border);
+	background: var(--color-surface-overlay);
+	color: var(--color-surface-text);
+}
+
+.catalog-page-action-secondary:hover:not(:disabled) {
+	border-color: color-mix(in srgb, var(--color-primary-500) 45%, transparent);
+	background: var(--color-surface-overlay);
+	color: var(--color-primary-400);
+}
+
+@media (min-width: 640px) {
+	.catalog-page-shell {
+		padding: 1rem 1.5rem 5rem;
+	}
+
+	.catalog-page-title {
+		font-size: 1.5rem;
+		line-height: 2rem;
+	}
+}
+
+@media (min-width: 768px) {
+	.catalog-page-header-row {
+		flex-direction: row;
+		align-items: flex-start;
+		justify-content: space-between;
+		margin-bottom: -0.5rem;
+	}
+
+	.catalog-page-actions {
+		justify-content: flex-end;
+	}
+}
+
 input[type="search"]::-webkit-search-cancel-button,
 input[type="search"]::-webkit-search-decoration {
 	appearance: none;
