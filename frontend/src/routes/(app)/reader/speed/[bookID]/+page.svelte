@@ -768,7 +768,7 @@
 	<div
 		bind:this={containerEl}
 		class="speed-reader-root fixed inset-0 z-50 flex flex-col select-none"
-			style="--speed-reader-bg: {readerTheme.bg}; --speed-reader-chrome: {readerTheme.text}; background-color: {readerTheme.bg}; color: {readerTheme.text};"
+		style="--speed-reader-bg: {readerTheme.bg}; --speed-reader-chrome: {readerTheme.text}; background-color: {readerTheme.bg}; color: {readerTheme.text};"
 		role="application"
 		aria-label="Speed Reader"
 	>
@@ -822,7 +822,7 @@
 	<!-- Word Display Area -->
 	<div class="flex-1 flex items-center justify-center relative">
 		{#if loading}
-			<div class="animate-spin rounded-full h-12 w-12 border-b-2" style="border-color: var(--color-primary-500);"></div>
+			<div class="animate-spin rounded-full h-12 w-12 border-b-2" style="border-color: var(--speed-reader-accent);"></div>
 		{:else if words.length > 0}
 			<!-- Focus Indicators -->
 			{#if settings.focusIndicator !== 'off'}
@@ -1123,11 +1123,11 @@
 			<!-- Legend -->
 			<div class="flex-shrink-0 flex items-center gap-4 px-5 py-2 text-xs border-b" style="border-color: {readerTheme.text}10; color: {readerTheme.text}60;">
 				<span class="flex items-center gap-1.5">
-					<span class="inline-block w-3 h-3 rounded-sm" style="background-color: var(--color-primary-500);"></span>
+					<span class="inline-block w-3 h-3 rounded-sm" style="background-color: var(--speed-reader-accent-strong);"></span>
 					Current position
 				</span>
 				<span class="flex items-center gap-1.5">
-					<span class="inline-block w-3 h-3 rounded-sm border-2" style="border-color: var(--color-primary-400);"></span>
+					<span class="inline-block w-3 h-3 rounded-sm border-2" style="border-color: var(--speed-reader-accent);"></span>
 					Selected destination
 				</span>
 			</div>
@@ -1157,20 +1157,20 @@
 										onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); wordPickerPending = idx; } }}
 										class="cursor-pointer rounded px-0.5 py-px transition-colors {
 										isOrigin && isPending
-											? 'text-white'
+											? 'text-[var(--speed-reader-chrome)]'
 											: isOrigin
-												? 'text-white'
+												? 'text-[var(--speed-reader-chrome)]'
 												: isPending
 													? 'outline outline-2'
 													: 'hover:bg-white/10'
 									}"
 									style="{
 										isOrigin && isPending
-											? 'background-color: var(--color-primary-500);'
+											? 'background-color: var(--speed-reader-accent-strong);'
 											: isOrigin
-												? 'background-color: var(--color-primary-500);'
+												? 'background-color: var(--speed-reader-accent-strong);'
 												: isPending
-													? 'outline-color: var(--color-primary-400);'
+													? 'outline-color: var(--speed-reader-accent);'
 													: ''
 									}"
 								>{word.text}</span>&#8203;{' '}
@@ -1215,7 +1215,7 @@
 						type="button"
 						onclick={(e) => confirmWordPicker(e)}
 						class="speed-word-picker-action speed-word-picker-action-primary"
-					style="background-color: var(--color-primary-500); color: white;"
+						style="background-color: var(--speed-reader-accent-strong); border-color: var(--speed-reader-accent-border); color: var(--speed-reader-chrome);"
 				>
 					Start Here
 				</button>
@@ -1242,6 +1242,10 @@
 				--color-surface-overlay: {readerTheme.bg}f2;
 				--color-surface-700: {readerTheme.text}18;
 				--color-surface-600: {readerTheme.text}24;
+				--color-primary-500: var(--speed-reader-accent);
+				--color-primary-600: var(--speed-reader-accent);
+				--color-primary-400: var(--speed-reader-chrome);
+				--color-primary-300: var(--speed-reader-chrome);
 			"
 		>
 			<div class="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
@@ -1249,21 +1253,21 @@
 					<button
 						type="button"
 						onclick={() => activeSettingsTab = 'reading'}
-						class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {activeSettingsTab === 'reading' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+						class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {activeSettingsTab === 'reading' ? 'bg-[var(--speed-reader-accent-strong)] text-[var(--speed-reader-chrome)] ring-1 ring-inset ring-[var(--speed-reader-accent-border)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 					>
 						Reading
 					</button>
 					<button
 						type="button"
 						onclick={() => activeSettingsTab = 'typography'}
-						class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {activeSettingsTab === 'typography' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+						class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {activeSettingsTab === 'typography' ? 'bg-[var(--speed-reader-accent-strong)] text-[var(--speed-reader-chrome)] ring-1 ring-inset ring-[var(--speed-reader-accent-border)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 					>
 						Typography
 					</button>
 					<button
 						type="button"
 						onclick={() => activeSettingsTab = 'focus'}
-						class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {activeSettingsTab === 'focus' ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+						class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {activeSettingsTab === 'focus' ? 'bg-[var(--speed-reader-accent-strong)] text-[var(--speed-reader-chrome)] ring-1 ring-inset ring-[var(--speed-reader-accent-border)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 					>
 						Focus
 					</button>
@@ -1628,7 +1632,14 @@
 
 <style>
 	.speed-reader-root {
-		--speed-reader-top-bar-height: 56px;
+		--speed-reader-top-bar-height: 68px;
+		--speed-reader-accent: var(--speed-reader-chrome, currentColor);
+		--speed-reader-accent-soft: color-mix(in srgb, var(--speed-reader-chrome, currentColor) 12%, transparent);
+		--speed-reader-accent-strong: color-mix(in srgb, var(--speed-reader-chrome, currentColor) 20%, transparent);
+		--speed-reader-accent-border: color-mix(in srgb, var(--speed-reader-chrome, currentColor) 38%, transparent);
+		width: 100vw;
+		max-width: 100vw;
+		overflow: hidden;
 	}
 
 	.top-nav {
@@ -1960,7 +1971,7 @@
 	.speed-word-picker-action {
 		flex: 1;
 		padding: 10px 16px;
-		border: 0;
+		border: 1px solid transparent;
 		border-radius: 10px;
 		font-size: 14px;
 		font-weight: 650;
@@ -1981,8 +1992,9 @@
 
 	.speed-word-picker-action-primary:hover,
 	.speed-word-picker-action-primary:focus-visible {
-		filter: brightness(1.08);
-		box-shadow: 0 10px 24px rgba(34, 197, 94, 0.22);
+		background-color: var(--speed-reader-accent-strong) !important;
+		border-color: var(--speed-reader-accent) !important;
+		box-shadow: 0 10px 24px color-mix(in srgb, currentColor 14%, transparent);
 	}
 
 	@keyframes speed-sheet-in {
@@ -2212,7 +2224,7 @@
 
 	@media (max-width: 768px) {
 		.speed-reader-root {
-			--speed-reader-top-bar-height: 72px;
+			--speed-reader-top-bar-height: 80px;
 		}
 	}
 </style>

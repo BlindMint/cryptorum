@@ -226,6 +226,7 @@ func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []inter
 		conditions = append(conditions, "l.owner_user_id = ?")
 		args = append(args, user.ID)
 	}
+	conditions = append(conditions, "EXISTS (SELECT 1 FROM book_file active_bf WHERE active_bf.book_id = b.id AND active_bf.missing_at IS NULL)")
 	addFilterGroup(func(add func(string, ...interface{})) {
 		for _, value := range req.Author {
 			addAuthorFilterCondition(add, "bm.authors", value)

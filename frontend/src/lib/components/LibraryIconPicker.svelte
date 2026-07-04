@@ -264,7 +264,7 @@
 										<button
 											type="button"
 											onclick={addCustomIcon}
-											class="inline-flex items-center gap-2 rounded-md bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white hover:bg-[var(--color-primary-600)]"
+											class="accent-action inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors"
 										>
 											<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 												<path d="M12 5v14"></path>

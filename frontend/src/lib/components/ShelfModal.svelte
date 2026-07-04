@@ -344,54 +344,36 @@
 
 					<div>
 						<div class="mb-2 block text-sm font-medium text-[var(--color-surface-text)]">Icon</div>
-						{#if currentShelfIcon}
-							<div class="flex items-center gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2">
-								<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[var(--color-surface-overlay)] text-[var(--color-primary-400)]">
-									{#if currentShelfIcon.svg}
-										<div class="shelf-icon-preview h-5 w-5">{@html currentShelfIcon.svg}</div>
-									{:else}
-										<span class="text-xs font-semibold uppercase">{currentShelfIcon.name.slice(0, 1) || '?'}</span>
-									{/if}
-								</div>
-								<div class="min-w-0 flex-1">
-									<div class="truncate text-sm font-medium text-[var(--color-surface-text)]">{currentShelfIcon.label}</div>
-									<div class="text-xs text-[var(--color-surface-text-muted)]">
-										{currentShelfIcon.source === 'custom' ? 'Custom SVG' : currentShelfIcon.source === 'svg' ? 'SVG Library' : 'Prime Icons'}
-									</div>
-								</div>
-								<button
-									type="button"
-									onclick={() => showShelfIconPicker = true}
-									class="inline-flex h-8 items-center rounded-md border border-[var(--color-surface-border)] px-2 text-xs font-medium text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)]"
-								>
-									Change
-								</button>
-								<button
-									type="button"
-									onclick={clearShelfIcon}
-									class="inline-flex h-8 w-8 items-center justify-center rounded-md text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
-									title="Remove icon"
-									aria-label="Remove icon"
-								>
-									<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-										<path d="M18 6 6 18"></path>
-										<path d="m6 6 12 12"></path>
-									</svg>
-								</button>
-							</div>
-						{:else}
+						<div class="flex gap-2">
 							<button
 								type="button"
 								onclick={() => showShelfIconPicker = true}
-								class="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-3 text-sm font-medium text-[var(--color-primary-400)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)]"
+								class="flex min-w-0 flex-1 items-center gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-left transition-colors hover:border-[var(--color-primary-500)]/60 hover:bg-[var(--color-surface-overlay)]"
 							>
-								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-									<path d="M12 5v14"></path>
-									<path d="M5 12h14"></path>
-								</svg>
-								Select icon
+								<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[var(--color-surface-overlay)] text-[var(--color-primary-400)]">
+									{#if currentShelfIcon?.svg}
+										<div class="shelf-icon-preview h-5 w-5">{@html currentShelfIcon.svg}</div>
+									{:else}
+										<span class="text-xs font-semibold uppercase">{(shelfName || '?').slice(0, 1)}</span>
+									{/if}
+								</div>
+								<div class="min-w-0 flex-1">
+									<div class="truncate text-sm font-medium text-[var(--color-surface-text)]">
+										{currentShelfIcon?.label || currentShelfIcon?.name || 'Default icon'}
+									</div>
+									<div class="text-xs text-[var(--color-surface-text-muted)]">Click to choose a different icon</div>
+								</div>
 							</button>
-						{/if}
+							{#if shelfIcon && shelfIcon !== (isMagicShelf ? 'sparkles' : 'bookmark')}
+								<button
+									type="button"
+									onclick={clearShelfIcon}
+									class="inline-flex h-[58px] shrink-0 items-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 text-xs font-medium text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)]/50 hover:text-[var(--color-surface-text)]"
+								>
+									Default
+								</button>
+							{/if}
+						</div>
 					</div>
 				</div>
 

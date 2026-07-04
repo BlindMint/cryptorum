@@ -129,45 +129,60 @@ func buildMagicShelfConditions(rulesJSON string) (string, []interface{}, error) 
 		case "authors":
 			switch condition.Operator {
 			case "contains":
-				key := normalizedAuthorMatchKey(fmt.Sprintf("%v", condition.Value))
+				key := normalizedAuthorMatchKey(strings.TrimSpace(fmt.Sprintf("%v", condition.Value)))
 				if key != "" {
 					conditions = append(conditions, `EXISTS (SELECT 1 FROM json_each(COALESCE(bm.authors, '[]')) WHERE `+normalizedAuthorSQLExpression("value")+` LIKE ?)`)
 					args = append(args, "%"+key+"%")
 				}
 			}
 		case "series":
+			value := strings.TrimSpace(fmt.Sprintf("%v", condition.Value))
+			if value == "" {
+				break
+			}
 			switch condition.Operator {
 			case "equals":
 				conditions = append(conditions, "COALESCE(bm.series, '') = ?")
-				args = append(args, condition.Value)
+				args = append(args, value)
 			case "contains":
 				conditions = append(conditions, "COALESCE(bm.series, '') LIKE ?")
-				args = append(args, "%"+fmt.Sprintf("%v", condition.Value)+"%")
+				args = append(args, "%"+value+"%")
 			}
 		case "genres", "tags":
+			value := strings.TrimSpace(fmt.Sprintf("%v", condition.Value))
+			if value == "" {
+				break
+			}
 			switch condition.Operator {
 			case "contains":
 				tagCondition := hierarchicalJSONFilterCondition("bm.tags")
 				genreCondition := hierarchicalJSONFilterCondition("bm.genres")
-				value := fmt.Sprintf("%v", condition.Value)
 				conditions = append(conditions, "("+tagCondition+" OR "+genreCondition+")")
 				args = append(args, hierarchicalJSONFilterArgs(value)...)
 				args = append(args, hierarchicalJSONFilterArgs(value)...)
 			}
 		case "publisher":
+			value := strings.TrimSpace(fmt.Sprintf("%v", condition.Value))
+			if value == "" {
+				break
+			}
 			switch condition.Operator {
 			case "equals":
 				conditions = append(conditions, "COALESCE(bm.publisher, '') = ?")
-				args = append(args, condition.Value)
+				args = append(args, value)
 			case "contains":
 				conditions = append(conditions, "COALESCE(bm.publisher, '') LIKE ?")
-				args = append(args, "%"+fmt.Sprintf("%v", condition.Value)+"%")
+				args = append(args, "%"+value+"%")
 			}
 		case "language":
+			value := strings.TrimSpace(fmt.Sprintf("%v", condition.Value))
+			if value == "" {
+				break
+			}
 			switch condition.Operator {
 			case "equals":
 				conditions = append(conditions, "COALESCE(bm.language, '') = ?")
-				args = append(args, condition.Value)
+				args = append(args, value)
 			}
 		case "rating":
 			if rating, err := strconv.ParseFloat(fmt.Sprintf("%v", condition.Value), 64); err == nil {
@@ -203,6 +218,8 @@ func buildMagicShelfConditions(rulesJSON string) (string, []interface{}, error) 
 	whereClause := "1 = 1"
 	if len(conditions) > 0 {
 		whereClause = strings.Join(conditions, " AND ")
+	} else if len(rules.Conditions) > 0 {
+		whereClause = "0 = 1"
 	}
 
 	return whereClause, args, nil
