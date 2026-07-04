@@ -5,6 +5,8 @@
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
 	import BulkMetadataEditModal from '$lib/components/BulkMetadataEditModal.svelte';
+	import ShelfModal from '$lib/components/ShelfModal.svelte';
+	import ShelfBookPickerModal from '$lib/components/ShelfBookPickerModal.svelte';
 	import { showFormatOnCover, getFormatColor } from '$lib/stores';
 	import {
 		getBookDetailContextUrl,
@@ -26,15 +28,26 @@
 	let showMetadataMenu = $state(false);
 	let metadataLookupJob = $state<any | null>(null);
 	let showBulkMetadataReview = $state(false);
+	let showEditShelfModal = $state(false);
+	let showAddBooksModal = $state(false);
 	let actionInProgress = $state(false);
+	let deletingShelf = $state(false);
+	let shelfSearch = $state('');
+	let viewMode = $state<'grid' | 'list'>('grid');
+	let shelfSortBy = $state<'title' | 'authors' | 'series' | 'added_at' | 'last_read' | 'status' | 'format'>('title');
+	let shelfSortDir = $state<'asc' | 'desc'>('asc');
 	let longPressTimer: number | null = null;
 	let longPressThreshold = 500;
+	let activeShelfId = $state('');
+	let shelfRequestToken = 0;
 	let suppressNextClickBookId: number | null = null;
 	let longPressTouchStart: { x: number; y: number } | null = null;
 	const LONG_PRESS_MOVE_TOLERANCE = 10;
 	let bulkSelectionAnchorId = $state<number | null>(null);
 
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
+	let visibleBooks = $derived(getVisibleBooks());
+	let existingShelfBookIds = $derived(new Set(books.map((book) => Number(book.id))));
 
 	$effect(() => {
 		const unsub = showFormatOnCover.subscribe((value: boolean) => formatOnCover = value);
@@ -43,26 +56,73 @@
 
 	onMount(async () => {
 		showFormatOnCover.init();
-		await fetchShelfBooks();
 	});
 
-	async function fetchShelfBooks() {
-		loading = true;
+	$effect(() => {
 		const shelfId = $page.params.shelfID;
+		if (!shelfId || shelfId === activeShelfId) return;
+
+		activeShelfId = shelfId;
+		resetShelfRouteState();
+		void fetchShelfBooks(shelfId);
+	});
+
+	function resetShelfRouteState() {
+		clearLongPressTimer();
+		shelf = null;
+		books = [];
+		selectedBooks = new Set();
+		bulkSelectionAnchorId = null;
+		shelfSearch = '';
+		showMetadataMenu = false;
+		showBulkMetadataEdit = false;
+		showBulkMetadataReview = false;
+		showEditShelfModal = false;
+		showAddBooksModal = false;
+		bulkMetadataEditBookIds = [];
+		bulkMetadataLookupBookIds = [];
+		metadataLookupJob = null;
+		deletingShelf = false;
+		actionInProgress = false;
+		suppressNextClickBookId = null;
+		longPressTouchStart = null;
+	}
+
+	async function fetchShelfBooks(shelfId = $page.params.shelfID) {
+		const requestToken = ++shelfRequestToken;
+		loading = true;
 		try {
 			const [shelfRes, booksRes] = await Promise.all([
 				fetch(`/api/shelves/${shelfId}`),
 				fetch(`/api/shelves/${shelfId}/books`)
 			]);
 
-			if (shelfRes.ok) shelf = await shelfRes.json();
-			if (booksRes.ok) books = await booksRes.json();
+			const nextShelf = shelfRes.ok ? await shelfRes.json() : null;
+			const nextBooks = booksRes.ok ? await booksRes.json() : [];
+
+			if (requestToken !== shelfRequestToken) return;
+
+			shelf = nextShelf;
+			books = nextBooks;
+			applyShelfSortDefaults(nextShelf);
 		} catch (error) {
+			if (requestToken !== shelfRequestToken) return;
 			console.error('Failed to fetch shelf:', error);
+			shelf = null;
+			books = [];
 		} finally {
-			loading = false;
-			restoreRouteScrollPosition();
+			if (requestToken === shelfRequestToken) {
+				loading = false;
+				restoreRouteScrollPosition();
+			}
 		}
+	}
+
+	function applyShelfSortDefaults(nextShelf: any) {
+		const allowedSorts = new Set(['title', 'authors', 'series', 'added_at', 'last_read', 'status', 'format']);
+		const nextSortBy = String(nextShelf?.sort_by || 'title');
+		shelfSortBy = allowedSorts.has(nextSortBy) ? nextSortBy as typeof shelfSortBy : 'title';
+		shelfSortDir = nextShelf?.sort_dir === 'desc' ? 'desc' : 'asc';
 	}
 
 	function parseAuthors(authorsJson: string): string {
@@ -74,8 +134,139 @@
 		}
 	}
 
+	function getVisibleBooks() {
+		const query = shelfSearch.trim().toLowerCase();
+		const filtered = !query ? books : books.filter((book) => {
+			const text = [
+				book.title || '',
+				parseAuthors(book.authors || ''),
+				book.format || '',
+				book.status || ''
+			].join(' ').toLowerCase();
+			return query.split(/\s+/).filter(Boolean).every((token) => text.includes(token));
+		});
+		return [...filtered].sort((a, b) => compareShelfBooks(a, b));
+	}
+
+	function compareShelfBooks(a: any, b: any): number {
+		let comparison = 0;
+		if (shelfSortBy === 'authors') {
+			comparison = parseAuthors(a.authors || '').localeCompare(parseAuthors(b.authors || ''), undefined, { sensitivity: 'base' });
+		} else if (shelfSortBy === 'series') {
+			comparison = String(a.series || '').localeCompare(String(b.series || ''), undefined, { numeric: true, sensitivity: 'base' });
+			if (comparison === 0) {
+				comparison = Number(a.series_number || 0) - Number(b.series_number || 0);
+			}
+		} else if (shelfSortBy === 'added_at') {
+			comparison = Number(a.added_at || 0) - Number(b.added_at || 0);
+		} else if (shelfSortBy === 'last_read') {
+			comparison = Number(a.last_read_at || 0) - Number(b.last_read_at || 0);
+		} else if (shelfSortBy === 'status') {
+			comparison = String(a.status || '').localeCompare(String(b.status || ''), undefined, { sensitivity: 'base' });
+		} else if (shelfSortBy === 'format') {
+			comparison = String(a.format || '').localeCompare(String(b.format || ''), undefined, { sensitivity: 'base' });
+		} else {
+			comparison = String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' });
+		}
+		if (comparison === 0) {
+			comparison = String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' });
+		}
+		return shelfSortDir === 'desc' ? -comparison : comparison;
+	}
+
+	function shelfSortLabel() {
+		switch (shelfSortBy) {
+			case 'authors':
+				return 'Author';
+			case 'series':
+				return 'Series';
+			case 'added_at':
+				return 'Added';
+			case 'last_read':
+				return 'Last Read';
+			case 'status':
+				return 'Status';
+			case 'format':
+				return 'Format';
+			default:
+				return 'Title';
+		}
+	}
+
+	function toggleSortDirection() {
+		shelfSortDir = shelfSortDir === 'asc' ? 'desc' : 'asc';
+	}
+
+	async function deleteShelf() {
+		if (!shelf?.id || deletingShelf) return;
+		if (!confirm(`Delete shelf "${shelf.name}"? Books will remain in your libraries.`)) return;
+
+		deletingShelf = true;
+		try {
+			const res = await fetch(`/api/shelves/${shelf.id}`, { method: 'DELETE' });
+			if (res.ok) {
+				await (window as any).refreshSidebar?.();
+				goto('/shelves');
+			} else {
+				console.error('Failed to delete shelf');
+			}
+		} catch (error) {
+			console.error('Failed to delete shelf:', error);
+		} finally {
+			deletingShelf = false;
+		}
+	}
+
+	function getStatusLabel(status: string): string {
+		switch (status) {
+			case 'reading':
+				return 'Currently Reading';
+			case 'finished':
+				return 'Already Read';
+			default:
+				return 'Unread';
+		}
+	}
+
+	function getBookDetailHref(bookId: number): string {
+		return `/book/${bookId}`;
+	}
+
+	function getBookCoverSrc(book: any): string | null {
+		return book.cover_path ? `/api/covers/${book.id}/thumb` : null;
+	}
+
+	function getBookAuthors(book: any): string {
+		return book.authors && book.authors !== '[]' ? parseAuthors(book.authors) : '';
+	}
+
+	function getBookTitle(book: any): string {
+		return book.title || 'Untitled';
+	}
+
+	function getBookFormat(book: any): string {
+		return book.format || '';
+	}
+
+	function getShelfTypeLabel(): string {
+		return shelf?.is_magic === 1 ? 'Smart rules' : 'Manual';
+	}
+
+	function getShelfTypeClass(): string {
+		return shelf?.is_magic === 1 ? 'text-purple-300' : 'text-[var(--color-primary-400)]';
+	}
+
+	function clearShelfSearch() {
+		shelfSearch = '';
+	}
+
+	function getSearchCountLabel(): string {
+		if (!shelfSearch.trim()) return `${books.length} books`;
+		return `${visibleBooks.length} of ${books.length} books`;
+	}
+
 	function getVisibleBookIds(): number[] {
-		return books.map((book) => book.id);
+		return visibleBooks.map((book) => book.id);
 	}
 
 	function openBookDetailFromList(event: MouseEvent, bookId: number) {
@@ -195,7 +386,7 @@
 	}
 
 	function selectAllPage() {
-		selectedBooks = new Set(books.map((book) => book.id));
+		selectedBooks = new Set(visibleBooks.map((book) => book.id));
 	}
 
 	function deselectAll() {
@@ -229,6 +420,7 @@
 
 	async function removeSelectedFromShelf() {
 		if (selectedBooks.size === 0 || !shelf) return;
+		if (shelf.is_magic === 1) return;
 		if (!confirmBulkAction({ action: 'remove {count} books from this shelf', count: selectedBooks.size, destructive: true, alwaysConfirm: true })) return;
 
 		actionInProgress = true;
@@ -251,10 +443,22 @@
 			actionInProgress = false;
 		}
 	}
+
+	async function handleShelfSaved() {
+		showEditShelfModal = false;
+		await fetchShelfBooks();
+		await (window as any).refreshSidebar?.();
+	}
+
+	async function handleBooksAdded() {
+		showAddBooksModal = false;
+		await fetchShelfBooks();
+		await (window as any).refreshSidebar?.();
+	}
 </script>
 
 <div class="space-y-6">
-	<a href="/shelves" class="inline-flex items-center text-slate-400 hover:text-white transition-colors">
+	<a href="/shelves" class="inline-flex items-center text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)]">
 		<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
 		</svg>
@@ -263,25 +467,210 @@
 
 	{#if loading}
 		<div class="flex justify-center py-12">
-			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500"></div>
+			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
 		</div>
 	{:else if shelf}
-		<div>
-			<h1 class="text-2xl font-bold text-white">{shelf.name}</h1>
-			<p class="text-slate-400 mt-1">{books.length} books</p>
+		<div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+			<div>
+				<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">{shelf.name}</h1>
+				<p class="mt-1 text-[var(--color-surface-text-muted)]">
+					{getSearchCountLabel()}
+					<span class="ml-2 text-xs font-medium uppercase tracking-wide {getShelfTypeClass()}">
+						{getShelfTypeLabel()}
+					</span>
+				</p>
+			</div>
+			<div class="flex flex-wrap gap-2">
+				{#if shelf.is_magic !== 1}
+					<button
+						type="button"
+						onclick={() => showAddBooksModal = true}
+						class="accent-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+					>
+						<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"></path>
+						</svg>
+						Add Books
+					</button>
+				{/if}
+				<button
+					type="button"
+					onclick={() => showEditShelfModal = true}
+					class="inline-flex items-center gap-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:border-[var(--color-primary-500)]/45 hover:text-[var(--color-primary-400)]"
+				>
+					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"></path>
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 7.125 16.875 4.5"></path>
+					</svg>
+					Edit Shelf
+				</button>
+				<button
+					type="button"
+					onclick={deleteShelf}
+					disabled={deletingShelf}
+					class="inline-flex items-center gap-2 rounded-lg border border-red-500/35 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:border-red-400/60 hover:bg-red-500/15 disabled:opacity-50"
+				>
+					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12m-9 4v6m6-6v6M9 7V4h6v3m-9 0 1 13h10l1-13"></path>
+					</svg>
+					{deletingShelf ? 'Deleting...' : 'Delete'}
+				</button>
+			</div>
+		</div>
+
+		<div class="flex flex-col gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3 xl:flex-row xl:items-center xl:justify-between">
+			<div class="relative min-w-0 flex-1">
+				<input
+					type="search"
+					bind:value={shelfSearch}
+					placeholder="Search this shelf"
+					class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 pr-9 text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+				>
+				{#if shelfSearch}
+					<button
+						type="button"
+						onclick={clearShelfSearch}
+						class="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+						aria-label="Clear shelf search"
+					>
+						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+							<path d="M18 6 6 18"></path>
+							<path d="m6 6 12 12"></path>
+						</svg>
+					</button>
+				{/if}
+			</div>
+			<div class="flex flex-wrap items-center gap-2">
+				<div class="inline-flex overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
+					<button
+						type="button"
+						onclick={() => viewMode = 'grid'}
+						class="px-3 py-2 text-sm font-medium transition-colors {viewMode === 'grid' ? 'bg-[var(--color-primary-500)]/10 text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]'}"
+					>
+						Grid
+					</button>
+					<button
+						type="button"
+						onclick={() => viewMode = 'list'}
+						class="border-l border-[var(--color-surface-border)] px-3 py-2 text-sm font-medium transition-colors {viewMode === 'list' ? 'bg-[var(--color-primary-500)]/10 text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]'}"
+					>
+						List
+					</button>
+				</div>
+				<div class="inline-flex overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
+					<select
+						bind:value={shelfSortBy}
+						class="bg-transparent px-3 py-2 text-sm text-[var(--color-surface-text)] focus:outline-none"
+						aria-label="Sort shelf books"
+					>
+						<option value="title">Title</option>
+						<option value="authors">Author</option>
+						<option value="series">Series</option>
+						<option value="added_at">Added</option>
+						<option value="last_read">Last Read</option>
+						<option value="status">Status</option>
+						<option value="format">Format</option>
+					</select>
+					<button
+						type="button"
+						onclick={toggleSortDirection}
+						class="min-w-14 border-l border-[var(--color-surface-border)] px-2 text-sm font-medium text-[var(--color-primary-400)] transition-colors hover:bg-[var(--color-surface-overlay)]"
+						title={shelfSortDir === 'asc' ? `Sort ${shelfSortLabel()} ascending` : `Sort ${shelfSortLabel()} descending`}
+						aria-label={shelfSortDir === 'asc' ? `Sort ${shelfSortLabel()} ascending` : `Sort ${shelfSortLabel()} descending`}
+					>
+						{shelfSortDir === 'asc' ? 'Asc' : 'Desc'}
+					</button>
+				</div>
+			</div>
+			{#if selectedBooks.size > 0}
+				<div class="text-sm font-medium text-[var(--color-surface-text-muted)]">{selectedBooks.size} selected</div>
+			{/if}
 		</div>
 
 		{#if books.length === 0}
-			<div class="text-center py-16 bg-slate-800 rounded-lg border border-slate-700">
-				<svg class="w-16 h-16 text-slate-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<div class="text-center py-16 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">
+				<svg class="w-16 h-16 text-[var(--color-surface-text-muted)] mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
 				</svg>
-				<h3 class="text-lg font-medium text-white mb-2">No books on this shelf</h3>
-				<p class="text-slate-400">Add books to this shelf from the book detail page</p>
+				<h3 class="text-lg font-medium text-[var(--color-surface-text)] mb-2">No books on this shelf</h3>
+				<p class="text-[var(--color-surface-text-muted)]">
+					{shelf.is_magic === 1 ? 'No books currently match these smart rules.' : 'Use Add Books to build this shelf.'}
+				</p>
+			</div>
+		{:else if visibleBooks.length === 0}
+			<div class="text-center py-16 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">
+				<h3 class="text-lg font-medium text-[var(--color-surface-text)] mb-2">No books match your shelf search</h3>
+				<p class="text-[var(--color-surface-text-muted)]">Clear the shelf search to see all books on this shelf.</p>
+			</div>
+		{:else if viewMode === 'list'}
+			<div class="space-y-2">
+				{#each visibleBooks as book}
+					<div
+						class="group relative rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] transition-all duration-200 hover:border-[var(--color-primary-500)]/40 hover:bg-[var(--color-surface-700)]/60 {selectedBooks.has(book.id) ? 'ring-2 ring-[var(--color-primary-500)] ring-offset-2 ring-offset-[var(--color-surface-base)]' : ''}"
+						data-book-id={book.id}
+						onclick={handleBookClick}
+						onmousedown={handleMouseDown}
+						onmouseup={handleMouseUp}
+						onmouseleave={handleMouseUp}
+						ontouchstart={handleTouchStart}
+						ontouchmove={handleTouchMove}
+						ontouchend={handleTouchEnd}
+						ontouchcancel={handleTouchEnd}
+						onkeydown={handleBookKeydown}
+						role="button"
+						tabindex="0"
+					>
+						<a href={getBookDetailHref(book.id)} class="flex items-center gap-4 p-3" onclick={(event) => openBookDetailFromList(event, book.id)}>
+							<div class="relative w-14 shrink-0 overflow-hidden rounded-md sm:w-16">
+								<BookCoverFrame
+									src={getBookCoverSrc(book)}
+									alt={getBookTitle(book)}
+									format={getBookFormat(book)}
+									mode="cover"
+									frameClass="aspect-[2/3]"
+									imageClass="group-hover:scale-105 transition-transform"
+									placeholderSize="sm"
+								/>
+							</div>
+							<div class="min-w-0 flex-1">
+								<h3 class="truncate text-sm font-semibold text-[var(--color-surface-text)] sm:text-base">{getBookTitle(book)}</h3>
+								{#if getBookAuthors(book)}
+									<p class="truncate text-sm text-[var(--color-surface-text-muted)]">{getBookAuthors(book)}</p>
+								{/if}
+								<div class="mt-2 flex flex-wrap items-center gap-2">
+									<span class="rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">
+										{getStatusLabel(book.status)}
+									</span>
+									{#if getBookFormat(book)}
+										{@const formatColor = getFormatColor(getBookFormat(book))}
+										<span
+											class="rounded-md border border-black/20 px-2 py-0.5 text-xs font-medium uppercase"
+											style="background-color: {formatColor.bg}; color: {formatColor.text};"
+										>
+											{getBookFormat(book)}
+										</span>
+									{/if}
+								</div>
+							</div>
+						</a>
+						<button
+							type="button"
+							onclick={(event) => toggleBookSelection(book.id, event)}
+							class="absolute right-3 top-3 z-20 flex h-7 w-7 items-center justify-center rounded border-2 transition-all {selectedBooks.has(book.id) ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]' : 'border-[var(--color-surface-400)] bg-[var(--color-surface-800)]/90 opacity-0 group-hover:opacity-100'} {bulkSelectMode ? 'opacity-100' : ''}"
+							aria-label={selectedBooks.has(book.id) ? 'Deselect book' : 'Select book'}
+						>
+							{#if selectedBooks.has(book.id)}
+								<svg class="h-4 w-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+								</svg>
+							{/if}
+						</button>
+					</div>
+				{/each}
 			</div>
 		{:else}
 			<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-				{#each books as book}
+				{#each visibleBooks as book}
 					<div
 						class="relative group {selectedBooks.has(book.id) ? 'ring-2 ring-[var(--color-primary-500)] ring-offset-2 ring-offset-[var(--color-surface-base)] rounded-lg' : ''}"
 						data-book-id={book.id}
@@ -297,33 +686,34 @@
 						role="button"
 						tabindex="0"
 					>
-						<a href="/book/{book.id}" class="block" onclick={(event) => openBookDetailFromList(event, book.id)}>
+						<a href={getBookDetailHref(book.id)} class="block" onclick={(event) => openBookDetailFromList(event, book.id)}>
 							<div class="relative mb-2 overflow-hidden rounded-lg">
 								<BookCoverFrame
-									src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
-									alt={book.title}
-									format={book.format}
+									src={getBookCoverSrc(book)}
+									alt={getBookTitle(book)}
+									format={getBookFormat(book)}
 									mode="cover"
 									frameClass="aspect-[2/3]"
 									imageClass="group-hover:scale-105 transition-transform"
 									placeholderSize="md"
 								/>
-								{#if formatOnCover && book.format}
-									{@const formatColor = getFormatColor(book.format)}
+								{#if formatOnCover && getBookFormat(book)}
+									{@const formatColor = getFormatColor(getBookFormat(book))}
 									<div
 										class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
 										style="background-color: {formatColor.bg}; color: {formatColor.text};"
 									>
-										{book.format}
+										{getBookFormat(book)}
 									</div>
 								{/if}
 							</div>
-							<h3 class="text-sm font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
-							{#if book.authors && book.authors !== '[]'}
-								<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{parseAuthors(book.authors)}</p>
+							<h3 class="text-sm font-medium text-[var(--color-surface-text)] truncate">{getBookTitle(book)}</h3>
+							{#if getBookAuthors(book)}
+								<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{getBookAuthors(book)}</p>
 							{/if}
 						</a>
 						<button
+							type="button"
 							onclick={(event) => toggleBookSelection(book.id, event)}
 							class="absolute top-2 left-2 z-20 w-6 h-6 rounded border-2 transition-all opacity-0 group-hover:opacity-100 {bulkSelectMode ? 'opacity-100' : ''} {selectedBooks.has(book.id) ? 'bg-[var(--color-primary-500)] border-[var(--color-primary-500)]' : 'bg-[var(--color-surface-800)]/90 border-[var(--color-surface-400)]'} flex items-center justify-center"
 							aria-label={selectedBooks.has(book.id) ? 'Deselect book' : 'Select book'}
@@ -339,8 +729,8 @@
 			</div>
 		{/if}
 	{:else}
-		<div class="text-center py-16 bg-slate-800 rounded-lg border border-slate-700">
-			<p class="text-slate-400">Shelf not found</p>
+		<div class="text-center py-16 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">
+			<p class="text-[var(--color-surface-text-muted)]">Shelf not found</p>
 		</div>
 	{/if}
 </div>
@@ -408,23 +798,25 @@
 								</div>
 							{/if}
 						</div>
-						<button
-							onclick={removeSelectedFromShelf}
-							disabled={actionInProgress}
-							class="px-4 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
-						>
-							{#if actionInProgress}
-								<svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-									<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-									<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-								</svg>
-							{:else}
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 6h14M10 6V4h4v2m-5 4v6m4-6v6M6 6l1 14h10l1-14"></path>
-								</svg>
-							{/if}
-							<span>Remove from Shelf</span>
-						</button>
+						{#if shelf?.is_magic !== 1}
+							<button
+								onclick={removeSelectedFromShelf}
+								disabled={actionInProgress}
+								class="px-4 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+							>
+								{#if actionInProgress}
+									<svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+										<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+									</svg>
+								{:else}
+									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 6h14M10 6V4h4v2m-5 4v6m4-6v6M6 6l1 14h10l1-14"></path>
+									</svg>
+								{/if}
+								<span>Remove from Shelf</span>
+							</button>
+						{/if}
 					</div>
 				</div>
 			</div>
@@ -449,6 +841,22 @@
 		onApplied={async () => fetchShelfBooks()}
 	/>
 {/if}
+
+<ShelfModal
+	open={showEditShelfModal}
+	mode="edit"
+	shelf={shelf}
+	onClose={() => showEditShelfModal = false}
+	onSaved={handleShelfSaved}
+/>
+
+<ShelfBookPickerModal
+	open={showAddBooksModal}
+	shelf={shelf}
+	existingBookIds={existingShelfBookIds}
+	onClose={() => showAddBooksModal = false}
+	onAdded={handleBooksAdded}
+/>
 
 <style>
 	@keyframes slide-up {

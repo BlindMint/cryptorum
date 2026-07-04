@@ -18,6 +18,8 @@
 	import FilterPanel from '$lib/components/FilterPanel.svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
 	import BulkMetadataEditModal from '$lib/components/BulkMetadataEditModal.svelte';
+	import ShelfPickerRow from '$lib/components/ShelfPickerRow.svelte';
+	import ShelfModal from '$lib/components/ShelfModal.svelte';
 
 		type FilterMode = 'AND' | 'OR' | 'NOT';
 		const COMPACT_TOOLBAR_WIDTH = 720;
@@ -100,10 +102,12 @@
 	let metadataLookupJob = $state<any | null>(null);
 	let showBulkMetadataReview = $state(false);
 	let showShelfPicker = $state(false);
+	let showCreateShelfModal = $state(false);
 	let shelves = $state<any[]>([]);
 	let actionInProgress = $state(false);
 	let selectAllMode = $state<'none' | 'page' | 'filtered'>('none');
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
+	let manualShelves = $derived(shelves.filter((shelf) => shelf.is_magic !== 1));
 	let bulkSelectionAnchorId = $state<number | null>(null);
 	let bulkSelectionRestored = false;
 
@@ -925,7 +929,7 @@
 
 	async function fetchShelves() {
 		try {
-			const res = await fetch('/api/shelves');
+			const res = await fetch('/api/shelves', { cache: 'no-store' });
 			if (res.ok) {
 				shelves = await res.json();
 			}
@@ -1024,6 +1028,12 @@
 	function openShelfPicker() {
 		fetchShelves();
 		showShelfPicker = true;
+	}
+
+	async function handleShelfCreatedFromPicker() {
+		showCreateShelfModal = false;
+		await fetchShelves();
+		await (window as any).refreshSidebar?.();
 	}
 
 	function openSequentialMetadataEdit() {
@@ -1800,34 +1810,41 @@
 				<p class="text-sm text-[var(--color-surface-text-muted)] mt-1">Add {getSelectionCount()} book(s) to shelf</p>
 			</div>
 			<div class="p-4 max-h-64 overflow-y-auto">
-				{#if shelves.length === 0}
-					<p class="text-center text-[var(--color-surface-text-muted)] py-4">No shelves yet. Create one first.</p>
+				{#if manualShelves.length === 0}
+					<p class="text-center text-[var(--color-surface-text-muted)] py-4">No manual shelves yet. Create one first.</p>
 				{:else}
 					<div class="space-y-2">
-						{#each shelves as shelf}
-							<button
-								onclick={() => addToShelf(shelf.id)}
+						{#each manualShelves as shelf}
+							<ShelfPickerRow
+								{shelf}
 								disabled={actionInProgress}
-								class="w-full flex items-center space-x-3 px-4 py-3 rounded-lg bg-[var(--color-surface-base)] hover:bg-[var(--color-surface-700)] text-[var(--color-surface-text)] transition-colors disabled:opacity-50"
-							>
-								<svg class="w-5 h-5 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-								</svg>
-								<span class="flex-1 text-left">{shelf.name}</span>
-								<span class="text-sm text-[var(--color-surface-text-muted)]">{shelf.book_count} books</span>
-							</button>
+								onSelect={(selectedShelf) => addToShelf(selectedShelf.id)}
+							/>
 						{/each}
 					</div>
 				{/if}
 			</div>
 			<div class="px-6 py-4 border-t border-[var(--color-surface-border)]">
-				<a href="/shelves/new" class="block w-full text-center px-4 py-2 text-sm rounded-lg border border-dashed border-[var(--color-surface-border)] text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] transition-colors">
+				<button
+					type="button"
+					onclick={() => showCreateShelfModal = true}
+					class="block w-full text-center px-4 py-2 text-sm rounded-lg border border-dashed border-[var(--color-surface-border)] text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] transition-colors"
+				>
 					+ Create New Shelf
-				</a>
+				</button>
 			</div>
 		</div>
 	</div>
 	{/if}
+
+	<ShelfModal
+		open={showCreateShelfModal}
+		mode="create"
+		initialMagic={false}
+		allowMagicToggle={false}
+		onClose={() => showCreateShelfModal = false}
+		onSaved={handleShelfCreatedFromPicker}
+	/>
 
 	{#if showBulkMetadataEdit}
 		<BulkMetadataEditModal

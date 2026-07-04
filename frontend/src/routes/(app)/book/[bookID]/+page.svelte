@@ -6,6 +6,8 @@
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
 	import PathDisplay from '$lib/components/PathDisplay.svelte';
+	import ShelfPickerRow from '$lib/components/ShelfPickerRow.svelte';
+	import ShelfModal from '$lib/components/ShelfModal.svelte';
 	import { showFormatOnCover, getFormatColor } from '$lib/stores';
 	import { addMetadataSuggestionsFromPayload, refreshMetadataSuggestions } from '$lib/stores/metadataSuggestions';
 	import { getCoverThumbUrl } from '$lib/utils/covers';
@@ -62,6 +64,7 @@
 	let showMetadataLookup = $state(false);
 	let showCoverModal = $state(false);
 	let showShelfPicker = $state(false);
+	let showCreateShelfModal = $state(false);
 	let regeneratingCover = $state(false);
 	let shelves = $state<any[]>([]);
 	let shelfActionInProgress = $state(false);
@@ -80,6 +83,7 @@
 	let authorsList = $state<string[]>([]);
 	let statusOptions = metadataStatusOptions;
 	let selectionSession = $state<MetadataEditSelectionSession | null>(null);
+	let manualShelves = $derived(shelves.filter((shelf) => shelf.is_magic !== 1));
 	let currentBookRouteId: string | null = null;
 	let bookRequestToken = 0;
 	let exitingInlineMetadataEdit = false;
@@ -276,7 +280,7 @@
 
 	async function fetchShelves() {
 		try {
-			const res = await fetch('/api/shelves');
+			const res = await fetch('/api/shelves', { cache: 'no-store' });
 			if (res.ok) {
 				shelves = await res.json();
 			}
@@ -655,6 +659,13 @@
 	function openShelfPicker() {
 		showShelfPicker = true;
 		shelfActionMessage = '';
+		void fetchShelves();
+	}
+
+	async function handleShelfCreatedFromPicker() {
+		showCreateShelfModal = false;
+		await fetchShelves();
+		await (window as any).refreshSidebar?.();
 	}
 
 	async function addBookToShelf(shelfId: number) {
@@ -1791,32 +1802,18 @@
 				<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">{book.title || 'This book'}</p>
 			</div>
 			<div class="max-h-[60vh] overflow-y-auto p-4">
-							{#if shelves.length === 0}
+							{#if manualShelves.length === 0}
 								<div class="py-6 text-center text-sm text-[var(--color-surface-text-muted)]">
-									No shelves yet.
+									No manual shelves yet.
 								</div>
 							{:else}
 								<div class="space-y-2">
-									{#each shelves as shelf}
-										<button
-											type="button"
-											onclick={() => addBookToShelf(shelf.id)}
+									{#each manualShelves as shelf}
+										<ShelfPickerRow
+											{shelf}
 											disabled={shelfActionInProgress}
-											class="group flex w-full items-center justify-between rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3 text-left transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-surface-700)] hover:shadow-sm disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
-										>
-											<span class="flex min-w-0 items-center gap-3">
-												<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-transform duration-200 ease-out {shelf.is_magic === 1 ? 'bg-purple-500/20 text-purple-300' : 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-400)]'} group-hover:scale-105">
-													<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
-													</svg>
-												</span>
-												<span class="min-w-0">
-													<span class="block truncate text-sm font-medium text-[var(--color-surface-text)]">{shelf.name}</span>
-													<span class="block text-xs text-[var(--color-surface-text-muted)]">{shelf.book_count} books{#if shelf.is_magic === 1} · Magic{/if}</span>
-												</span>
-											</span>
-											<span class="text-xs font-medium text-[var(--color-primary-400)] transition-transform duration-200 ease-out group-hover:translate-x-0.5">Add</span>
-										</button>
+											onSelect={(selectedShelf) => addBookToShelf(selectedShelf.id)}
+										/>
 									{/each}
 								</div>
 							{/if}
@@ -1828,9 +1825,13 @@
 							<span class="text-sm text-[var(--color-surface-text-muted)]">Choose a shelf to add this book.</span>
 						{/if}
 						<div class="flex items-center gap-3">
-							<a href="/shelves/new" class="text-sm text-[var(--color-primary-400)] transition-colors duration-200 hover:text-[var(--color-primary-300)] focus-visible:outline-none focus-visible:underline">
+							<button
+								type="button"
+								onclick={() => showCreateShelfModal = true}
+								class="text-sm text-[var(--color-primary-400)] transition-colors duration-200 hover:text-[var(--color-primary-300)] focus-visible:outline-none focus-visible:underline"
+							>
 								New shelf
-							</a>
+							</button>
 							<button
 								type="button"
 								onclick={() => showShelfPicker = false}
@@ -1843,6 +1844,15 @@
 		</div>
 	</div>
 {/if}
+
+<ShelfModal
+	open={showCreateShelfModal}
+	mode="create"
+	initialMagic={false}
+	allowMagicToggle={false}
+	onClose={() => showCreateShelfModal = false}
+	onSaved={handleShelfCreatedFromPicker}
+/>
 
 {#if showCoverModal && book}
 	<div class="fixed inset-0 z-[140] flex items-center justify-center p-4">

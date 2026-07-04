@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { appActivity, desktopSidebarCollapsed, mobileMenuOpen } from '$lib/stores';
 	import LibraryIconPicker from '$lib/components/LibraryIconPicker.svelte';
+	import ShelfModal from '$lib/components/ShelfModal.svelte';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { parseLibraryIcon } from '$lib/utils/library-icons';
 
@@ -47,6 +48,7 @@
 	let draggedShelfId = $state<number | null>(null);
 	let shelfDropTargetId = $state<number | null>(null);
 	let shelfDropPosition = $state<'before' | 'after'>('before');
+	let showShelfModal = $state(false);
 
 	// Library modal state
 	let showLibraryModal = $state(false);
@@ -208,6 +210,15 @@
 		originalLibraryPaths = [];
 		libraryForm = { name: '', icon: '', exclude_from_suggestions: false, comic_spread_fallback: 'inherit', paths: [''] };
 		showLibraryModal = true;
+	}
+
+	function openShelfModal() {
+		showShelfModal = true;
+	}
+
+	async function handleShelfSaved() {
+		showShelfModal = false;
+		await loadData();
 	}
 
 	function closeLibraryModal() {
@@ -833,16 +844,16 @@
 					</svg>
 					<span>Shelves</span>
 				</a>
-				<a
-					href="/shelves/new"
-					onclick={closeMobileNavigation}
+				<button
+					type="button"
+					onclick={() => { openShelfModal(); closeMobileNavigation(); }}
 					class="p-1 rounded text-[var(--color-surface-text-muted)] hover:text-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)] transition-colors"
 					title="Create Shelf"
 				>
 					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
 					</svg>
-				</a>
+				</button>
 			</div>
 
 			{#each shelves as shelf}
@@ -980,6 +991,14 @@
 		</a>
 	</div>
 {/if}
+
+<ShelfModal
+	open={showShelfModal}
+	mode="create"
+	initialMagic={false}
+	onClose={() => showShelfModal = false}
+	onSaved={handleShelfSaved}
+/>
 
 	  {#if showLibraryModal}
 		<div class="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4" role="dialog" aria-modal="true" tabindex="-1">
