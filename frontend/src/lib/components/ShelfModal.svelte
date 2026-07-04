@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import LibraryIconPicker from '$lib/components/LibraryIconPicker.svelte';
 	import { parseLibraryIcon } from '$lib/utils/library-icons';
 
@@ -55,6 +56,7 @@
 	let errorMessage = $state('');
 	let currentShelfIcon = $derived(parseLibraryIcon(shelfIcon));
 	let isEditing = $derived(mode === 'edit' && !!shelf?.id);
+	let lastResetKey = '';
 
 	const fieldOptions = [
 		{ value: 'status', label: 'Reading Status' },
@@ -219,6 +221,15 @@
 		shelfIcon = '';
 	}
 
+	function setShelfKind(nextIsMagic: boolean) {
+		isMagicShelf = nextIsMagic;
+		if (nextIsMagic) {
+			if (!shelfIcon || shelfIcon === 'bookmark') shelfIcon = 'sparkles';
+			return;
+		}
+		if (!shelfIcon || shelfIcon === 'sparkles') shelfIcon = 'bookmark';
+	}
+
 	function normalizeShelfSortBy(value: string | undefined) {
 		const normalized = value || 'added_at';
 		return shelfSortOptions.some(option => option.value === normalized) ? normalized : 'added_at';
@@ -263,8 +274,15 @@
 	}
 
 	$effect(() => {
-		if (!open) return;
-		resetForm();
+		if (!open) {
+			lastResetKey = '';
+			return;
+		}
+
+		const resetKey = `${mode}:${shelf?.id ?? 'new'}:${initialMagic ? 'magic' : 'manual'}:${allowMagicToggle ? 'toggle' : 'fixed'}`;
+		if (resetKey === lastResetKey) return;
+		lastResetKey = resetKey;
+		untrack(resetForm);
 	});
 </script>
 
@@ -309,22 +327,32 @@
 					<div class="inline-flex rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
 						<button
 							type="button"
-							onclick={() => { isMagicShelf = false; if (!shelfIcon) shelfIcon = 'bookmark'; }}
-							class="rounded-md border px-3 py-2 text-sm font-medium transition-colors {isMagicShelf ? 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]' : 'border-[var(--color-primary-500)]/45 bg-[var(--color-primary-500)]/10 text-[var(--color-primary-400)]'}"
+							onclick={() => setShelfKind(false)}
+							class="inline-flex items-center rounded-md border px-3 py-2 text-sm font-medium transition-colors {isMagicShelf ? 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]' : 'border-[var(--color-primary-500)]/45 bg-[var(--color-primary-500)]/10 text-[var(--color-primary-400)]'}"
 						>
 							Regular Shelf
 						</button>
 						<button
 							type="button"
-							onclick={() => { isMagicShelf = true; if (!shelfIcon || shelfIcon === 'bookmark') shelfIcon = 'sparkles'; }}
-							class="rounded-md border px-3 py-2 text-sm font-medium transition-colors {isMagicShelf ? 'border-[var(--color-primary-500)]/45 bg-[var(--color-primary-500)]/10 text-[var(--color-primary-400)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+							onclick={() => setShelfKind(true)}
+							class="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors {isMagicShelf ? 'border-[var(--color-primary-500)]/45 bg-[var(--color-primary-500)]/10 text-[var(--color-primary-400)]' : 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 						>
+							<svg class="h-4 w-4 {isMagicShelf ? 'text-purple-300' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+							</svg>
 							Magic Shelf
 						</button>
 					</div>
 				{:else}
-					<div class="inline-flex rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-1 text-xs font-medium uppercase tracking-wide {isMagicShelf ? 'text-purple-300' : 'text-[var(--color-primary-400)]'}">
-						{isMagicShelf ? 'Smart rules' : 'Manual'}
+					<div class="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-1 text-xs font-medium uppercase tracking-wide {isMagicShelf ? 'text-purple-300' : 'text-[var(--color-primary-400)]'}">
+						{#if isMagicShelf}
+							<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+							</svg>
+							<span>Magic</span>
+						{:else}
+							<span>Manual</span>
+						{/if}
 					</div>
 				{/if}
 
