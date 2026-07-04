@@ -63,63 +63,64 @@
 			return (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name);
 		});
 	}
+
+	function getShelfCountLabel(): string {
+		if (shelves.length === 0) return 'Organize your books into collections';
+		if (!searchQuery.trim()) return `${shelves.length} shelves`;
+		return `${getVisibleShelves().length} of ${shelves.length} shelves`;
+	}
 </script>
 
 <div class="space-y-6">
-	<div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+	<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 		<div>
 			<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">Shelves</h1>
-			<p class="text-[var(--color-surface-text-muted)] mt-1">
-				{#if shelves.length > 0}
-					{searchQuery.trim() ? `${getVisibleShelves().length} of ${shelves.length} shelves` : `${shelves.length} shelves`}
-				{:else}
-					Organize your books into collections
-				{/if}
-			</p>
+			<p class="mt-1 text-[var(--color-surface-text-muted)]">{getShelfCountLabel()}</p>
 		</div>
-		<div class="flex flex-wrap gap-3">
-			<button
-				type="button"
-				onclick={() => openCreateShelf(false)}
-				class="inline-flex items-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-2 font-medium text-[var(--color-surface-text)] transition-colors hover:border-[var(--color-primary-500)]/45 hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-400)]"
-			>
-				<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
-				</svg>
-				Create Shelf
-			</button>
-			<button
-				type="button"
-				onclick={() => openCreateShelf(true)}
-				class="accent-action inline-flex items-center rounded-lg px-4 py-2 font-medium transition-colors"
-			>
-				<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
-				</svg>
-				Create Magic Shelf
-			</button>
+		<div class="flex w-full flex-col gap-3 md:w-auto md:items-end">
+			<div class="flex flex-wrap gap-3 md:justify-end">
+				<button
+					type="button"
+					onclick={() => openCreateShelf(false)}
+					class="inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-2 font-medium text-[var(--color-surface-text)] transition-colors hover:border-[var(--color-primary-500)]/45 hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-400)]"
+				>
+					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
+					</svg>
+					Create Shelf
+				</button>
+				<button
+					type="button"
+					onclick={() => openCreateShelf(true)}
+					class="accent-action inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 font-medium transition-colors"
+				>
+					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+					</svg>
+					Create Magic Shelf
+				</button>
+			</div>
+			{#if shelves.length > 0}
+				<div class="flex w-full flex-col gap-3 sm:flex-row md:w-auto">
+					<input
+						type="search"
+						bind:value={searchQuery}
+						placeholder="Search shelves"
+						class="min-w-0 flex-1 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)] sm:w-72"
+					>
+					<select
+						bind:value={sortBy}
+						class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+					>
+						<option value="custom">Sidebar order</option>
+						<option value="name">Sort by name</option>
+						<option value="count">Sort by count</option>
+						<option value="type">Sort by type</option>
+					</select>
+				</div>
+			{/if}
 		</div>
 	</div>
-
-	{#if shelves.length > 0}
-		<div class="flex flex-col gap-3 sm:flex-row">
-			<input
-				type="search"
-				bind:value={searchQuery}
-				placeholder="Search shelves"
-				class="min-w-0 flex-1 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-			>
-			<select
-				bind:value={sortBy}
-				class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-			>
-				<option value="custom">Sidebar order</option>
-				<option value="name">Sort by name</option>
-				<option value="count">Sort by count</option>
-				<option value="type">Sort by type</option>
-			</select>
-		</div>
-	{/if}
 
 	{#if loading}
 		<div class="flex justify-center py-12">
@@ -138,11 +139,11 @@
 			No shelves match your search
 		</div>
 	{:else}
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
 			{#each getVisibleShelves() as shelf}
 				{@const parsedIcon = parseLibraryIcon(shelf.icon || (shelf.is_magic === 1 ? 'sparkles' : 'bookmark'))}
-				<a href="/shelves/{shelf.id}" class="group relative overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 transition-colors hover:border-[var(--color-primary-500)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
-					<div class="flex items-center gap-4 pr-7">
+				<a href="/shelves/{shelf.id}" class="group relative flex items-center overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 transition-colors hover:border-[var(--color-primary-500)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]">
+					<div class="flex min-w-0 w-full items-center gap-4 pr-7">
 						<div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg {shelf.is_magic === 1 ? 'bg-purple-500/15 text-purple-300' : 'bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)]'}">
 							{#if parsedIcon?.svg}
 								<div class="shelf-icon h-6 w-6">{@html parsedIcon.svg}</div>
@@ -151,7 +152,7 @@
 							{/if}
 						</div>
 						<div class="min-w-0 flex-1">
-							<h3 class="truncate font-semibold text-[var(--color-surface-text)] transition-colors group-hover:text-[var(--color-primary-400)]">{shelf.name}</h3>
+							<h3 class="line-clamp-2 break-words font-semibold leading-snug text-[var(--color-surface-text)] transition-colors group-hover:text-[var(--color-primary-400)]">{shelf.name}</h3>
 							<p class="mt-0.5 text-sm text-[var(--color-surface-text-muted)]">{shelf.book_count} books</p>
 							<p class="mt-1 inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide {shelf.is_magic === 1 ? 'text-purple-300' : 'text-[var(--color-primary-400)]'}">
 								{#if shelf.is_magic === 1}
