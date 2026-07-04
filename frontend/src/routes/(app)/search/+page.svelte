@@ -1092,7 +1092,7 @@
 					{#each getActiveFilters() as filter}
 						<button
 							onclick={() => removeFilter(filter.key, filter.value)}
-							class="inline-flex items-center rounded-full border border-[var(--color-primary-500)]/50 bg-[var(--color-primary-500)]/20 px-3 py-1 text-sm text-[var(--color-primary-300)] transition-colors hover:bg-[var(--color-primary-500)]/30"
+							class="active-filter-chip inline-flex items-center rounded-full px-3 py-1 text-sm transition-colors"
 						>
 							{filter.label}
 							<svg class="ml-1.5 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">

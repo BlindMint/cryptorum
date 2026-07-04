@@ -184,6 +184,29 @@ func TestBulkAddByFilterToMagicShelfIsRejected(t *testing.T) {
 	}
 }
 
+func TestBulkAddByFilterExcludesMissingBooks(t *testing.T) {
+	setupShelfHandlerTestDB(t)
+	insertShelfTestBook(t, 5, 1, 1, "Missing Not On Shelf", "reading", true)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/shelves/1/books/bulk-by-filter", strings.NewReader(`{"status":["reading"]}`))
+	req = requestWithShelfID(req, "1")
+	req = req.WithContext(authContextWithUser(req.Context(), &AppUser{ID: 1}))
+
+	bulkAddToShelfByFilterHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var linked int
+	if err := appDB.QueryRow(`SELECT COUNT(*) FROM book_shelf WHERE shelf_id = 1 AND book_id = 5`).Scan(&linked); err != nil {
+		t.Fatalf("query missing book shelf link: %v", err)
+	}
+	if linked != 0 {
+		t.Fatalf("missing book links = %d, want 0", linked)
+	}
+}
+
 func TestGetMagicShelfBooksUsesShelfSort(t *testing.T) {
 	setupShelfHandlerTestDB(t)
 	insertShelfTestBook(t, 4, 1, 1, "Newest Reading", "reading", false)
@@ -209,6 +232,35 @@ func TestGetMagicShelfBooksUsesShelfSort(t *testing.T) {
 	}
 	if books[0].ID != 4 || books[1].ID != 1 {
 		t.Fatalf("book order = %+v, want newest added first", books)
+	}
+}
+
+func TestMagicShelfUnsupportedRulesMatchNoBooks(t *testing.T) {
+	setupShelfHandlerTestDB(t)
+	mustExec(t, `
+		UPDATE shelf
+		SET rules_json = '{"conditions":[{"field":"added_at","operator":"between","value":{"from":"2024-01-01","to":"2024-12-31"}}]}'
+		WHERE id = 2
+	`)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/shelves/2/books", nil)
+	req = requestWithShelfID(req, "2")
+	req = req.WithContext(authContextWithUser(req.Context(), &AppUser{ID: 1}))
+
+	getShelfBooksHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var books []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&books); err != nil {
+		t.Fatalf("decode shelf books: %v", err)
+	}
+	if len(books) != 0 {
+		t.Fatalf("books = %+v, want no matches for unsupported smart shelf rules", books)
 	}
 }
 

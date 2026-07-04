@@ -76,6 +76,12 @@
 	});
 
 	$effect(() => {
+		if (typeof document === 'undefined') return;
+		document.documentElement.classList.toggle('reader-route', isReaderPage);
+		return () => document.documentElement.classList.remove('reader-route');
+	});
+
+	$effect(() => {
 		const routeKey = `${$page.url.pathname}${$page.url.search}`;
 		if (lastRouteKey && routeKey !== lastRouteKey) {
 			$mobileMenuOpen = false;
@@ -160,7 +166,7 @@
 				<Sidebar />
 			{/if}
 				<div class="flex-1 min-w-0 flex flex-col overflow-hidden">
-					<main class="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] {isReaderPage || isLibraryPage ? '!p-0' : 'p-6'}">
+					<main class="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden {isReaderPage ? '[scrollbar-gutter:auto]' : '[scrollbar-gutter:stable]'} {isReaderPage || isLibraryPage ? '!p-0' : 'p-6'}">
 						{@render children()}
 					</main>
 				</div>

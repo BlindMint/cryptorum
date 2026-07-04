@@ -45,6 +45,22 @@ html {
 	scrollbar-gutter: stable;
 }
 
+html.reader-route {
+	scrollbar-gutter: auto;
+}
+
+.active-filter-chip {
+	border: 1px solid color-mix(in srgb, var(--color-primary-500) 50%, transparent);
+	background: color-mix(in srgb, var(--color-primary-500) 10%, var(--color-surface-overlay));
+	color: var(--color-primary-400);
+}
+
+.active-filter-chip:hover {
+	border-color: color-mix(in srgb, var(--color-primary-400) 70%, transparent);
+	background: color-mix(in srgb, var(--color-primary-500) 16%, var(--color-surface-overlay));
+	color: var(--color-primary-300, var(--color-primary-400));
+}
+
 body::before {
 	content: '';
 	position: fixed;

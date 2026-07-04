@@ -20,6 +20,7 @@
 	import BulkMetadataEditModal from '$lib/components/BulkMetadataEditModal.svelte';
 	import ShelfPickerRow from '$lib/components/ShelfPickerRow.svelte';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
+	import LibraryModal from '$lib/components/LibraryModal.svelte';
 
 		type FilterMode = 'AND' | 'OR' | 'NOT';
 		const COMPACT_TOOLBAR_WIDTH = 720;
@@ -37,8 +38,8 @@
 	// Display controls
 	let viewMode = $state('grid');
 	let localGridScale = $state(DEFAULT_GRID_SCALE);
-	let sortBy = $state($page.url.searchParams.get('sort') || 'title');
-	let sortDir = $state<'asc' | 'desc'>($page.url.searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc');
+	let sortBy = $state(getSortByForUrl($page.url));
+	let sortDir = $state<'asc' | 'desc'>(getSortDirForUrl($page.url));
 	let estimatedGridWidth = $derived(typeof window === 'undefined' ? 1920 : window.innerWidth);
 	let responsiveGridLayout = $derived(getResponsiveGridLayout(estimatedGridWidth, localGridScale));
 	let responsiveGridColumns = $derived(responsiveGridLayout.columns);
@@ -103,6 +104,8 @@
 	let showBulkMetadataReview = $state(false);
 	let showShelfPicker = $state(false);
 	let showCreateShelfModal = $state(false);
+	let showLibraryModal = $state(false);
+	let editingLibrary = $state<any | null>(null);
 	let shelves = $state<any[]>([]);
 	let actionInProgress = $state(false);
 	let selectAllMode = $state<'none' | 'page' | 'filtered'>('none');
@@ -167,6 +170,18 @@
 			const trimmed = value.trim();
 			if (trimmed) params.append(key, trimmed);
 		}
+	}
+
+	function getSortByForUrl(url: URL): string {
+		const explicitSort = url.searchParams.get('sort');
+		if (explicitSort) return explicitSort;
+		return getQueryValues(url.searchParams, 'series').length === 1 ? 'series' : 'title';
+	}
+
+	function getSortDirForUrl(url: URL): 'asc' | 'desc' {
+		const explicitSortDir = url.searchParams.get('sort_dir');
+		if (explicitSortDir) return explicitSortDir === 'desc' ? 'desc' : 'asc';
+		return 'asc';
 	}
 
 	function getFilterMode(): FilterMode {
@@ -404,8 +419,8 @@
 		}
 		activeBulkSelectionScope = nextSelectionScope;
 		librarySearch = $page.url.searchParams.get('q') || '';
-		sortBy = $page.url.searchParams.get('sort') || sortBy || 'title';
-		sortDir = $page.url.searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc';
+		sortBy = getSortByForUrl($page.url);
+		sortDir = getSortDirForUrl($page.url);
 		fetchBooks(true);
 		fetchFilterOptions();
 	});
@@ -567,21 +582,23 @@
 		};
 	});
 
-	async function scanLibrary() {
+	async function scanLibrary(targetLibrary: any | null = null) {
+		const targetLibraryId = targetLibrary?.id ? String(targetLibrary.id) : libraryFilter;
+		const targetLibraryName = targetLibrary?.name || libraryName || 'Library';
 		scanning = true;
 		scanMessage = 'Scanning...';
 		const pendingJob = appActivity.startPendingJob({
 			job_type: 'library_scan',
-			title: libraryFilter ? `Scan library: ${libraryName || 'Library'}` : 'Scan libraries',
-			payload: libraryFilter ? { library_id: Number(libraryFilter), library_name: libraryName || undefined } : {}
+			title: targetLibraryId ? `Scan library: ${targetLibraryName}` : 'Scan libraries',
+			payload: targetLibraryId ? { library_id: Number(targetLibraryId), library_name: targetLibraryName } : {}
 		});
 		try {
-			const res = libraryFilter
-				? await fetch(`/api/libraries/${libraryFilter}/scan`, { method: 'POST' })
+			const res = targetLibraryId
+				? await fetch(`/api/libraries/${targetLibraryId}/scan`, { method: 'POST' })
 				: await fetch('/api/scan', { method: 'POST' });
 			const data = await res.json().catch(() => ({}));
 			if (res.ok) {
-				const jobIds = libraryFilter
+				const jobIds = targetLibraryId
 					? [data.job_id].filter(Boolean)
 					: [...(data.queued_jobs ?? []), ...(data.existing_jobs ?? [])];
 				if (jobIds.length > 0) {
@@ -605,6 +622,75 @@
 			appActivity.failPendingJob(pendingJob, 'Unable to queue library scan.');
 			scanMessage = 'Scan failed. Check console for details.';
 			scanning = false;
+		}
+	}
+
+	async function openEditLibraryModal() {
+		if (!libraryFilter) return;
+		try {
+			const response = await fetch(`/api/libraries/${libraryFilter}`, { cache: 'no-store' });
+			editingLibrary = response.ok
+				? await response.json()
+				: { id: Number(libraryFilter), name: libraryName || 'Library', book_count: totalBooks };
+			showLibraryModal = true;
+		} catch (error) {
+			console.error('Failed to load library for editing:', error);
+			editingLibrary = { id: Number(libraryFilter), name: libraryName || 'Library', book_count: totalBooks };
+			showLibraryModal = true;
+		}
+	}
+
+	function closeLibraryModal() {
+		showLibraryModal = false;
+		editingLibrary = null;
+	}
+
+	async function handleLibrarySaved(result: { library: any; isEditing: boolean; foldersChanged: boolean }) {
+		closeLibraryModal();
+		await fetchLibraryName();
+		await fetchBooks(true);
+		await fetchFilterOptions();
+		if ((window as any).refreshSidebar) {
+			(window as any).refreshSidebar();
+		}
+		if (result.isEditing && result.foldersChanged && confirm('Library folders changed. Scan this library now?')) {
+			await scanLibrary(result.library);
+		}
+	}
+
+	async function regenerateLibraryCovers(library: any, mode: 'all' | 'missing') {
+		if (!library?.id) return;
+		if (!confirmBulkAction({
+			action: mode === 'all' ? 'regenerate covers for' : 'regenerate missing covers for',
+			count: library.book_count || totalBooks
+		})) return;
+
+		const pendingJob = appActivity.startPendingJob({
+			job_type: 'cover_regenerate',
+			title: mode === 'all' ? `Regenerate covers for ${library.name}` : `Regenerate missing covers for ${library.name}`,
+			payload: { mode, library_id: library.id, library_name: library.name }
+		});
+		try {
+			const response = await fetch('/api/settings/book-covers/regenerate', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ mode, library_id: library.id })
+			});
+			if (!response.ok) {
+				appActivity.failPendingJob(pendingJob, 'Unable to queue cover regeneration.');
+				console.error('Failed to queue library cover regeneration:', await response.text());
+				return;
+			}
+			const job = await response.json().catch(() => null);
+			if (job?.id) {
+				appActivity.confirmPendingJob(pendingJob, job);
+			} else {
+				appActivity.confirmPendingJob(pendingJob);
+			}
+			await appActivity.refresh();
+		} catch (error) {
+			console.error('Failed to queue library cover regeneration:', error);
+			appActivity.failPendingJob(pendingJob, 'Unable to queue cover regeneration.');
 		}
 	}
 
@@ -1227,17 +1313,33 @@
 <div class="pb-20" style={`--filter-panel-offset: ${$filterPanelWidth + 24}px;`}>
 		<div class="sticky top-0 z-30 px-3 py-3 sm:px-6 sm:py-4 bg-[var(--color-surface-base)]/95 backdrop-blur border-b border-[var(--color-surface-border)] shadow-[0_1px_0_rgba(255,255,255,0.04)] {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}">
 				<div bind:this={toolbarContainer} class="space-y-3">
-				<div class="min-w-0 flex-1">
-					<div class="flex items-baseline gap-2 sm:gap-3 min-w-0">
-						<h1 class="text-xl sm:text-2xl font-bold text-[var(--color-surface-text)] truncate">{libraryFilter ? libraryName || 'Library' : 'All Books'}</h1>
-					{#if totalBooks > 0}
-						<p class="text-sm text-[var(--color-surface-text-muted)] whitespace-nowrap">{totalBooks} books</p>
-					{/if}
-				</div>
-				{#if scanMessage}
-					<div class="mt-2 inline-flex items-center gap-2 rounded-lg border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/15 px-3 py-1.5 text-sm text-[var(--color-primary-300)]">
-						{scanMessage}
+				<div class="flex min-w-0 items-start justify-between gap-3">
+					<div class="min-w-0">
+						<div class="flex min-w-0 items-baseline gap-2 sm:gap-3">
+							<h1 class="truncate text-xl font-bold text-[var(--color-surface-text)] sm:text-2xl">{libraryFilter ? libraryName || 'Library' : 'All Books'}</h1>
+							{#if totalBooks > 0}
+								<p class="whitespace-nowrap text-sm text-[var(--color-surface-text-muted)]">{totalBooks} books</p>
+							{/if}
+						</div>
+						{#if scanMessage}
+							<div class="mt-2 inline-flex items-center gap-2 rounded-lg border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/15 px-3 py-1.5 text-sm text-[var(--color-primary-300)]">
+								{scanMessage}
+							</div>
+						{/if}
 					</div>
+					{#if libraryFilter}
+						<button
+							type="button"
+							onclick={openEditLibraryModal}
+							class="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:border-[var(--color-primary-500)]/50 hover:text-[var(--color-primary-400)]"
+							title="Edit Library"
+						>
+							<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"></path>
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 7.125 16.875 4.5"></path>
+							</svg>
+							<span class="hidden sm:inline">Edit Library</span>
+						</button>
 					{/if}
 				</div>
 
@@ -1262,7 +1364,7 @@
 						</svg>
 						</button>
 						{#if showSettingsMenu}
-							<div class="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-3 shadow-lg">
+							<div class="absolute right-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-3 shadow-lg">
 								<div class="px-4 pb-3 border-b border-[var(--color-surface-border)]">
 									<div class="mb-2 text-sm font-medium text-[var(--color-surface-text)]">View</div>
 									<div class="grid grid-cols-2 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
@@ -1316,7 +1418,7 @@
 							</button>
 							<div class="border-t border-[var(--color-surface-border)] mt-1 pt-1">
 								<button
-									onclick={scanLibrary}
+									onclick={() => scanLibrary()}
 									disabled={scanning}
 									class="group w-full text-left px-4 py-2 hover:bg-[var(--color-surface-700)] text-[var(--color-surface-text)] flex items-center disabled:opacity-50"
 								>
@@ -1438,7 +1540,7 @@
 				{#each getActiveFilters() as filter}
 					<button
 						onclick={() => removeFilter(filter.key, filter.value)}
-						class="inline-flex items-center px-3 py-1 rounded-full bg-[var(--color-primary-500)]/20 border border-[var(--color-primary-500)]/50 text-[var(--color-primary-300)] text-sm hover:bg-[var(--color-primary-500)]/30 transition-colors"
+						class="active-filter-chip inline-flex items-center rounded-full px-3 py-1 text-sm transition-colors"
 					>
 						{filter.label}
 						<svg class="w-3 h-3 ml-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1504,7 +1606,7 @@
 					{libraryFilter ? 'Scan to find books in this library' : 'Configure your library paths in settings, then scan.'}
 				</p>
 				{#if libraryFilter}
-					<button onclick={scanLibrary} disabled={scanning} class="px-4 py-2 bg-[var(--color-primary-500)] text-white rounded-lg hover:bg-[var(--color-primary-600)]">
+					<button onclick={() => scanLibrary()} disabled={scanning} class="accent-action rounded-lg px-4 py-2 font-medium transition-colors">
 						Scan Now
 					</button>
 				{/if}
@@ -1865,6 +1967,15 @@
 			onApplied={async () => fetchBooks(true)}
 		/>
 	{/if}
+
+	<LibraryModal
+		open={showLibraryModal}
+		library={editingLibrary}
+		onClose={closeLibraryModal}
+		onSaved={handleLibrarySaved}
+		onScan={(library) => scanLibrary(library)}
+		onRegenerateCovers={(library, mode) => regenerateLibraryCovers(library, mode)}
+	/>
 
  <style>
 	@keyframes slide-up {

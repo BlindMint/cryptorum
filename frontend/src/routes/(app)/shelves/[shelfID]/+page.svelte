@@ -36,6 +36,8 @@
 	let viewMode = $state<'grid' | 'list'>('grid');
 	let shelfSortBy = $state<'title' | 'authors' | 'series' | 'added_at' | 'last_read' | 'status' | 'format'>('title');
 	let shelfSortDir = $state<'asc' | 'desc'>('asc');
+	let showSettingsMenu = $state(false);
+	let showSortMenu = $state(false);
 	let longPressTimer: number | null = null;
 	let longPressThreshold = 500;
 	let activeShelfId = $state('');
@@ -48,6 +50,15 @@
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
 	let visibleBooks = $derived(getVisibleBooks());
 	let existingShelfBookIds = $derived(new Set(books.map((book) => Number(book.id))));
+	const shelfSortOptions: Array<{ value: typeof shelfSortBy; label: string }> = [
+		{ value: 'title', label: 'Title' },
+		{ value: 'authors', label: 'Author' },
+		{ value: 'series', label: 'Series' },
+		{ value: 'added_at', label: 'Added' },
+		{ value: 'last_read', label: 'Last Read' },
+		{ value: 'status', label: 'Status' },
+		{ value: 'format', label: 'Format' }
+	];
 
 	$effect(() => {
 		const unsub = showFormatOnCover.subscribe((value: boolean) => formatOnCover = value);
@@ -79,6 +90,8 @@
 		showBulkMetadataReview = false;
 		showEditShelfModal = false;
 		showAddBooksModal = false;
+		showSettingsMenu = false;
+		showSortMenu = false;
 		bulkMetadataEditBookIds = [];
 		bulkMetadataLookupBookIds = [];
 		metadataLookupJob = null;
@@ -195,6 +208,24 @@
 
 	function toggleSortDirection() {
 		shelfSortDir = shelfSortDir === 'asc' ? 'desc' : 'asc';
+	}
+
+	function setShelfSort(value: typeof shelfSortBy) {
+		shelfSortBy = value;
+		showSortMenu = false;
+	}
+
+	function sortDirectionLabel() {
+		return shelfSortDir === 'asc' ? 'Ascending' : 'Descending';
+	}
+
+	function sortDirectionArrow() {
+		return shelfSortDir === 'asc' ? '↑' : '↓';
+	}
+
+	function toggleFormatOnCover() {
+		formatOnCover = !formatOnCover;
+		showFormatOnCover.set(formatOnCover);
 	}
 
 	async function deleteShelf() {
@@ -458,13 +489,6 @@
 </script>
 
 <div class="space-y-6">
-	<a href="/shelves" class="inline-flex items-center text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)]">
-		<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-		</svg>
-		Back to Shelves
-	</a>
-
 	{#if loading}
 		<div class="flex justify-center py-12">
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
@@ -518,13 +542,13 @@
 			</div>
 		</div>
 
-		<div class="flex flex-col gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3 xl:flex-row xl:items-center xl:justify-between">
-			<div class="relative min-w-0 flex-1">
+		<div class="grid min-w-0 grid-cols-[minmax(0,1fr)_2.5rem_auto] items-center gap-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3">
+			<div class="relative min-w-0">
 				<input
 					type="search"
 					bind:value={shelfSearch}
 					placeholder="Search this shelf"
-					class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 pr-9 text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+					class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 pr-9 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 				>
 				{#if shelfSearch}
 					<button
@@ -540,52 +564,117 @@
 					</button>
 				{/if}
 			</div>
-			<div class="flex flex-wrap items-center gap-2">
-				<div class="inline-flex overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
+
+			<div class="relative">
+				{#if showSettingsMenu}
 					<button
 						type="button"
-						onclick={() => viewMode = 'grid'}
-						class="px-3 py-2 text-sm font-medium transition-colors {viewMode === 'grid' ? 'bg-[var(--color-primary-500)]/10 text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]'}"
-					>
-						Grid
-					</button>
+						class="fixed inset-0 z-20"
+						aria-label="Close shelf settings menu"
+						onclick={() => showSettingsMenu = false}
+					></button>
+				{/if}
+				<button
+					type="button"
+					onclick={() => showSettingsMenu = !showSettingsMenu}
+					aria-label="Shelf settings"
+					class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-overlay)]"
+				>
+					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+					</svg>
+				</button>
+				{#if showSettingsMenu}
+					<div class="absolute right-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-3 shadow-lg">
+						<div class="px-4 pb-3 border-b border-[var(--color-surface-border)]">
+							<div class="mb-2 text-sm font-medium text-[var(--color-surface-text)]">View</div>
+							<div class="grid grid-cols-2 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
+								<button
+									type="button"
+									onclick={() => viewMode = 'grid'}
+									class="rounded-md px-2 py-1.5 text-sm font-medium transition-colors {viewMode === 'grid' ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-400)] ring-1 ring-inset ring-[var(--color-primary-500)]/45' : 'text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]'}"
+									aria-pressed={viewMode === 'grid'}
+								>
+									Grid
+								</button>
+								<button
+									type="button"
+									onclick={() => viewMode = 'list'}
+									class="rounded-md px-2 py-1.5 text-sm font-medium transition-colors {viewMode === 'list' ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-400)] ring-1 ring-inset ring-[var(--color-primary-500)]/45' : 'text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]'}"
+									aria-pressed={viewMode === 'list'}
+								>
+									List
+								</button>
+							</div>
+						</div>
+						<button
+							type="button"
+							onclick={toggleFormatOnCover}
+							class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)]"
+						>
+							<span>Show Format on Cover</span>
+							<span class="relative h-6 w-10 rounded-full transition-colors {formatOnCover ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-600)]'}">
+								<span class="absolute top-1 h-4 w-4 rounded-full bg-white transition-transform {formatOnCover ? 'left-5' : 'left-1'}"></span>
+							</span>
+						</button>
+					</div>
+				{/if}
+			</div>
+
+			<div class="relative">
+				{#if showSortMenu}
 					<button
 						type="button"
-						onclick={() => viewMode = 'list'}
-						class="border-l border-[var(--color-surface-border)] px-3 py-2 text-sm font-medium transition-colors {viewMode === 'list' ? 'bg-[var(--color-primary-500)]/10 text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]'}"
+						class="fixed inset-0 z-20"
+						aria-label="Close shelf sort menu"
+						onclick={() => showSortMenu = false}
+					></button>
+				{/if}
+				<div class="inline-flex h-10 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
+					<button
+						type="button"
+						onclick={() => showSortMenu = !showSortMenu}
+						aria-label="Sort shelf books by {shelfSortLabel()}"
+						class="inline-flex min-w-0 items-center px-3 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-overlay)]"
 					>
-						List
+						<span class="hidden min-w-0 truncate sm:inline">{shelfSortLabel()}</span>
+						<svg class="h-4 w-4 sm:ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+						</svg>
 					</button>
-				</div>
-				<div class="inline-flex overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
-					<select
-						bind:value={shelfSortBy}
-						class="bg-transparent px-3 py-2 text-sm text-[var(--color-surface-text)] focus:outline-none"
-						aria-label="Sort shelf books"
-					>
-						<option value="title">Title</option>
-						<option value="authors">Author</option>
-						<option value="series">Series</option>
-						<option value="added_at">Added</option>
-						<option value="last_read">Last Read</option>
-						<option value="status">Status</option>
-						<option value="format">Format</option>
-					</select>
 					<button
 						type="button"
 						onclick={toggleSortDirection}
-						class="min-w-14 border-l border-[var(--color-surface-border)] px-2 text-sm font-medium text-[var(--color-primary-400)] transition-colors hover:bg-[var(--color-surface-overlay)]"
-						title={shelfSortDir === 'asc' ? `Sort ${shelfSortLabel()} ascending` : `Sort ${shelfSortLabel()} descending`}
+						class="inline-flex w-10 items-center justify-center border-l border-[var(--color-surface-border)] text-[var(--color-primary-400)] transition-colors hover:bg-[var(--color-surface-overlay)]"
+						title={sortDirectionLabel()}
 						aria-label={shelfSortDir === 'asc' ? `Sort ${shelfSortLabel()} ascending` : `Sort ${shelfSortLabel()} descending`}
 					>
-						{shelfSortDir === 'asc' ? 'Asc' : 'Desc'}
+						{sortDirectionArrow()}
 					</button>
 				</div>
+				{#if showSortMenu}
+					<div class="absolute right-0 top-full z-40 mt-2 w-48 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-1 shadow-lg">
+						{#each shelfSortOptions as option}
+							<button
+								type="button"
+								onclick={() => setShelfSort(option.value)}
+								class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] {shelfSortBy === option.value ? 'text-[var(--color-primary-400)]' : ''}"
+							>
+								<span>{option.label}</span>
+								{#if shelfSortBy === option.value}
+									<span class="text-xs">✓</span>
+								{/if}
+							</button>
+						{/each}
+					</div>
+				{/if}
 			</div>
-			{#if selectedBooks.size > 0}
-				<div class="text-sm font-medium text-[var(--color-surface-text-muted)]">{selectedBooks.size} selected</div>
-			{/if}
 		</div>
+
+		{#if selectedBooks.size > 0}
+			<div class="-mt-3 text-sm font-medium text-[var(--color-surface-text-muted)]">{selectedBooks.size} selected</div>
+		{/if}
 
 		{#if books.length === 0}
 			<div class="text-center py-16 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">

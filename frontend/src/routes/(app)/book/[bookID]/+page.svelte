@@ -832,6 +832,8 @@
 			url.searchParams.set('author', value);
 		} else if (field === 'series') {
 			url.searchParams.set('series', value);
+			url.searchParams.set('sort', 'series');
+			url.searchParams.set('sort_dir', 'asc');
 		} else if (field === 'genre') {
 			url.searchParams.set('genre', value);
 		} else if (field === 'tags') {

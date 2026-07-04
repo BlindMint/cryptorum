@@ -8,8 +8,8 @@ import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 import AdminPanel from './AdminPanel.svelte';
 import MetadataManagerContent from '$lib/components/MetadataManagerContent.svelte';
 import JobsPanel from './JobsPanel.svelte';
-import LibraryIconPicker from '$lib/components/LibraryIconPicker.svelte';
-import { parseLibraryIcon } from '$lib/utils/library-icons';
+import LibraryModal from '$lib/components/LibraryModal.svelte';
+import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	
 	let settings = $state<any>({
 		libraries: [],
@@ -45,10 +45,6 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		{ value: 'left', label: 'Left side' },
 		{ value: 'disabled', label: 'Disabled' }
 	];
-	const inheritedComicSpreadFallbackOptions = [
-		{ value: 'inherit', label: 'Inherit' },
-		...globalComicSpreadFallbackOptions
-	];
 	let bookCoverSettings = $state({
 		preserve_full_cover: true,
 		vertical_cropping: true,
@@ -65,21 +61,11 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	let previousMainOverscrollBehaviorY = '';
 
 	let showLibraryModal = $state(false);
-	let showLibraryIconPicker = $state(false);
 	let editingLibrary = $state<any>(null);
 	let showDirectoryModal = $state(false);
 	let currentDirectory = $state('/');
 	let directoryContents = $state<any[]>([]);
-	let directoryTarget = $state<'library' | 'bookdrop'>('library');
-	let libraryForm = $state({
-		name: '',
-		icon: '',
-		exclude_from_suggestions: false,
-		comic_spread_fallback: 'inherit',
-		paths: ['']
-	});
-	let originalLibraryPaths = $state<string[]>([]);
-	let currentLibraryIcon = $derived(parseLibraryIcon(libraryForm.icon));
+	let directoryLoading = $state(false);
 	let anyLibraryScanning = $derived(
 		!!settings.libraries?.some((library: any) => library.is_importing)
 	);
@@ -326,56 +312,40 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		}
 	}
 
-  	function openLibraryModal(library: any = null) {
-  		editingLibrary = library;
-  		if (library) {
-			originalLibraryPaths = normalizeLibraryPaths(library.paths || []);
-			libraryForm = {
-				name: library.name,
-				icon: library.icon || '',
-				exclude_from_suggestions: !!library.exclude_from_suggestions,
-				comic_spread_fallback: library.comic_spread_fallback || 'inherit',
-				paths: (library.paths || []).filter((p: string) => p.trim())
-  			};
-  		} else {
-			originalLibraryPaths = [];
-  			libraryForm = {
-  				name: '',
-  				icon: '',
-				exclude_from_suggestions: false,
-				comic_spread_fallback: 'inherit',
-  				paths: ['']
-  			};
-  		}
-  		showLibraryModal = true;
-  	}
+	async function openLibraryModal(library: any = null) {
+		editingLibrary = null;
+		if (library?.id) {
+			try {
+				const response = await fetch(`/api/libraries/${library.id}`, { cache: 'no-store' });
+				editingLibrary = response.ok ? await response.json() : library;
+			} catch (e) {
+				console.error('Failed to load library for editing:', e);
+				editingLibrary = library;
+			}
+		}
+		showLibraryModal = true;
+	}
 
 	function closeLibraryModal() {
 		showLibraryModal = false;
-		showLibraryIconPicker = false;
 		editingLibrary = null;
-		originalLibraryPaths = [];
 	}
 
-	function openLibraryIconPicker() {
-		showLibraryIconPicker = true;
+	async function handleLibrarySaved(result: { library: any; isEditing: boolean; foldersChanged: boolean }) {
+		closeLibraryModal();
+		await loadSettings();
+		if ((window as any).refreshSidebar) {
+			(window as any).refreshSidebar();
+		}
+		if (result.isEditing && result.foldersChanged) {
+			const scanTarget = { ...result.library, id: Number(result.library.id) };
+			if (isLibraryScanActive(scanTarget)) {
+				setActiveTab('jobs');
+			} else if (confirm('Library folders changed. Scan this library now?')) {
+				await scanLibrary(scanTarget);
+			}
+		}
 	}
-
-	function closeLibraryIconPicker() {
-		showLibraryIconPicker = false;
-	}
-
-	function selectLibraryIcon(iconValue: string) {
-		libraryForm.icon = iconValue;
-	}
-
-	function clearLibraryIcon() {
-		libraryForm.icon = '';
-	}
-
-	$effect(() => {
-		currentLibraryIcon = parseLibraryIcon(libraryForm.icon);
-	});
 
 	async function saveReaderSettings() {
 		readerSettings.set(localReaderSettings);
@@ -483,22 +453,62 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		}
 	}
 
-	function removePath(index: number) {
-		libraryForm.paths = libraryForm.paths.filter((_, i) => i !== index);
+	async function regenerateLibraryCovers(library: any, mode: 'all' | 'missing') {
+		if (!library?.id) return;
+		if (!confirmBulkAction({
+			action: mode === 'all' ? 'regenerate covers for' : 'regenerate missing covers for',
+			count: library.book_count || 0
+		})) return;
+
+		coverRegenerating = true;
+		coverActionMessage = '';
+		const pendingJob = appActivity.startPendingJob({
+			job_type: 'cover_regenerate',
+			title: mode === 'all' ? `Regenerate covers for ${library.name}` : `Regenerate missing covers for ${library.name}`,
+			payload: { mode, library_id: library.id, library_name: library.name }
+		});
+		try {
+			const response = await fetch('/api/settings/book-covers/regenerate', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ mode, library_id: library.id, settings: bookCoverSettings })
+			});
+			if (!response.ok) {
+				appActivity.failPendingJob(pendingJob, 'Unable to queue cover regeneration.');
+				return;
+			}
+			const job = await response.json().catch(() => null);
+			if (job?.id) {
+				appActivity.confirmPendingJob(pendingJob, job);
+			} else {
+				appActivity.confirmPendingJob(pendingJob);
+			}
+			await appActivity.refresh();
+			coverActionMessage = mode === 'all'
+				? `Cover regeneration job queued for ${library.name}.`
+				: `Missing cover regeneration job queued for ${library.name}.`;
+		} catch (e) {
+			console.error('Failed to start library cover regeneration:', e);
+			appActivity.failPendingJob(pendingJob, 'Unable to queue cover regeneration.');
+		} finally {
+			coverRegenerating = false;
+			setTimeout(() => coverActionMessage = '', 4000);
+		}
 	}
 
-	async function openDirectoryModal(target: 'library' | 'bookdrop' = 'library') {
-		directoryTarget = target;
+	async function openDirectoryModal() {
 		showDirectoryModal = true;
+		directoryLoading = true;
+		directoryContents = [];
 		try {
 			const response = await fetch('/api/directories?path=/books');
 			if (response.ok) {
-				loadDirectoryContents('/books');
+				await loadDirectoryContents('/books');
 			} else {
-				loadDirectoryContents('/');
+				await loadDirectoryContents('/');
 			}
 		} catch (e) {
-			loadDirectoryContents('/');
+			await loadDirectoryContents('/');
 		}
 	}
 
@@ -508,6 +518,8 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 
 	async function loadDirectoryContents(path: string) {
 		currentDirectory = path;
+		directoryLoading = true;
+		directoryContents = [];
 		try {
 			const response = await fetch(`/api/directories?path=${encodeURIComponent(path)}`);
 			if (response.ok) {
@@ -517,6 +529,8 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 			}
 		} catch (e) {
 			directoryContents = [];
+		} finally {
+			directoryLoading = false;
 		}
 	}
 
@@ -528,77 +542,8 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 
 	function addSelectedDirectory() {
 		const newPath = currentDirectory;
-		if (directoryTarget === 'bookdrop') {
-			bookdropPath = newPath;
-		} else if (!libraryForm.paths.includes(newPath)) {
-			libraryForm.paths = [...libraryForm.paths, newPath];
-		}
+		bookdropPath = newPath;
 		closeDirectoryModal();
-	}
-
-	function normalizeLibraryPaths(paths: string[]): string[] {
-		return Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean))).sort();
-	}
-
-	function libraryFolderSetChanged(nextPaths: string[]): boolean {
-		const next = normalizeLibraryPaths(nextPaths);
-		if (next.length !== originalLibraryPaths.length) return true;
-		return next.some((path, index) => path !== originalLibraryPaths[index]);
-	}
-
-	async function saveLibrary() {
-		if (!libraryForm.name.trim()) return;
-
-		const filteredPaths = libraryForm.paths.filter(p => p.trim());
-		if (filteredPaths.length === 0) return;
-		const libraryBeingEdited = editingLibrary;
-		const foldersChanged = !!libraryBeingEdited && libraryFolderSetChanged(filteredPaths);
-
-		const data = {
-			name: libraryForm.name.trim(),
-			icon: libraryForm.icon.trim(),
-			exclude_from_suggestions: libraryForm.exclude_from_suggestions,
-			comic_spread_fallback: libraryForm.comic_spread_fallback,
-			paths: filteredPaths
-		};
-
-		try {
-			let response;
-			if (libraryBeingEdited) {
-				response = await fetch(`/api/libraries/${libraryBeingEdited.id}`, {
-					method: 'PUT',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(data)
-				});
-			} else {
-				response = await fetch('/api/libraries', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(data)
-				});
-			}
-
-			if (response.ok) {
-				const savedLibrary = libraryBeingEdited ? libraryBeingEdited : await response.json().catch(() => null);
-				await loadSettings();
-				if ((window as any).refreshSidebar) {
-					(window as any).refreshSidebar();
-				}
-				closeLibraryModal();
-				if (!libraryBeingEdited && savedLibrary?.id) {
-					await scanLibrary(savedLibrary);
-				} else if (libraryBeingEdited && foldersChanged) {
-					const scanTarget = { ...libraryBeingEdited, id: Number(libraryBeingEdited.id) };
-					if (isLibraryScanActive(scanTarget)) {
-						setActiveTab('jobs');
-					} else if (confirm('Library folders changed. Scan this library now?')) {
-						await scanLibrary(scanTarget);
-					}
-				}
-			}
-		} catch (e) {
-			console.error('Failed to save library:', e);
-		}
 	}
 
 	async function deleteLibrary(library: any) {
@@ -2446,12 +2391,6 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 		min-width: 0;
 	}
 
-	.library-icon-preview :global(svg) {
-		display: block;
-		width: 100%;
-		height: 100%;
-		overflow: visible;
-	}
 </style>
 
 <!-- Bookdrop Modal -->
@@ -2479,7 +2418,7 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 							class="flex-1 px-3 py-2 rounded-lg bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 						>
 						<button
-							onclick={() => openDirectoryModal('library')}
+							onclick={openDirectoryModal}
 							class="px-3 py-2 rounded-lg border border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors"
 						>
 							Folder
@@ -2629,183 +2568,14 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 	</div>
 {/if}
 
-<!-- Library Modal -->
-{#if showLibraryModal}
-		<div class="fixed inset-0 z-50 flex items-center justify-center p-4">
-		<button
-			type="button"
-			class="absolute inset-0 bg-black/80"
-			aria-label="Close library modal"
-			onclick={closeLibraryModal}
-		></button>
-		<div class="relative z-10 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl">
-			<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">
-					{editingLibrary ? 'Edit Library' : 'Add Library'}
-				</h3>
-			</div>
-			<div class="p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-120px)]">
-				<div class="grid grid-cols-2 gap-4">
-					<div>
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
-							Library Name
-						</div>
-						<input
-							type="text"
-							bind:value={libraryForm.name}
-							class="w-full px-3 py-2 rounded-lg bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)] focus:border-transparent"
-							placeholder="Enter library name"
-						/>
-					</div>
-					<div>
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
-							Icon
-						</div>
-						{#if currentLibraryIcon}
-							<div class="flex items-center gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2">
-								<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[var(--color-surface-overlay)] text-[var(--color-primary-400)]">
-									{#if currentLibraryIcon.svg}
-										<div class="library-icon-preview h-5 w-5">{@html currentLibraryIcon.svg}</div>
-									{:else}
-										<span class="text-xs font-semibold uppercase">{currentLibraryIcon.name.slice(0, 1) || '?'}</span>
-									{/if}
-								</div>
-								<div class="min-w-0 flex-1">
-									<div class="truncate text-sm font-medium text-[var(--color-surface-text)]">{currentLibraryIcon.name}</div>
-									<div class="text-xs text-[var(--color-surface-text-muted)]">
-										{currentLibraryIcon.source === 'custom' ? 'Custom SVG' : currentLibraryIcon.source === 'svg' ? 'SVG Library' : 'Prime Icons'}
-									</div>
-								</div>
-								<button
-									type="button"
-									onclick={clearLibraryIcon}
-									class="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
-									title="Remove icon"
-									aria-label="Remove icon"
-								>
-									<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-										<path d="M18 6 6 18"></path>
-										<path d="m6 6 12 12"></path>
-									</svg>
-								</button>
-							</div>
-						{:else}
-							<button
-								type="button"
-								onclick={openLibraryIconPicker}
-								class="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-3 text-sm font-medium text-[var(--color-primary-400)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)]"
-							>
-								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-									<path d="M12 5v14"></path>
-									<path d="M5 12h14"></path>
-								</svg>
-								Select icon
-							</button>
-						{/if}
-					</div>
-				</div>
-
-				<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
-					<label for="settings-library-exclude-suggestions" class="flex items-start justify-between gap-4">
-						<span class="min-w-0">
-							<span class="block text-sm font-medium text-[var(--color-surface-text)]">Exclude from discovery and recommendations</span>
-							<span class="mt-1 block text-xs leading-5 text-[var(--color-surface-text-muted)]">
-								Keep this library searchable and readable, but hide its books from dashboard Discover and similar book sections.
-							</span>
-						</span>
-						<input
-							id="settings-library-exclude-suggestions"
-							type="checkbox"
-							bind:checked={libraryForm.exclude_from_suggestions}
-							class="mt-1 h-4 w-4 shrink-0 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
-						/>
-					</label>
-				</div>
-
-				<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
-					<label for="settings-library-comic-spread-fallback" class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
-						Wide Comic Fallback Cover
-					</label>
-					<select
-						id="settings-library-comic-spread-fallback"
-						bind:value={libraryForm.comic_spread_fallback}
-						class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-sm text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-					>
-						{#each inheritedComicSpreadFallbackOptions as option}
-							<option value={option.value}>{option.label}</option>
-						{/each}
-					</select>
-				</div>
-
-				<div>
-					<div class="flex items-center justify-between mb-2">
-						<div class="block text-sm font-medium text-[var(--color-surface-text)]">
-							Book Folders
-						</div>
-						<button
-							onclick={() => openDirectoryModal('library')}
-							class="px-3 py-1.5 text-sm bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white rounded-lg transition-colors"
-						>
-							Add Folder
-						</button>
-					</div>
-					<div class="space-y-2 min-h-[60px] border-2 border-dashed border-[var(--color-surface-border)] rounded-lg p-4">
-						{#if libraryForm.paths.filter(p => p.trim()).length === 0}
-							<div class="text-center py-4 text-[var(--color-surface-text-muted)]">
-								<svg class="w-8 h-8 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
-								</svg>
-								<p class="text-sm">No folders selected</p>
-								<p class="text-xs mt-1">Click "Add Folder" to select directories</p>
-							</div>
-						{:else}
-							{#each libraryForm.paths.filter(p => p.trim()) as path, i}
-								<div class="flex items-center justify-between bg-[var(--color-surface-base)] rounded-lg p-3 border border-[var(--color-surface-border)]">
-									<div class="flex items-center space-x-3">
-										<svg class="w-5 h-5 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
-										</svg>
-										<span class="font-mono text-sm text-[var(--color-surface-text)]">{path}</span>
-									</div>
-									<button
-										onclick={() => removePath(libraryForm.paths.indexOf(path))}
-										class="p-1 rounded text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
-										title="Remove folder"
-									>
-										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-										</svg>
-									</button>
-								</div>
-							{/each}
-						{/if}
-					</div>
-				</div>
-			</div>
-			<div class="px-6 py-4 border-t border-[var(--color-surface-border)] flex justify-end space-x-3">
-				<button
-					onclick={closeLibraryModal}
-					class="px-4 py-2 rounded-lg text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] transition-colors"
-				>
-					Cancel
-				</button>
-				<button
-					onclick={saveLibrary}
-					disabled={!libraryForm.name.trim() || libraryForm.paths.filter(p => p.trim()).length === 0}
-					class="px-4 py-2 rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-				>
-					{editingLibrary ? 'Update' : 'Create'} Library
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-<LibraryIconPicker
-	open={showLibraryIconPicker}
-	selectedIcon={libraryForm.icon}
-	onSelect={selectLibraryIcon}
-	onClose={closeLibraryIconPicker}
+<LibraryModal
+	open={showLibraryModal}
+	library={editingLibrary}
+	isScanActive={(library) => isLibraryScanActive(library)}
+	onClose={closeLibraryModal}
+	onSaved={handleLibrarySaved}
+	onScan={(library) => scanLibrary(library)}
+	onRegenerateCovers={(library, mode) => regenerateLibraryCovers(library, mode)}
 />
 
 <!-- Directory Selection Modal -->
@@ -2821,7 +2591,11 @@ import { parseLibraryIcon } from '$lib/utils/library-icons';
 				</p>
 			</div>
 			<div class="p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0">
-				{#if directoryContents.length === 0}
+				{#if directoryLoading}
+					<div class="flex items-center justify-center py-8">
+						<div class="h-8 w-8 animate-spin rounded-full border-b-2 border-[var(--color-primary-500)]"></div>
+					</div>
+				{:else if directoryContents.length === 0}
 					<div class="text-center py-8">
 						<svg class="w-8 h-8 text-[var(--color-surface-text-muted)] mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
