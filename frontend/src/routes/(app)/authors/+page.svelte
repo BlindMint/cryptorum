@@ -45,21 +45,22 @@
 </script>
 
 <div class="space-y-6">
-	<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-		<div>
+	<div class="space-y-3">
+		<div class="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
 			<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">Authors</h1>
-			<p class="mt-1 text-[var(--color-surface-text-muted)]">{getAuthorCountLabel()}</p>
+			<p class="whitespace-nowrap text-sm text-[var(--color-surface-text-muted)]">{getAuthorCountLabel()}</p>
 		</div>
-		<div class="flex w-full flex-col gap-3 sm:flex-row md:w-auto">
+
+		<div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
 			<input
 				type="search"
 				bind:value={searchQuery}
 				placeholder="Search authors"
-				class="min-w-0 flex-1 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)] sm:w-72"
+				class="min-w-0 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 			>
 			<select
 				bind:value={sortBy}
-				class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+				class="min-w-0 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 			>
 				<option value="name">Sort by name</option>
 				<option value="count">Sort by count</option>

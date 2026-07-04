@@ -495,20 +495,18 @@
 		</div>
 	{:else if shelf}
 		<div class="space-y-3">
-			<div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-				<div>
-					<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">{shelf.name}</h1>
-					<p class="mt-1 text-[var(--color-surface-text-muted)]">
-						{getSearchCountLabel()}
-						<span class="ml-2 inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide {getShelfTypeClass()}">
-							{#if shelf.is_magic === 1}
-								<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
-								</svg>
-							{/if}
-							<span>{getShelfTypeLabel()}</span>
-						</span>
-					</p>
+			<div class="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+				<div class="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+					<h1 class="min-w-0 break-words text-2xl font-bold text-[var(--color-surface-text)]">{shelf.name}</h1>
+					<p class="whitespace-nowrap text-sm text-[var(--color-surface-text-muted)]">{getSearchCountLabel()}</p>
+					<span class="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide {getShelfTypeClass()}">
+						{#if shelf.is_magic === 1}
+							<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+							</svg>
+						{/if}
+						<span>{getShelfTypeLabel()}</span>
+					</span>
 				</div>
 				<div class="flex flex-wrap gap-2 lg:justify-end">
 					{#if shelf.is_magic !== 1}

@@ -50,6 +50,7 @@
 		let activeBookActions = $state<number | null>(null);
 		let toolbarContainer = $state<HTMLDivElement | null>(null);
 		let toolbarWidth = $state(0);
+		let toolbarScrolled = $state(false);
 		let compactToolbar = $derived(toolbarWidth > 0 && toolbarWidth < COMPACT_TOOLBAR_WIDTH);
 
 	$effect(() => {
@@ -73,6 +74,25 @@
 			updateWidth();
 			observer.observe(element);
 			return () => observer.disconnect();
+		});
+
+		$effect(() => {
+			const element = toolbarContainer;
+			if (!element || typeof window === 'undefined') return;
+
+			const scrollRoot = element.closest('main');
+			const updateToolbarScrollState = () => {
+				toolbarScrolled = scrollRoot ? scrollRoot.scrollTop > 8 : window.scrollY > 8;
+			};
+
+			updateToolbarScrollState();
+			if (scrollRoot) {
+				scrollRoot.addEventListener('scroll', updateToolbarScrollState, { passive: true });
+				return () => scrollRoot.removeEventListener('scroll', updateToolbarScrollState);
+			}
+
+			window.addEventListener('scroll', updateToolbarScrollState, { passive: true });
+			return () => window.removeEventListener('scroll', updateToolbarScrollState);
 		});
 
 	function updateGridScale(value: number) {
@@ -1311,7 +1331,7 @@
   </script>
 
 <div class="pb-20" style={`--filter-panel-offset: ${$filterPanelWidth + 24}px;`}>
-		<div class="sticky top-0 z-30 px-3 py-3 sm:px-6 sm:py-4 bg-[var(--color-surface-base)]/95 backdrop-blur border-b border-[var(--color-surface-border)] shadow-[0_1px_0_rgba(255,255,255,0.04)] {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}">
+		<div class="sticky top-0 z-30 px-3 py-3 transition-all duration-200 sm:px-6 sm:py-4 {toolbarScrolled ? 'border-b border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/80 shadow-[0_1px_0_rgba(255,255,255,0.04),0_10px_24px_rgba(0,0,0,0.16)] backdrop-blur-md' : 'border-b border-transparent bg-transparent shadow-none backdrop-blur-0'} {showFilterPanel ? 'lg:pr-[var(--filter-panel-offset)]' : ''}">
 				<div bind:this={toolbarContainer} class="space-y-3">
 				<div class="flex min-w-0 items-start justify-between gap-3">
 					<div class="min-w-0">
