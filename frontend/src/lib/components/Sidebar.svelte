@@ -55,6 +55,7 @@
 	const SIDEBAR_MIN_WIDTH = 240;
 	const SIDEBAR_MAX_WIDTH = 400;
 	const SIDEBAR_STORAGE_KEY = 'sidebarWidth';
+	const LIBRARY_NAME_CACHE_KEY = 'cryptorumLibraryNames';
 
 	function clampSidebarWidth(width: number): number {
 		return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -324,7 +325,10 @@
 
 			if (libsRes.ok) {
 				const libs = await libsRes.json();
-				if (libs) libraries = libs;
+				if (libs) {
+					libraries = libs;
+					cacheLibraryNames(libs);
+				}
 			}
 
 			if (shelvesRes.ok) {
@@ -336,6 +340,15 @@
 			console.error('Failed to load navigation data:', e);
 		} finally {
 			isLoading = false;
+		}
+	}
+
+	function cacheLibraryNames(nextLibraries: Library[]) {
+		try {
+			const names = Object.fromEntries(nextLibraries.map((library) => [String(library.id), library.name || '']));
+			sessionStorage.setItem(LIBRARY_NAME_CACHE_KEY, JSON.stringify(names));
+		} catch {
+			// Ignore storage failures; the library page will still fetch the name.
 		}
 	}
 

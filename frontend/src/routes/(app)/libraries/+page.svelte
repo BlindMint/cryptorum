@@ -70,18 +70,18 @@
 	}
 </script>
 
-<div class="space-y-6">
-	<div class="space-y-3">
-		<div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-			<div class="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
-				<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">Libraries</h1>
-				<p class="whitespace-nowrap text-sm text-[var(--color-surface-text-muted)]">{getLibraryCountLabel()}</p>
+<div class="catalog-page-shell space-y-6">
+	<div class="catalog-page-header">
+		<div class="catalog-page-header-row">
+			<div class="catalog-page-title-row">
+				<h1 class="catalog-page-title">Libraries</h1>
+				<p class="catalog-page-count">{getLibraryCountLabel()}</p>
 			</div>
 
 			<button
 				type="button"
 				onclick={() => showLibraryModal = true}
-				class="accent-action inline-flex shrink-0 items-center justify-center gap-2 rounded-lg px-4 py-2 font-medium transition-colors"
+				class="accent-action catalog-page-action shrink-0"
 			>
 				<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"></path>
@@ -91,16 +91,16 @@
 		</div>
 
 		{#if libraries.length > 0}
-			<div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+			<div class="catalog-page-controls">
 				<input
 					type="search"
 					bind:value={searchQuery}
 					placeholder="Search libraries"
-					class="min-w-0 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+					class="catalog-page-control"
 				>
 				<select
 					bind:value={sortBy}
-					class="min-w-0 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+					class="catalog-page-control"
 				>
 					<option value="name">Sort by name</option>
 					<option value="count">Sort by count</option>

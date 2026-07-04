@@ -80,8 +80,6 @@
 
 	function resetShelfRouteState() {
 		clearLongPressTimer();
-		shelf = null;
-		books = [];
 		selectedBooks = new Set();
 		bulkSelectionAnchorId = null;
 		shelfSearch = '';
@@ -103,7 +101,7 @@
 
 	async function fetchShelfBooks(shelfId = $page.params.shelfID) {
 		const requestToken = ++shelfRequestToken;
-		loading = true;
+		loading = !shelf;
 		try {
 			const [shelfRes, booksRes] = await Promise.all([
 				fetch(`/api/shelves/${shelfId}`),
@@ -488,17 +486,17 @@
 	}
 </script>
 
-<div class="space-y-6">
+<div class="catalog-page-shell space-y-6">
 	{#if loading}
 		<div class="flex justify-center py-12">
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
 		</div>
 	{:else if shelf}
-		<div class="space-y-3">
-			<div class="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-				<div class="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
-					<h1 class="min-w-0 break-words text-2xl font-bold text-[var(--color-surface-text)]">{shelf.name}</h1>
-					<p class="whitespace-nowrap text-sm text-[var(--color-surface-text-muted)]">{getSearchCountLabel()}</p>
+		<div class="catalog-page-header">
+			<div class="catalog-page-header-row">
+				<div class="catalog-page-title-row">
+					<h1 class="catalog-page-title break-words">{shelf.name}</h1>
+					<p class="catalog-page-count">{getSearchCountLabel()}</p>
 					<span class="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide {getShelfTypeClass()}">
 						{#if shelf.is_magic === 1}
 							<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -508,12 +506,12 @@
 						<span>{getShelfTypeLabel()}</span>
 					</span>
 				</div>
-				<div class="flex flex-wrap gap-2 lg:justify-end">
+				<div class="catalog-page-actions">
 					{#if shelf.is_magic !== 1}
 						<button
 							type="button"
 							onclick={() => showAddBooksModal = true}
-							class="accent-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+							class="accent-action catalog-page-action"
 						>
 							<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"></path>
@@ -524,7 +522,7 @@
 					<button
 						type="button"
 						onclick={() => showEditShelfModal = true}
-						class="inline-flex items-center gap-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:border-[var(--color-primary-500)]/45 hover:text-[var(--color-primary-400)]"
+						class="catalog-page-action catalog-page-action-secondary"
 					>
 						<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"></path>
@@ -536,7 +534,7 @@
 						type="button"
 						onclick={deleteShelf}
 						disabled={deletingShelf}
-						class="inline-flex items-center gap-2 rounded-lg border border-red-500/35 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:border-red-400/60 hover:bg-red-500/15 disabled:opacity-50"
+						class="catalog-page-action border border-red-500/35 bg-red-500/10 text-red-300 hover:border-red-400/60 hover:bg-red-500/15 disabled:opacity-50"
 					>
 						<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12m-9 4v6m6-6v6M9 7V4h6v3m-9 0 1 13h10l1-13"></path>
@@ -547,27 +545,27 @@
 			</div>
 
 			<div class="grid min-w-0 grid-cols-[minmax(0,1fr)_2.5rem_auto] items-center gap-2">
-			<div class="relative min-w-0">
-				<input
-					type="search"
-					bind:value={shelfSearch}
-					placeholder="Search this shelf"
-					class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 pr-9 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-				>
-				{#if shelfSearch}
-					<button
-						type="button"
-						onclick={clearShelfSearch}
-						class="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
-						aria-label="Clear shelf search"
+				<div class="relative min-w-0">
+					<input
+						type="search"
+						bind:value={shelfSearch}
+						placeholder="Search this shelf"
+						class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 pr-9 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 					>
-						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-							<path d="M18 6 6 18"></path>
-							<path d="m6 6 12 12"></path>
-						</svg>
-					</button>
-				{/if}
-			</div>
+					{#if shelfSearch}
+						<button
+							type="button"
+							onclick={clearShelfSearch}
+							class="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+							aria-label="Clear shelf search"
+						>
+							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+								<path d="M18 6 6 18"></path>
+								<path d="m6 6 12 12"></path>
+							</svg>
+						</button>
+					{/if}
+				</div>
 
 			<div class="relative">
 				{#if showSettingsMenu}
