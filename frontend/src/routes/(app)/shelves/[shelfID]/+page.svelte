@@ -494,66 +494,67 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
 		</div>
 	{:else if shelf}
-		<div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-			<div>
-				<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">{shelf.name}</h1>
-				<p class="mt-1 text-[var(--color-surface-text-muted)]">
-					{getSearchCountLabel()}
-					<span class="ml-2 inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide {getShelfTypeClass()}">
-						{#if shelf.is_magic === 1}
-							<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+		<div class="space-y-3">
+			<div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+				<div>
+					<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">{shelf.name}</h1>
+					<p class="mt-1 text-[var(--color-surface-text-muted)]">
+						{getSearchCountLabel()}
+						<span class="ml-2 inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide {getShelfTypeClass()}">
+							{#if shelf.is_magic === 1}
+								<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+								</svg>
+							{/if}
+							<span>{getShelfTypeLabel()}</span>
+						</span>
+					</p>
+				</div>
+				<div class="flex flex-wrap gap-2 lg:justify-end">
+					{#if shelf.is_magic !== 1}
+						<button
+							type="button"
+							onclick={() => showAddBooksModal = true}
+							class="accent-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+						>
+							<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"></path>
 							</svg>
-						{/if}
-						<span>{getShelfTypeLabel()}</span>
-					</span>
-				</p>
-			</div>
-			<div class="flex flex-wrap gap-2">
-				{#if shelf.is_magic !== 1}
+							Add Books
+						</button>
+					{/if}
 					<button
 						type="button"
-						onclick={() => showAddBooksModal = true}
-						class="accent-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+						onclick={() => showEditShelfModal = true}
+						class="inline-flex items-center gap-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:border-[var(--color-primary-500)]/45 hover:text-[var(--color-primary-400)]"
 					>
 						<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"></path>
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"></path>
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 7.125 16.875 4.5"></path>
 						</svg>
-						Add Books
+						Edit Shelf
 					</button>
-				{/if}
-				<button
-					type="button"
-					onclick={() => showEditShelfModal = true}
-					class="inline-flex items-center gap-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:border-[var(--color-primary-500)]/45 hover:text-[var(--color-primary-400)]"
-				>
-					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"></path>
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 7.125 16.875 4.5"></path>
-					</svg>
-					Edit Shelf
-				</button>
-				<button
-					type="button"
-					onclick={deleteShelf}
-					disabled={deletingShelf}
-					class="inline-flex items-center gap-2 rounded-lg border border-red-500/35 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:border-red-400/60 hover:bg-red-500/15 disabled:opacity-50"
-				>
-					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12m-9 4v6m6-6v6M9 7V4h6v3m-9 0 1 13h10l1-13"></path>
-					</svg>
-					{deletingShelf ? 'Deleting...' : 'Delete'}
-				</button>
+					<button
+						type="button"
+						onclick={deleteShelf}
+						disabled={deletingShelf}
+						class="inline-flex items-center gap-2 rounded-lg border border-red-500/35 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:border-red-400/60 hover:bg-red-500/15 disabled:opacity-50"
+					>
+						<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12m-9 4v6m6-6v6M9 7V4h6v3m-9 0 1 13h10l1-13"></path>
+						</svg>
+						{deletingShelf ? 'Deleting...' : 'Delete'}
+					</button>
+				</div>
 			</div>
-		</div>
 
-		<div class="grid min-w-0 grid-cols-[minmax(0,1fr)_2.5rem_auto] items-center gap-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3">
+			<div class="grid min-w-0 grid-cols-[minmax(0,1fr)_2.5rem_auto] items-center gap-2">
 			<div class="relative min-w-0">
 				<input
 					type="search"
 					bind:value={shelfSearch}
 					placeholder="Search this shelf"
-					class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 pr-9 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+					class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 pr-9 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 				>
 				{#if shelfSearch}
 					<button
@@ -675,6 +676,7 @@
 					</div>
 				{/if}
 			</div>
+		</div>
 		</div>
 
 		{#if selectedBooks.size > 0}

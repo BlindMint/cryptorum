@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import LibraryModal from '$lib/components/LibraryModal.svelte';
 	import { lenientSearchMatch } from '$lib/utils/search';
 	import { parseLibraryIcon } from '$lib/utils/library-icons';
 
@@ -16,6 +17,7 @@
 
 	let libraries = $state<Library[]>([]);
 	let loading = $state(true);
+	let showLibraryModal = $state(false);
 	let searchQuery = $state('');
 	let sortBy = $state<'name' | 'count'>('name');
 
@@ -49,6 +51,18 @@
 		});
 	}
 
+	function getLibraryCountLabel(): string {
+		if (libraries.length === 0) return 'Add a library to get started';
+		if (!searchQuery.trim()) return `${libraries.length} libraries`;
+		return `${getVisibleLibraries().length} of ${libraries.length} libraries`;
+	}
+
+	async function handleLibrarySaved() {
+		showLibraryModal = false;
+		await fetchLibraries();
+		await (window as any).refreshSidebar?.();
+	}
+
 	function libraryStatusLabel(library: Library): string | null {
 		if (library.is_importing) return 'Scanning';
 		if (library.exclude_from_suggestions) return 'Hidden from suggestions';
@@ -57,27 +71,39 @@
 </script>
 
 <div class="space-y-6">
-	<div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+	<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 		<div>
 			<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">Libraries</h1>
-			{#if libraries.length > 0}
-				<p class="mt-1 text-[var(--color-surface-text-muted)]">{libraries.length} libraries</p>
-			{/if}
+			<p class="mt-1 text-[var(--color-surface-text-muted)]">{getLibraryCountLabel()}</p>
 		</div>
-		<div class="flex flex-col gap-3 sm:flex-row">
-			<input
-				type="text"
-				bind:value={searchQuery}
-				placeholder="Search libraries"
-				class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)]"
+		<div class="flex w-full flex-col gap-3 md:w-auto md:items-end">
+			<button
+				type="button"
+				onclick={() => showLibraryModal = true}
+				class="accent-action inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 font-medium transition-colors"
 			>
-			<select
-				bind:value={sortBy}
-				class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)]"
-			>
-				<option value="name">Sort by name</option>
-				<option value="count">Sort by count</option>
-			</select>
+				<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"></path>
+				</svg>
+				Add Library
+			</button>
+			{#if libraries.length > 0}
+				<div class="flex w-full flex-col gap-3 sm:flex-row md:w-auto">
+					<input
+						type="search"
+						bind:value={searchQuery}
+						placeholder="Search libraries"
+						class="min-w-0 flex-1 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)] sm:w-72"
+					>
+					<select
+						bind:value={sortBy}
+						class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+					>
+						<option value="name">Sort by name</option>
+						<option value="count">Sort by count</option>
+					</select>
+				</div>
+			{/if}
 		</div>
 	</div>
 
@@ -93,25 +119,25 @@
 			<p class="text-[var(--color-surface-text-muted)]">No libraries found</p>
 		</div>
 	{:else}
-		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
 			{#each getVisibleLibraries() as library}
 				{@const parsedIcon = parseLibraryIcon(library.icon)}
 				<a
 					href="/library?library={library.id}"
-					class="overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-colors hover:border-[var(--color-primary-500)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+					class="flex flex-col justify-center overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-colors hover:border-[var(--color-primary-500)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 				>
-					<div class="mb-2 flex min-w-0 items-center gap-3">
-						<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[var(--color-primary-500)]/20 text-[var(--color-primary-400)]">
+					<div class="flex min-w-0 w-full items-center gap-3">
+						<div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)]">
 							{#if parsedIcon?.svg}
-								<div class="library-icon h-5 w-5">{@html parsedIcon.svg}</div>
+								<div class="library-icon h-6 w-6">{@html parsedIcon.svg}</div>
 							{:else}
-								<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
 								</svg>
 							{/if}
 						</div>
 						<div class="min-w-0 flex-1">
-							<h3 class="truncate text-lg font-semibold text-[var(--color-surface-text)]">{library.name}</h3>
+							<h3 class="line-clamp-2 break-words text-base font-semibold leading-snug text-[var(--color-surface-text)]">{library.name}</h3>
 							<p class="text-sm text-[var(--color-surface-text-muted)]">{library.book_count} books</p>
 						</div>
 					</div>
@@ -130,6 +156,13 @@
 		</div>
 	{/if}
 </div>
+
+<LibraryModal
+	open={showLibraryModal}
+	library={null}
+	onClose={() => showLibraryModal = false}
+	onSaved={handleLibrarySaved}
+/>
 
 <style>
 	.library-icon :global(svg) {
