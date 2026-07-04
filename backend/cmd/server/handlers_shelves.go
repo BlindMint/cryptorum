@@ -80,6 +80,19 @@ func getShelvesHandler(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, shelves)
 }
 
+func rejectMagicShelfMembershipMutation(w http.ResponseWriter, shelfID string) bool {
+	var isMagic int
+	if err := appDB.QueryRow("SELECT is_magic FROM shelf WHERE id = ?", shelfID).Scan(&isMagic); err != nil {
+		errorResponse(w, http.StatusNotFound, "Shelf not found")
+		return true
+	}
+	if isMagic == 1 {
+		errorResponse(w, http.StatusBadRequest, "Smart shelves are managed by rules")
+		return true
+	}
+	return false
+}
+
 func buildMagicShelfConditions(rulesJSON string) (string, []interface{}, error) {
 	if strings.TrimSpace(rulesJSON) == "" {
 		return "1 = 1", nil, nil
@@ -195,27 +208,39 @@ func buildMagicShelfConditions(rulesJSON string) (string, []interface{}, error) 
 	return whereClause, args, nil
 }
 
-func evaluateMagicShelfRules(shelfID string, rulesJSON string, user *AppUser) (*sql.Rows, error) {
+func evaluateMagicShelfRules(rulesJSON string, sortBy string, sortDir string, user *AppUser) (*sql.Rows, error) {
 	whereClause, args, err := buildMagicShelfConditions(rulesJSON)
 	if err != nil {
 		return nil, err
 	}
 	ownerClause, ownerArgs := userOwnershipClause(user, "l")
+	orderBy := bookListOrderBy(sortBy, sortDir)
 
 	query := fmt.Sprintf(`
 		SELECT b.id, b.library_id, b.added_at,
 		       COALESCE(bm.title, '') as title,
 		       COALESCE(bm.authors, '[]') as authors,
+		       COALESCE(bm.series, '') as series,
+		       COALESCE(bm.series_number, 0) as series_number,
+		       COALESCE(bm.series_number_display, '') as series_number_display,
 		       COALESCE(bm.cover_path, '') as cover_path,
-		       COALESCE(rp.status, 'unread') as status
+		       COALESCE(rp.status, 'unread') as status,
+		       COALESCE(rp.updated_at, 0) as last_read_at,
+		       COALESCE(bf.format, '') as format
 			FROM book b
 			JOIN library l ON b.library_id = l.id
 			LEFT JOIN book_metadata bm ON b.id = bm.book_id
 			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
+			LEFT JOIN (
+				SELECT book_id, MIN(format) AS format
+				FROM book_file
+				WHERE missing_at IS NULL
+				GROUP BY book_id
+			) bf ON b.id = bf.book_id
 			WHERE (%s) AND %s
 			  AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL)
-			ORDER BY bm.title
-		`, whereClause, ownerClause)
+			ORDER BY %s
+		`, whereClause, ownerClause, orderBy)
 
 	queryArgs := append([]interface{}{userIDForScopedRows(user)}, args...)
 	queryArgs = append(queryArgs, ownerArgs...)
@@ -284,6 +309,8 @@ func createShelfHandler(w http.ResponseWriter, r *http.Request) {
 		Name:      req.Name,
 		Icon:      req.Icon,
 		IsMagic:   req.IsMagic,
+		SortBy:    req.SortBy,
+		SortDir:   req.SortDir,
 		SortOrder: nextSortOrder,
 	})
 }
@@ -458,10 +485,11 @@ func getShelfBooksHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if this is a magic shelf
 	var isMagic int
 	var rulesJSON string
-	err = appDB.QueryRow("SELECT is_magic, rules_json FROM shelf WHERE id = ?", shelfID).Scan(&isMagic, &rulesJSON)
+	var sortBy string
+	var sortDir string
+	err = appDB.QueryRow("SELECT is_magic, COALESCE(rules_json, ''), COALESCE(sort_by, ''), COALESCE(sort_dir, '') FROM shelf WHERE id = ?", shelfID).Scan(&isMagic, &rulesJSON, &sortBy, &sortDir)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch shelf info")
 		return
@@ -469,26 +497,35 @@ func getShelfBooksHandler(w http.ResponseWriter, r *http.Request) {
 
 	var rows *sql.Rows
 	if isMagic == 1 {
-		// For magic shelves, evaluate rules to get matching books
-		rows, err = evaluateMagicShelfRules(shelfID, rulesJSON, current)
+		rows, err = evaluateMagicShelfRules(rulesJSON, sortBy, sortDir, current)
 	} else {
-		// For regular shelves, get manually added books
 		ownerClause, ownerArgs := userOwnershipClause(current, "l")
-		rows, err = appDB.Query(`
+		query := `
 			SELECT b.id, b.library_id, b.added_at,
 			       COALESCE(bm.title, '') as title,
 			       COALESCE(bm.authors, '[]') as authors,
+			       COALESCE(bm.series, '') as series,
+			       COALESCE(bm.series_number, 0) as series_number,
+			       COALESCE(bm.series_number_display, '') as series_number_display,
 			       COALESCE(bm.cover_path, '') as cover_path,
-			       COALESCE(rp.status, 'unread') as status
+			       COALESCE(rp.status, 'unread') as status,
+			       COALESCE(rp.updated_at, 0) as last_read_at,
+			       COALESCE(bf.format, '') as format
 			FROM book_shelf bs
 				JOIN book b ON bs.book_id = b.id
 				JOIN library l ON b.library_id = l.id
 				LEFT JOIN book_metadata bm ON b.id = bm.book_id
 				LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
-				WHERE bs.shelf_id = ? AND `+ownerClause+`
+				LEFT JOIN (
+					SELECT book_id, MIN(format) AS format
+					FROM book_file
+					WHERE missing_at IS NULL
+					GROUP BY book_id
+				) bf ON b.id = bf.book_id
+				WHERE bs.shelf_id = ? AND ` + ownerClause + `
 				  AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL)
-				ORDER BY bm.title
-			`, append([]interface{}{userIDForScopedRows(current), shelfID}, ownerArgs...)...)
+				ORDER BY ` + bookListOrderBy(sortBy, sortDir)
+		rows, err = appDB.Query(query, append([]interface{}{userIDForScopedRows(current), shelfID}, ownerArgs...)...)
 	}
 
 	if err != nil {
@@ -498,19 +535,24 @@ func getShelfBooksHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type BookResponse struct {
-		ID        int64  `json:"id"`
-		LibraryID int64  `json:"library_id"`
-		AddedAt   int64  `json:"added_at"`
-		Title     string `json:"title"`
-		Authors   string `json:"authors"`
-		CoverPath string `json:"cover_path"`
-		Status    string `json:"status"`
+		ID                  int64   `json:"id"`
+		LibraryID           int64   `json:"library_id"`
+		AddedAt             int64   `json:"added_at"`
+		Title               string  `json:"title"`
+		Authors             string  `json:"authors"`
+		Series              string  `json:"series"`
+		SeriesNumber        float64 `json:"series_number"`
+		SeriesNumberDisplay string  `json:"series_number_display"`
+		CoverPath           string  `json:"cover_path"`
+		Status              string  `json:"status"`
+		LastReadAt          int64   `json:"last_read_at"`
+		Format              string  `json:"format"`
 	}
 
 	books := []BookResponse{}
 	for rows.Next() {
 		var b BookResponse
-		if err := rows.Scan(&b.ID, &b.LibraryID, &b.AddedAt, &b.Title, &b.Authors, &b.CoverPath, &b.Status); err != nil {
+		if err := rows.Scan(&b.ID, &b.LibraryID, &b.AddedAt, &b.Title, &b.Authors, &b.Series, &b.SeriesNumber, &b.SeriesNumberDisplay, &b.CoverPath, &b.Status, &b.LastReadAt, &b.Format); err != nil {
 			continue
 		}
 		books = append(books, b)
@@ -530,6 +572,9 @@ func addBookToShelfHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if !allowed {
 		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+	if rejectMagicShelfMembershipMutation(w, shelfID) {
 		return
 	}
 
@@ -575,6 +620,9 @@ func removeBookFromShelfHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusForbidden, "Permission denied")
 		return
 	}
+	if rejectMagicShelfMembershipMutation(w, shelfID) {
+		return
+	}
 
 	bookAllowed, err := canAccessBook(current, mustInt64(bookID))
 	if err != nil {
@@ -618,6 +666,9 @@ func bulkRemoveBooksFromShelfHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if !allowed {
 		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+	if rejectMagicShelfMembershipMutation(w, shelfID) {
 		return
 	}
 

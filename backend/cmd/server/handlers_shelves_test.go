@@ -99,9 +99,7 @@ func TestGetShelfBooksExcludesMissingManualBooks(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/shelves/1/books", nil)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("shelfID", "1")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	req = requestWithShelfID(req, "1")
 	req = req.WithContext(authContextWithUser(req.Context(), &AppUser{ID: 1}))
 
 	getShelfBooksHandler(rec, req)
@@ -117,6 +115,100 @@ func TestGetShelfBooksExcludesMissingManualBooks(t *testing.T) {
 	}
 	if len(books) != 1 || books[0].ID != 1 {
 		t.Fatalf("books = %+v, want only active book 1", books)
+	}
+}
+
+func TestAddBookToMagicShelfIsRejected(t *testing.T) {
+	setupShelfHandlerTestDB(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/shelves/2/books", strings.NewReader(`{"book_id":1}`))
+	req = requestWithShelfID(req, "2")
+	req = req.WithContext(authContextWithUser(req.Context(), &AppUser{ID: 1}))
+
+	addBookToShelfHandler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var count int
+	if err := appDB.QueryRow(`SELECT COUNT(*) FROM book_shelf WHERE shelf_id = 2`).Scan(&count); err != nil {
+		t.Fatalf("query magic shelf links: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("magic shelf links = %d, want 0", count)
+	}
+}
+
+func TestBulkAddToMagicShelfIsRejected(t *testing.T) {
+	setupShelfHandlerTestDB(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/shelves/2/books/bulk", strings.NewReader(`{"book_ids":[1]}`))
+	req = requestWithShelfID(req, "2")
+	req = req.WithContext(authContextWithUser(req.Context(), &AppUser{ID: 1}))
+
+	bulkAddToShelfHandler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var count int
+	if err := appDB.QueryRow(`SELECT COUNT(*) FROM book_shelf WHERE shelf_id = 2`).Scan(&count); err != nil {
+		t.Fatalf("query magic shelf links: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("magic shelf links = %d, want 0", count)
+	}
+}
+
+func TestBulkAddByFilterToMagicShelfIsRejected(t *testing.T) {
+	setupShelfHandlerTestDB(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/shelves/2/books/bulk-by-filter", strings.NewReader(`{"status":["reading"]}`))
+	req = requestWithShelfID(req, "2")
+	req = req.WithContext(authContextWithUser(req.Context(), &AppUser{ID: 1}))
+
+	bulkAddToShelfByFilterHandler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var count int
+	if err := appDB.QueryRow(`SELECT COUNT(*) FROM book_shelf WHERE shelf_id = 2`).Scan(&count); err != nil {
+		t.Fatalf("query magic shelf links: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("magic shelf links = %d, want 0", count)
+	}
+}
+
+func TestGetMagicShelfBooksUsesShelfSort(t *testing.T) {
+	setupShelfHandlerTestDB(t)
+	insertShelfTestBook(t, 4, 1, 1, "Newest Reading", "reading", false)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/shelves/2/books", nil)
+	req = requestWithShelfID(req, "2")
+	req = req.WithContext(authContextWithUser(req.Context(), &AppUser{ID: 1}))
+
+	getShelfBooksHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var books []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&books); err != nil {
+		t.Fatalf("decode shelf books: %v", err)
+	}
+	if len(books) != 2 {
+		t.Fatalf("books = %+v, want 2 matching books", books)
+	}
+	if books[0].ID != 4 || books[1].ID != 1 {
+		t.Fatalf("book order = %+v, want newest added first", books)
 	}
 }
 
@@ -145,4 +237,10 @@ func TestUpdateShelfOrderPersistsOwnedShelves(t *testing.T) {
 	if first != 1 || second != 2 {
 		t.Fatalf("orders = shelf2:%d shelf1:%d, want 1 and 2", first, second)
 	}
+}
+
+func requestWithShelfID(req *http.Request, shelfID string) *http.Request {
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("shelfID", shelfID)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
 }

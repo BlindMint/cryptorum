@@ -1599,6 +1599,9 @@ func bulkAddToShelfHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusForbidden, "Permission denied")
 		return
 	}
+	if rejectMagicShelfMembershipMutation(w, shelfID) {
+		return
+	}
 
 	var req struct {
 		BookIDs []int64 `json:"book_ids"`
@@ -1642,6 +1645,9 @@ func bulkAddToShelfByFilterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if !allowed {
 		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+	if rejectMagicShelfMembershipMutation(w, shelfID) {
 		return
 	}
 
