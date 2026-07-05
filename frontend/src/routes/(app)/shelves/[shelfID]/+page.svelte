@@ -7,7 +7,16 @@
 	import BulkMetadataEditModal from '$lib/components/BulkMetadataEditModal.svelte';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
 	import ShelfBookPickerModal from '$lib/components/ShelfBookPickerModal.svelte';
-	import { showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { gridScale, showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { getCoverThumbUrl, getLibraryCoverThumbSize } from '$lib/utils/covers';
+	import {
+		DEFAULT_GRID_SCALE,
+		getResponsiveGridLayout,
+		getResponsiveGridStyle,
+		GRID_SCALE_STEP,
+		MAX_GRID_SCALE,
+		MIN_GRID_SCALE
+	} from '$lib/utils/responsive-grid';
 	import {
 		getBookDetailContextUrl,
 		getInlineMetadataEditUrl,
@@ -34,10 +43,13 @@
 	let deletingShelf = $state(false);
 	let shelfSearch = $state('');
 	let viewMode = $state<'grid' | 'list'>('grid');
+	let localGridScale = $state(DEFAULT_GRID_SCALE);
 	let shelfSortBy = $state<'title' | 'authors' | 'series' | 'added_at' | 'last_read' | 'status' | 'format'>('title');
 	let shelfSortDir = $state<'asc' | 'desc'>('asc');
 	let showSettingsMenu = $state(false);
 	let showSortMenu = $state(false);
+	let shelfGridContainer = $state<HTMLDivElement | null>(null);
+	let shelfGridWidth = $state(0);
 	let longPressTimer: number | null = null;
 	let longPressThreshold = 500;
 	let activeShelfId = $state('');
@@ -51,6 +63,11 @@
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
 	let visibleBooks = $derived(getVisibleBooks());
 	let existingShelfBookIds = $derived(new Set(books.map((book) => Number(book.id))));
+	let estimatedGridWidth = $derived(shelfGridWidth > 0 ? shelfGridWidth : typeof window === 'undefined' ? 1920 : window.innerWidth);
+	let responsiveGridLayout = $derived(getResponsiveGridLayout(estimatedGridWidth, localGridScale));
+	let responsiveGridColumns = $derived(responsiveGridLayout.columns);
+	let gridStyle = $derived(viewMode === 'grid' ? getResponsiveGridStyle(responsiveGridLayout) : '');
+	let shelfCoverThumbSize = $derived(getLibraryCoverThumbSize(responsiveGridColumns));
 	const shelfSortOptions: Array<{ value: typeof shelfSortBy; label: string }> = [
 		{ value: 'title', label: 'Title' },
 		{ value: 'authors', label: 'Author' },
@@ -66,9 +83,32 @@
 		return unsub;
 	});
 
+	$effect(() => {
+		const unsub = gridScale.subscribe((value: number) => localGridScale = value);
+		return unsub;
+	});
+
+	$effect(() => {
+		const element = shelfGridContainer;
+		if (!element || typeof ResizeObserver === 'undefined') return;
+
+		const updateWidth = () => {
+			shelfGridWidth = element.clientWidth;
+		};
+		const observer = new ResizeObserver(updateWidth);
+		updateWidth();
+		observer.observe(element);
+		return () => observer.disconnect();
+	});
+
 	onMount(async () => {
+		gridScale.init();
 		showFormatOnCover.init();
 	});
+
+	function updateGridScale(value: number) {
+		gridScale.set(value);
+	}
 
 	$effect(() => {
 		const shelfId = $page.params.shelfID;
@@ -291,7 +331,7 @@
 	}
 
 	function getBookCoverSrc(book: any): string | null {
-		return book.cover_path ? `/api/covers/${book.id}/thumb` : null;
+		return book.cover_path ? getCoverThumbUrl(book.id, shelfCoverThumbSize, book.cover_updated_on) : null;
 	}
 
 	function getBookAuthors(book: any): string {
@@ -638,6 +678,27 @@
 								</button>
 							</div>
 						</div>
+						{#if viewMode === 'grid'}
+							<div class="px-4 py-3 border-b border-[var(--color-surface-border)]">
+								<div class="mb-2 flex items-center justify-between gap-3">
+									<label class="text-sm font-medium text-[var(--color-surface-text)]" for="shelf-grid-scale">Grid Scale</label>
+									<span class="text-xs text-[var(--color-surface-text-muted)]">{responsiveGridColumns} cols</span>
+								</div>
+								<div class="flex items-center space-x-2">
+									<input
+										id="shelf-grid-scale"
+										type="range"
+										min={MIN_GRID_SCALE}
+										max={MAX_GRID_SCALE}
+										step={GRID_SCALE_STEP}
+										value={localGridScale}
+										oninput={(event) => updateGridScale(Number(event.currentTarget.value))}
+										class="flex-1 h-2 bg-[var(--color-surface-700)] rounded-lg appearance-none cursor-pointer slider"
+									>
+									<span class="text-sm text-[var(--color-surface-text)] w-12 text-right">{localGridScale}%</span>
+								</div>
+							</div>
+						{/if}
 						<button
 							type="button"
 							onclick={toggleFormatOnCover}
@@ -793,7 +854,7 @@
 				{/each}
 			</div>
 		{:else}
-			<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+			<div bind:this={shelfGridContainer} class="grid" style={gridStyle}>
 				{#each visibleBooks as book}
 					<div
 						class="relative group {selectedBooks.has(book.id) ? 'ring-2 ring-[var(--color-primary-500)] ring-offset-2 ring-offset-[var(--color-surface-base)] rounded-lg' : ''}"

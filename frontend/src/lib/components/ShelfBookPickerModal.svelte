@@ -48,6 +48,7 @@
 	let libraries = $state<Library[]>([]);
 	let books = $state<Book[]>([]);
 	let selectedBooks = $state<Set<number>>(new Set());
+	let selectionAnchorId = $state<number | null>(null);
 	let searchQuery = $state('');
 	let libraryID = $state('');
 	let authorFilter = $state('');
@@ -225,12 +226,37 @@
 		return selectedBooks.has(bookId);
 	}
 
-	function toggleBook(bookId: number) {
+	function getSelectableBookIds(): number[] {
+		return books.filter((book) => !isAlreadyOnShelf(book.id)).map((book) => book.id);
+	}
+
+	function toggleBook(bookId: number, event?: MouseEvent) {
+		if (event) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
 		if (isAlreadyOnShelf(bookId)) return;
+		const selectableIds = getSelectableBookIds();
+		if (event?.shiftKey && selectionAnchorId !== null) {
+			const anchorIndex = selectableIds.indexOf(selectionAnchorId);
+			const targetIndex = selectableIds.indexOf(bookId);
+			if (anchorIndex !== -1 && targetIndex !== -1) {
+				const next = new Set(selectedBooks);
+				const shouldSelect = !selectedBooks.has(bookId);
+				const [start, end] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+				for (const id of selectableIds.slice(start, end + 1)) {
+					if (shouldSelect) next.add(id);
+					else next.delete(id);
+				}
+				selectedBooks = next;
+				return;
+			}
+		}
 		const next = new Set(selectedBooks);
 		if (next.has(bookId)) next.delete(bookId);
 		else next.add(bookId);
 		selectedBooks = next;
+		selectionAnchorId = bookId;
 	}
 
 	function selectVisible() {
@@ -243,6 +269,7 @@
 
 	function clearSelection() {
 		selectedBooks = new Set();
+		selectionAnchorId = null;
 	}
 
 	function clearFilters() {
@@ -271,6 +298,7 @@
 				return;
 			}
 			selectedBooks = new Set();
+			selectionAnchorId = null;
 			onAdded?.();
 			onClose?.();
 		} catch (e) {
@@ -297,6 +325,7 @@
 				return;
 			}
 			selectedBooks = new Set();
+			selectionAnchorId = null;
 			onAdded?.();
 			onClose?.();
 		} catch (e) {
@@ -315,6 +344,7 @@
 		if (initializedForOpen) return;
 		initializedForOpen = true;
 		selectedBooks = new Set();
+		selectionAnchorId = null;
 		searchQuery = '';
 		libraryID = '';
 		authorFilter = '';
@@ -488,7 +518,7 @@
 							{@const selected = isSelected(book.id)}
 							<button
 								type="button"
-								onclick={() => toggleBook(book.id)}
+								onclick={(event) => toggleBook(book.id, event)}
 								disabled={alreadyOnShelf}
 								class="flex min-w-0 items-center gap-3 rounded-lg border p-2 text-left transition-colors {selected ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10' : 'border-[var(--color-surface-border)] bg-[var(--color-surface-base)] hover:border-[var(--color-primary-500)]/50 hover:bg-[var(--color-surface-overlay)]'} {alreadyOnShelf ? 'cursor-not-allowed opacity-55' : ''}"
 							>
