@@ -1947,8 +1947,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 36px;
-		height: 36px;
+		width: 44px;
+		height: 44px;
 		border: 0;
 		border-radius: 10px;
 		background: transparent;
@@ -2038,8 +2038,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 36px;
-		height: 36px;
+		width: 44px;
+		height: 44px;
 		border: none;
 		border-radius: 6px;
 		background: transparent;

@@ -2529,7 +2529,7 @@
 
 <style>
 	.epub-reader {
-		--reader-top-bar-height: 56px;
+		--reader-top-bar-height: 64px;
 		position: fixed;
 		inset: 0;
 		z-index: 9999;
@@ -2591,8 +2591,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 36px;
-		height: 36px;
+		width: 44px;
+		height: 44px;
 		border: none;
 		border-radius: 6px;
 		background: transparent;
@@ -2609,8 +2609,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 36px;
-		height: 36px;
+		width: 44px;
+		height: 44px;
 		border: none;
 		border-radius: 6px;
 		background: transparent;
@@ -3346,7 +3346,7 @@
 		}
 
 		.nav-btn {
-			width: 40px;
+			width: 44px;
 			height: 44px;
 		}
 

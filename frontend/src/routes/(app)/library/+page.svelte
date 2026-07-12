@@ -1640,7 +1640,7 @@
 			{#if getActiveFilters().length > 0}
 				<h3 class="text-lg font-medium text-[var(--color-surface-text)] mb-2">No books match your filters</h3>
 				<p class="text-[var(--color-surface-text-muted)] mb-4">Try adjusting or clearing your filters</p>
-				<button onclick={clearAllFilters} class="px-4 py-2 bg-[var(--color-primary-500)] text-white rounded-lg hover:bg-[var(--color-primary-600)]">
+				<button onclick={clearAllFilters} class="accent-action rounded-lg px-4 py-2 font-medium transition-colors">
 					Clear Filters
 				</button>
 			{:else}
@@ -1821,7 +1821,7 @@
 					<span class="text-[var(--color-surface-text-muted)] text-sm">Scroll for more books</span>
 					<button
 						onclick={loadMore}
-						class="px-4 py-2 bg-[var(--color-primary-500)] text-white rounded-lg hover:bg-[var(--color-primary-600)] transition-colors text-sm"
+						class="accent-action rounded-lg px-4 py-2 text-sm font-medium transition-colors"
 					>
 						Load More Books
 					</button>

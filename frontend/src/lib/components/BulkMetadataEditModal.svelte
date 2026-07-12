@@ -230,7 +230,7 @@
 		<div class="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--color-surface-border)] px-5 py-4">
 			<button type="button" onclick={onClose} disabled={saving} class="rounded-lg border border-[var(--color-surface-border)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] disabled:opacity-50">Cancel</button>
 			<button type="button" onclick={() => save(false)} disabled={saving} class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-600)] disabled:opacity-50">{saving ? 'Saving...' : 'Save'}</button>
-			<button type="button" onclick={() => save(true)} disabled={saving} class="rounded-lg bg-[var(--color-primary-500)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-primary-600)] disabled:opacity-50">{saving ? 'Saving...' : 'Save & Close'}</button>
+			<button type="button" onclick={() => save(true)} disabled={saving} class="accent-action rounded-lg px-4 py-2 text-sm font-medium transition-colors">{saving ? 'Saving...' : 'Save & Close'}</button>
 		</div>
 	</div>
 </div>

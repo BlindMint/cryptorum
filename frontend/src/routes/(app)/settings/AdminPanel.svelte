@@ -240,7 +240,7 @@
 			<button
 				onclick={saveBackupSettings}
 				disabled={savingBackupSettings}
-				class="rounded-lg bg-[var(--color-primary-500)] px-4 py-2 text-sm text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+				class="accent-action rounded-lg px-4 py-2 text-sm font-medium transition-colors"
 			>
 				{savingBackupSettings ? 'Saving...' : 'Save Backup Settings'}
 			</button>

@@ -1962,7 +1962,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 			<div class="flex justify-end pt-4">
 				<button
 					onclick={saveReaderSettings}
-					class="px-6 py-2.5 bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white rounded-lg transition-colors flex items-center space-x-2"
+					class="accent-action flex items-center space-x-2 rounded-lg px-6 py-2.5 font-medium transition-colors"
 				>
 					{#if settingsSaved}
 						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2440,7 +2440,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				<button
 					onclick={saveBookdropLocation}
 					disabled={!bookdropPath.trim()}
-					class="px-4 py-2 rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+					class="accent-action rounded-lg px-4 py-2 font-medium transition-colors"
 				>
 					Save Location
 				</button>
@@ -2559,7 +2559,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				<button
 					onclick={saveCustomTheme}
 					disabled={!canSaveCustomTheme}
-					class="px-4 py-2 rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+					class="accent-action rounded-lg px-4 py-2 font-medium transition-colors"
 				>
 					{editingCustomTheme ? 'Update Theme' : 'Add Theme'}
 				</button>
@@ -2635,7 +2635,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				<button
 					onclick={addSelectedDirectory}
 					disabled={!currentDirectory || currentDirectory === '/'}
-					class="px-4 py-2 rounded-lg bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+					class="accent-action rounded-lg px-4 py-2 font-medium transition-colors"
 				>
 					Select Directory
 				</button>

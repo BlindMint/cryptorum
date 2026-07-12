@@ -370,7 +370,7 @@
 						placeholder="Search title, message, or job ID..."
 						class="min-w-0 flex-1 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 					>
-					<button onclick={() => loadActivity()} class="rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-primary-600)]">Search</button>
+					<button onclick={() => loadActivity()} class="accent-action rounded-lg px-3 py-2 text-sm font-medium transition-colors">Search</button>
 				</div>
 				<select
 					bind:value={eventType}
@@ -435,7 +435,7 @@
 							</label>
 						</div>
 						<div class="flex flex-wrap items-center gap-2">
-							<button onclick={() => loadActivity()} class="rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-primary-600)]">Apply filters</button>
+							<button onclick={() => loadActivity()} class="accent-action rounded-lg px-3 py-2 text-sm font-medium transition-colors">Apply filters</button>
 							<button onclick={clearFilters} class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-overlay)]">Clear filters</button>
 							{#if events.some((item) => item.source === 'notification')}
 								<button onclick={deleteAllNotifications} class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-red-500/50 hover:text-red-300 transition-colors">Dismiss app notifications</button>

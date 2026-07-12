@@ -1027,7 +1027,7 @@
 
 <style>
 	.pdf-reader {
-		--reader-top-bar-height: 56px;
+		--reader-top-bar-height: 64px;
 		position: fixed;
 		inset: 0;
 		z-index: 9999;
@@ -1053,8 +1053,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 36px;
-		height: 36px;
+		width: 44px;
+		height: 44px;
 		border: none;
 		border-radius: 6px;
 		background: transparent;
@@ -1133,7 +1133,7 @@
 		}
 
 		.nav-btn {
-			width: 40px;
+			width: 44px;
 			height: 44px;
 		}
 
@@ -1154,7 +1154,7 @@
 		inset: 0;
 		background: var(--color-surface-base, #0f172a);
 		z-index: 50;
-		--embedpdf-shell-control-size: 42px;
+		--embedpdf-shell-control-size: 44px;
 		--embedpdf-shell-title-width: clamp(220px, 42vw, 560px);
 		--embedpdf-shell-left-reserve: clamp(400px, 35vw, 420px);
 		--embedpdf-shell-right-reserve: clamp(112px, 20vw, 240px);

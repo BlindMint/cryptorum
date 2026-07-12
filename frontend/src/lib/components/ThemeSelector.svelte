@@ -449,7 +449,7 @@
 									type="button"
 									onclick={saveCustomTheme}
 									disabled={!canSaveCustomTheme}
-									class="px-3 py-1.5 text-sm rounded bg-[var(--color-primary-500)] text-white hover:bg-[var(--color-primary-600)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+									class="accent-action rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
 								>
 								{editingTheme ? 'Update' : 'Add'} Theme
 							</button>

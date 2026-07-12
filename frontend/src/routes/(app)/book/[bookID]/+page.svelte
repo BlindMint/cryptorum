@@ -1628,7 +1628,7 @@
 												</div>
 											</div>
 											<div class="flex items-center gap-2 flex-shrink-0">
-													<span class="px-2 py-1 rounded-full text-xs font-medium bg-[var(--color-primary-500)]/20 text-[var(--color-primary-300)]">
+												<span class="active-filter-chip rounded-full px-2.5 py-1 text-xs font-medium">
 														{getReaderTypeLabel(session.reader_type)}
 													</span>
 													<button
@@ -1671,7 +1671,7 @@
 												<div class="flex items-center gap-2">
 													<button
 														onclick={() => downloadFile(file)}
-														class="rounded-lg bg-[var(--color-primary-500)] px-3 py-1.5 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+													class="accent-action rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 													>
 														Download
 													</button>
@@ -1709,7 +1709,7 @@
 																	</button>
 																	<button
 																		onclick={() => downloadConvertedFile(file)}
-																		class="rounded-lg bg-[var(--color-primary-500)] px-3 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-primary-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-overlay)]"
+																		class="accent-action rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-overlay)]"
 																	>
 																		Download Converted
 																	</button>
