@@ -647,7 +647,7 @@
 				<div class="px-6 py-4 border-t border-[var(--color-surface-border)] flex justify-end">
 					<button
 						onclick={toggleConfigModal}
-						class="px-4 py-2 bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white rounded-lg transition-colors"
+						class="accent-action rounded-lg px-4 py-2 font-medium transition-colors"
 					>
 						Done
 					</button>

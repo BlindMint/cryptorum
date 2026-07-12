@@ -152,7 +152,7 @@
 			</button>
 			<button
 				onclick={() => resetForm(null)}
-				class="px-4 py-2 rounded-lg bg-[var(--color-primary-500)] text-white hover:opacity-90 transition-opacity"
+				class="accent-action rounded-lg px-4 py-2 font-medium transition-colors"
 			>
 				Add User
 			</button>
@@ -223,7 +223,7 @@
 			<div class="flex items-center gap-3">
 				<button
 					onclick={saveUser}
-					class="px-4 py-2 rounded-lg bg-[var(--color-primary-500)] text-white hover:opacity-90 transition-opacity"
+					class="accent-action rounded-lg px-4 py-2 font-medium transition-colors"
 				>
 					{editingUser ? 'Save User' : 'Create User'}
 				</button>

@@ -346,11 +346,16 @@ function updateThemeColors(theme: FullTheme) {
 
 		const primary = primaryColorMap[theme.primary as keyof typeof primaryColorMap];
 		const surface = surfaceColorMap[theme.surface as keyof typeof surfaceColorMap];
+		const surfaceIsLight = (luminanceFromHex(surface.base) ?? 0) > 0.6;
+		const primaryText = surfaceIsLight
+			? primary[600]
+			: (mixHexColors(primary[400], '#ffffff', 0.3) ?? primary[400]);
 
 		// Set CSS variables
 		root.style.setProperty('--color-primary-500', primary[500]);
 		root.style.setProperty('--color-primary-600', primary[600]);
 		root.style.setProperty('--color-primary-400', primary[400]);
+		root.style.setProperty('--color-primary-300', primaryText);
 
 		// Set surface colors for transparent overlays
 			root.style.setProperty('--color-surface-base', surface.base);
@@ -359,7 +364,6 @@ function updateThemeColors(theme: FullTheme) {
 			root.style.setProperty('--color-surface-text', surface.text);
 			root.style.setProperty('--color-surface-text-muted', surface.textMuted);
 
-			const surfaceIsLight = (luminanceFromHex(surface.base) ?? 0) > 0.6;
 			const placeholderBase = mixHexColors(
 				surface.base,
 				primary[500],

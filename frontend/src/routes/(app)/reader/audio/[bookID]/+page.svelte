@@ -494,10 +494,10 @@
 >
 	<!-- Top Bar -->
 	<header 
-		class="absolute top-0 left-0 right-0 h-14 flex items-center justify-between px-4 transition-[transform,opacity] duration-200 z-20 {showControls ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}"
+		class="absolute top-0 left-0 right-0 h-16 flex items-center justify-between px-4 transition-[transform,opacity] duration-200 z-20 {showControls ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}"
 		style="background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);"
 	>
-		<a href={getReaderReturnUrl()} onclick={closeReader} class="text-white/80 hover:text-white transition-colors" aria-label="Back to book details">
+		<a href={getReaderReturnUrl()} onclick={closeReader} class="flex h-11 w-11 items-center justify-center rounded-lg text-white/80 transition-colors hover:bg-white/10 hover:text-white" aria-label="Back to book details">
 			<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
 			</svg>
@@ -512,7 +512,7 @@
 			<button
 				onclick={() => { showSettings = !showSettings; showControls = true; resetControlsTimer(); }}
 				aria-label="Open audio settings"
-				class="p-2 rounded-lg text-white/80 hover:text-white transition-colors"
+				class="flex h-11 w-11 items-center justify-center rounded-lg text-white/80 transition-colors hover:bg-white/10 hover:text-white"
 				title="Settings (Ctrl+S)"
 			>
 				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
