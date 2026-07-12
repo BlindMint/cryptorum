@@ -44,6 +44,7 @@
 	];
 
 	let query = $state($page.url.searchParams.get('q') || '');
+	let appliedQuery = $state($page.url.searchParams.get('q') || '');
 	let libraryFilter = $state($page.url.searchParams.get('library') || '');
 	let libraryName = $state('');
 	let results = $state<any[]>([]);
@@ -181,7 +182,7 @@
 
 	function buildSearchUrl(offset: number = 0, limit: number = BATCH_SIZE): string {
 		const params = new URLSearchParams();
-		params.set('q', query.trim());
+		params.set('q', appliedQuery.trim());
 		params.set('offset', String(offset));
 		params.set('limit', String(limit));
 		if (libraryFilter) params.set('library_id', libraryFilter);
@@ -213,7 +214,11 @@
 		if (currentSearch === lastUrlSearch) return;
 		lastUrlSearch = currentSearch;
 
-		query = $page.url.searchParams.get('q') || '';
+		const nextAppliedQuery = $page.url.searchParams.get('q') || '';
+		if (nextAppliedQuery !== appliedQuery) {
+			appliedQuery = nextAppliedQuery;
+			query = nextAppliedQuery;
+		}
 		libraryFilter = $page.url.searchParams.get('library') || '';
 		sortBy = $page.url.searchParams.get('sort') || 'relevance';
 		sortDir = $page.url.searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc';
@@ -224,7 +229,7 @@
 		}
 		void fetchFilterOptions();
 
-		if (query) {
+		if (appliedQuery) {
 			search(true);
 		} else {
 			results = [];
@@ -295,7 +300,7 @@
 	});
 
 	async function search(reset: boolean = true) {
-		const trimmed = query.trim();
+		const trimmed = appliedQuery.trim();
 		if (!trimmed) {
 			results = [];
 			totalResults = 0;
@@ -1269,14 +1274,14 @@
 				</div>
 			{/if}
 		</div>
-	{:else if query && !loading}
+	{:else if appliedQuery && !loading}
 		<div class="text-center py-12">
 			<svg class="w-16 h-16 text-[var(--color-primary-400)] mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
 			</svg>
-			<p class="text-[var(--color-surface-text-muted)]">No results found for "{query}"</p>
+			<p class="text-[var(--color-surface-text-muted)]">No results found for "{appliedQuery}"</p>
 		</div>
-	{:else if !query}
+	{:else if !appliedQuery}
 		<div class="text-center py-12">
 			<svg class="w-16 h-16 text-[var(--color-primary-400)] mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
