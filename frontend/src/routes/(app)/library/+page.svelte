@@ -2,10 +2,11 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { beforeNavigate, goto } from '$app/navigation';
-	import { appActivity, filterPanelWidth, gridScale, showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { appActivity, filterPanelWidth, gridScale, showFormatOnCover, showProgressChipOnCover, getFormatColor } from '$lib/stores';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { getCoverThumbUrl, getLibraryCoverThumbSize } from '$lib/utils/covers';
-	import { getBookReaderHref, isAudioFormat } from '$lib/utils/book-formats';
+	import { bookHasCoverProgress } from '$lib/utils/cover-progress';
+	import { getBookReaderHref } from '$lib/utils/book-formats';
 	import { DEFAULT_GRID_SCALE, getResponsiveGridLayout, getResponsiveGridStyle, GRID_SCALE_STEP, MAX_GRID_SCALE, MIN_GRID_SCALE } from '$lib/utils/responsive-grid';
 	import {
 		getBookDetailContextUrl,
@@ -15,6 +16,7 @@
 	} from '$lib/utils/metadata-edit-session';
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
+	import BookCoverProgressChip from '$lib/components/BookCoverProgressChip.svelte';
 	import FilterPanel from '$lib/components/FilterPanel.svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
 	import BulkMetadataEditModal from '$lib/components/BulkMetadataEditModal.svelte';
@@ -47,7 +49,7 @@
 		let libraryCoverThumbSize = $derived(getLibraryCoverThumbSize(responsiveGridColumns));
 		let showSettingsMenu = $state(false);
 		let formatOnCover = $state(true);
-		let activeBookActions = $state<number | null>(null);
+		let progressChipOnCover = $state(true);
 		let toolbarContainer = $state<HTMLDivElement | null>(null);
 		let toolbarWidth = $state(0);
 		let toolbarScrolled = $state(false);
@@ -60,6 +62,11 @@
 
 		$effect(() => {
 			const unsub = showFormatOnCover.subscribe((v: boolean) => formatOnCover = v);
+			return unsub;
+		});
+
+		$effect(() => {
+			const unsub = showProgressChipOnCover.subscribe((v: boolean) => progressChipOnCover = v);
 			return unsub;
 		});
 
@@ -102,6 +109,11 @@
 	function toggleFormatOnCover() {
 		formatOnCover = !formatOnCover;
 		showFormatOnCover.set(formatOnCover);
+	}
+
+	function toggleProgressChipOnCover() {
+		progressChipOnCover = !progressChipOnCover;
+		showProgressChipOnCover.set(progressChipOnCover);
 	}
 
 	// Filter state
@@ -608,6 +620,7 @@
 		fetchFilterOptions();
 		gridScale.init();
 		showFormatOnCover.init();
+		showProgressChipOnCover.init();
 		scheduleBackgroundRefresh(BACKGROUND_REFRESH_IDLE_INTERVAL_MS);
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		const filterPanelBackdropMedia = window.matchMedia('(max-width: 1023px)');
@@ -944,28 +957,6 @@
 
 	function getReaderUrl(book: any): string {
 		return getBookReaderHref(book.id, book.format, '/library');
-	}
-
-	function getReaderActionLabel(book: any): string {
-		const title = book.title || 'book';
-		return isAudioFormat(book.format) ? `Play audio for ${title}` : `Read ${title}`;
-	}
-
-	function isTouchLike(): boolean {
-		return typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
-	}
-
-	function handleCoverTap(event: MouseEvent, bookId: number) {
-		if (!isTouchLike() || bulkSelectMode) return;
-		event.preventDefault();
-		event.stopPropagation();
-		activeBookActions = activeBookActions === bookId ? null : bookId;
-	}
-
-	function handleCoverKeydown(event: KeyboardEvent, bookId: number) {
-		if (event.key !== 'Enter' && event.key !== ' ') return;
-		event.preventDefault();
-		activeBookActions = activeBookActions === bookId ? null : bookId;
 	}
 
     function handleBookKeydown(event: KeyboardEvent) {
@@ -1461,6 +1452,15 @@
 									<span class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform {formatOnCover ? 'left-5' : 'left-1'}"></span>
 								</span>
 							</button>
+							<button
+								onclick={toggleProgressChipOnCover}
+								class="w-full text-left px-4 py-2 hover:bg-[var(--color-surface-700)] text-[var(--color-surface-text)] flex items-center justify-between"
+							>
+								<span>Show Progress Chip</span>
+								<span class="w-10 h-6 rounded-full transition-colors {progressChipOnCover ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-600)]'} relative">
+									<span class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform {progressChipOnCover ? 'left-5' : 'left-1'}"></span>
+								</span>
+							</button>
 							<div class="border-t border-[var(--color-surface-border)] mt-1 pt-1">
 								<button
 									onclick={() => scanLibrary()}
@@ -1676,53 +1676,44 @@
 						tabindex="0"
 					>
 					<div class="block">
-							<div class="relative mb-2 overflow-hidden rounded-lg" role="button" tabindex="0" onclick={(event) => handleCoverTap(event, book.id)} onkeydown={(event) => handleCoverKeydown(event, book.id)}>
-								<BookCoverFrame
-									src={book.cover_path ? getCoverThumbUrl(book.id, libraryCoverThumbSize, book.cover_updated_on) : null}
-									alt={book.title}
-									format={book.format}
-									mode="cover"
-									frameClass="aspect-[2/3]"
-									imageClass="group-hover:scale-105 transition-transform"
-									placeholderSize="md"
-								/>
-								{#if book.opened && book.percent > 0}
-									<div class="absolute bottom-0 left-0 right-0 z-10 h-1 bg-slate-700">
-										<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
-									</div>
-								{/if}
-								{#if formatOnCover && book.format}
-									{@const formatColor = getFormatColor(book.format)}
-									<div
-										class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
-										style="background-color: {formatColor.bg}; color: {formatColor.text};"
-									>
-										{book.format}
-									</div>
-								{/if}
-								{#if book.status === 'reading' || book.status === 'finished'}
-									<span class="absolute bottom-2 right-2 z-20 h-3 w-3 rounded-full border border-black/30 {statusDot(book.status)} shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></span>
-								{/if}
-								<div class="cover-action-overlay {activeBookActions === book.id ? 'is-active' : ''}">
-									<a href="/book/{book.id}" class="cover-action-button top-action" aria-label="View details for {book.title || 'book'}" onclick={(event) => openBookDetailFromList(event, book.id)}>
-										<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11v5m0-8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-										</svg>
-									</a>
-									{#if bulkSelectMode}
-										<button type="button" class="cover-action-button bottom-action opacity-45 cursor-not-allowed" aria-label="Opening is disabled during bulk selection" onclick={(event) => event.stopPropagation()}>
-											<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-												<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
-											</svg>
-										</button>
-									{:else}
-										<a href={getReaderUrl(book)} class="cover-action-button bottom-action" aria-label={getReaderActionLabel(book)} onclick={(event) => event.stopPropagation()}>
-											<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-												<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
-											</svg>
-										</a>
+							<div class="relative mb-2 overflow-hidden rounded-lg">
+								<a href="/book/{book.id}" class="block" onclick={(event) => openBookDetailFromList(event, book.id)} aria-label="View details for {book.title || 'book'}">
+									<BookCoverFrame
+										src={book.cover_path ? getCoverThumbUrl(book.id, libraryCoverThumbSize, book.cover_updated_on) : null}
+										alt={book.title}
+										format={book.format}
+										mode="cover"
+										frameClass="aspect-[2/3]"
+										imageClass="group-hover:scale-105 transition-transform"
+										placeholderSize="md"
+									/>
+									{#if bookHasCoverProgress(book)}
+										<div class="absolute bottom-0 left-0 right-0 z-10 h-1 bg-slate-700">
+											<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
+										</div>
 									{/if}
-								</div>
+									{#if formatOnCover && book.format}
+										{@const formatColor = getFormatColor(book.format)}
+										<div
+											class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+											style="background-color: {formatColor.bg}; color: {formatColor.text};"
+										>
+											{book.format}
+										</div>
+									{/if}
+									{#if book.status === 'reading' || book.status === 'finished'}
+										<span class="absolute bottom-2 right-2 z-20 h-3 w-3 rounded-full border border-black/30 {statusDot(book.status)} shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></span>
+									{/if}
+								</a>
+								{#if progressChipOnCover && bookHasCoverProgress(book)}
+									<BookCoverProgressChip
+										href={getReaderUrl(book)}
+										percent={book.percent}
+										title={book.title}
+										format={book.format}
+										disabled={bulkSelectMode}
+									/>
+								{/if}
 							</div>
 							<a href="/book/{book.id}" class="block" onclick={(event) => openBookDetailFromList(event, book.id)}>
 								<h3 class="text-sm font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
@@ -2033,62 +2024,5 @@
 	}
 	.animate-slide-up {
 		animation: slide-up 0.2s ease-out;
-	}
-
-	.cover-action-overlay {
-		position: absolute;
-		inset: 0;
-		z-index: 20;
-		opacity: 0;
-		pointer-events: none;
-		transition: opacity 160ms ease;
-	}
-
-	@media (hover: hover) and (pointer: fine) {
-		.group:hover .cover-action-overlay {
-			opacity: 1;
-			pointer-events: auto;
-		}
-	}
-
-	.cover-action-overlay.is-active {
-		opacity: 1;
-		pointer-events: auto;
-	}
-
-	.cover-action-button {
-		position: absolute;
-		left: 50%;
-		display: inline-flex;
-		width: 2.5rem !important;
-		height: 2.5rem;
-		min-width: 2.5rem;
-		padding: 0;
-		transform: translateX(-50%);
-		align-items: center;
-		justify-content: center;
-		border-radius: 9999px;
-		border: 1px solid var(--color-surface-text-muted);
-		background: color-mix(in srgb, var(--color-surface-base) 88%, transparent);
-		color: var(--color-surface-text-muted);
-		box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
-		backdrop-filter: blur(8px);
-		line-height: 1;
-		transition: transform 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
-	}
-
-	.cover-action-button:hover {
-		transform: translateX(-50%) scale(1.06);
-		border-color: var(--color-surface-text);
-		color: var(--color-surface-text);
-		box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-surface-text) 28%, transparent), 0 0 18px color-mix(in srgb, var(--color-surface-text) 32%, transparent), 0 10px 28px rgba(0, 0, 0, 0.38);
-	}
-
-	.cover-action-button.top-action {
-		top: 18%;
-	}
-
-	.cover-action-button.bottom-action {
-		bottom: 18%;
 	}
  </style>

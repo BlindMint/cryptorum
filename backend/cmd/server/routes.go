@@ -1993,18 +1993,47 @@ func getSimilarBooksHandler(w http.ResponseWriter, r *http.Request) {
 	remaining -= addToResult(allBooks, remaining)
 
 	type SimilarBook struct {
-		ID             int64  `json:"id"`
-		Title          string `json:"title"`
-		Authors        string `json:"authors"`
-		CoverPath      string `json:"cover_path"`
-		CoverUpdatedOn int64  `json:"cover_updated_on"`
-		Format         string `json:"format"`
-		Score          int    `json:"score"`
-		MatchType      string `json:"match_type"`
+		ID             int64   `json:"id"`
+		Title          string  `json:"title"`
+		Authors        string  `json:"authors"`
+		CoverPath      string  `json:"cover_path"`
+		CoverUpdatedOn int64   `json:"cover_updated_on"`
+		Format         string  `json:"format"`
+		Percent        float64 `json:"percent"`
+		Opened         bool    `json:"opened"`
+		Score          int     `json:"score"`
+		MatchType      string  `json:"match_type"`
+	}
+
+	progressByID := map[int64]float64{}
+	if len(result) > 0 {
+		placeholders := make([]string, len(result))
+		args := make([]interface{}, 0, len(result)+1)
+		args = append(args, userIDForScopedRows(current))
+		for i, c := range result {
+			placeholders[i] = "?"
+			args = append(args, c.ID)
+		}
+		progressRows, progressErr := appDB.Query(`
+			SELECT book_id, COALESCE(percent, 0)
+			FROM reading_progress
+			WHERE owner_user_id = ? AND book_id IN (`+strings.Join(placeholders, ",")+`)
+		`, args...)
+		if progressErr == nil {
+			defer progressRows.Close()
+			for progressRows.Next() {
+				var bookID int64
+				var percent float64
+				if err := progressRows.Scan(&bookID, &percent); err == nil {
+					progressByID[bookID] = percent
+				}
+			}
+		}
 	}
 
 	similarResult := make([]SimilarBook, len(result))
 	for i, c := range result {
+		percent, opened := progressByID[c.ID]
 		similarResult[i] = SimilarBook{
 			ID:             c.ID,
 			Title:          c.Title,
@@ -2012,6 +2041,8 @@ func getSimilarBooksHandler(w http.ResponseWriter, r *http.Request) {
 			CoverPath:      c.CoverPath,
 			CoverUpdatedOn: c.CoverUpdatedOn,
 			Format:         c.Format,
+			Percent:        percent,
+			Opened:         opened,
 			Score:          c.Score,
 			MatchType:      c.MatchType,
 		}

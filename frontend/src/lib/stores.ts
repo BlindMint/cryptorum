@@ -163,6 +163,45 @@ function createShowFormatOnCoverStore() {
 
 export const showFormatOnCover = createShowFormatOnCoverStore();
 
+// Show tappable reading-progress chip on book covers
+function createShowProgressChipOnCoverStore() {
+	const defaultValue = true;
+	const { subscribe, set, update } = writable<boolean>(defaultValue);
+
+	return {
+		subscribe,
+		set: (value: boolean) => {
+			if (browser) {
+				localStorage.setItem('showProgressChipOnCover', JSON.stringify(value));
+			}
+			set(value);
+		},
+		update: (fn: (value: boolean) => boolean) => {
+			update((value) => {
+				const newValue = fn(value);
+				if (browser) {
+					localStorage.setItem('showProgressChipOnCover', JSON.stringify(newValue));
+				}
+				return newValue;
+			});
+		},
+		init: () => {
+			if (browser) {
+				const stored = localStorage.getItem('showProgressChipOnCover');
+				if (stored !== null) {
+					try {
+						set(JSON.parse(stored));
+					} catch {
+						// Ignore invalid localStorage state and keep the default.
+					}
+				}
+			}
+		}
+	};
+}
+
+export const showProgressChipOnCover = createShowProgressChipOnCoverStore();
+
 function createNotificationVisualIndicatorStore() {
 	const defaultValue = true;
 	const { subscribe, set, update } = writable<boolean>(defaultValue);

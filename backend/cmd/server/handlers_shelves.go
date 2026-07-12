@@ -242,6 +242,8 @@ func evaluateMagicShelfRules(rulesJSON string, sortBy string, sortDir string, us
 		       COALESCE(bm.series_number_display, '') as series_number_display,
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(rp.status, 'unread') as status,
+		       COALESCE(rp.percent, 0) as percent,
+		       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened,
 		       COALESCE(rp.updated_at, 0) as last_read_at,
 		       COALESCE(bf.format, '') as format
 			FROM book b
@@ -526,6 +528,8 @@ func getShelfBooksHandler(w http.ResponseWriter, r *http.Request) {
 			       COALESCE(bm.series_number_display, '') as series_number_display,
 			       COALESCE(bm.cover_path, '') as cover_path,
 			       COALESCE(rp.status, 'unread') as status,
+			       COALESCE(rp.percent, 0) as percent,
+			       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened,
 			       COALESCE(rp.updated_at, 0) as last_read_at,
 			       COALESCE(bf.format, '') as format
 			FROM book_shelf bs
@@ -562,6 +566,8 @@ func getShelfBooksHandler(w http.ResponseWriter, r *http.Request) {
 		SeriesNumberDisplay string  `json:"series_number_display"`
 		CoverPath           string  `json:"cover_path"`
 		Status              string  `json:"status"`
+		Percent             float64 `json:"percent"`
+		Opened              bool    `json:"opened"`
 		LastReadAt          int64   `json:"last_read_at"`
 		Format              string  `json:"format"`
 	}
@@ -569,9 +575,11 @@ func getShelfBooksHandler(w http.ResponseWriter, r *http.Request) {
 	books := []BookResponse{}
 	for rows.Next() {
 		var b BookResponse
-		if err := rows.Scan(&b.ID, &b.LibraryID, &b.AddedAt, &b.Title, &b.Authors, &b.Series, &b.SeriesNumber, &b.SeriesNumberDisplay, &b.CoverPath, &b.Status, &b.LastReadAt, &b.Format); err != nil {
+		var opened int
+		if err := rows.Scan(&b.ID, &b.LibraryID, &b.AddedAt, &b.Title, &b.Authors, &b.Series, &b.SeriesNumber, &b.SeriesNumberDisplay, &b.CoverPath, &b.Status, &b.Percent, &opened, &b.LastReadAt, &b.Format); err != nil {
 			continue
 		}
+		b.Opened = opened == 1
 		books = append(books, b)
 	}
 

@@ -3,12 +3,15 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
+	import BookCoverProgressChip from '$lib/components/BookCoverProgressChip.svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
 	import BulkMetadataEditModal from '$lib/components/BulkMetadataEditModal.svelte';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
 	import ShelfBookPickerModal from '$lib/components/ShelfBookPickerModal.svelte';
-	import { gridScale, showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { gridScale, showFormatOnCover, showProgressChipOnCover, getFormatColor } from '$lib/stores';
 	import { getCoverThumbUrl, getLibraryCoverThumbSize } from '$lib/utils/covers';
+	import { bookHasCoverProgress } from '$lib/utils/cover-progress';
+	import { getBookReaderHref } from '$lib/utils/book-formats';
 	import {
 		DEFAULT_GRID_SCALE,
 		getResponsiveGridLayout,
@@ -30,6 +33,7 @@
 	let books = $state<any[]>([]);
 	let loading = $state(true);
 	let formatOnCover = $state(true);
+	let progressChipOnCover = $state(true);
 	let selectedBooks = $state<Set<number>>(new Set());
 	let showBulkMetadataEdit = $state(false);
 	let bulkMetadataEditBookIds = $state<number[]>([]);
@@ -84,6 +88,11 @@
 	});
 
 	$effect(() => {
+		const unsub = showProgressChipOnCover.subscribe((value: boolean) => progressChipOnCover = value);
+		return unsub;
+	});
+
+	$effect(() => {
 		const unsub = gridScale.subscribe((value: number) => localGridScale = value);
 		return unsub;
 	});
@@ -104,6 +113,7 @@
 	onMount(async () => {
 		gridScale.init();
 		showFormatOnCover.init();
+		showProgressChipOnCover.init();
 	});
 
 	function updateGridScale(value: number) {
@@ -293,6 +303,16 @@
 	function toggleFormatOnCover() {
 		formatOnCover = !formatOnCover;
 		showFormatOnCover.set(formatOnCover);
+	}
+
+	function toggleProgressChipOnCover() {
+		progressChipOnCover = !progressChipOnCover;
+		showProgressChipOnCover.set(progressChipOnCover);
+	}
+
+	function getReaderUrl(book: any): string {
+		const shelfPath = shelf?.id ? `/shelves/${shelf.id}` : '/shelves';
+		return getBookReaderHref(book.id, getBookFormat(book), shelfPath);
 	}
 
 	async function deleteShelf() {
@@ -709,6 +729,16 @@
 								<span class="absolute top-1 h-4 w-4 rounded-full bg-white transition-transform {formatOnCover ? 'left-5' : 'left-1'}"></span>
 							</span>
 						</button>
+						<button
+							type="button"
+							onclick={toggleProgressChipOnCover}
+							class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)]"
+						>
+							<span>Show Progress Chip</span>
+							<span class="relative h-6 w-10 rounded-full transition-colors {progressChipOnCover ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-600)]'}">
+								<span class="absolute top-1 h-4 w-4 rounded-full bg-white transition-transform {progressChipOnCover ? 'left-5' : 'left-1'}"></span>
+							</span>
+						</button>
 					</div>
 				{/if}
 			</div>
@@ -871,32 +901,53 @@
 						role="button"
 						tabindex="0"
 					>
-						<a href={getBookDetailHref(book.id)} class="block" onclick={(event) => openBookDetailFromList(event, book.id)}>
+						<div class="block">
 							<div class="relative mb-2 overflow-hidden rounded-lg">
-								<BookCoverFrame
-									src={getBookCoverSrc(book)}
-									alt={getBookTitle(book)}
-									format={getBookFormat(book)}
-									mode="cover"
-									frameClass="aspect-[2/3]"
-									imageClass="group-hover:scale-105 transition-transform"
-									placeholderSize="md"
-								/>
-								{#if formatOnCover && getBookFormat(book)}
-									{@const formatColor = getFormatColor(getBookFormat(book))}
-									<div
-										class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
-										style="background-color: {formatColor.bg}; color: {formatColor.text};"
-									>
-										{getBookFormat(book)}
-									</div>
+								<a href={getBookDetailHref(book.id)} class="block" onclick={(event) => openBookDetailFromList(event, book.id)} aria-label="View details for {getBookTitle(book)}">
+									<BookCoverFrame
+										src={getBookCoverSrc(book)}
+										alt={getBookTitle(book)}
+										format={getBookFormat(book)}
+										mode="cover"
+										frameClass="aspect-[2/3]"
+										imageClass="group-hover:scale-105 transition-transform"
+										placeholderSize="md"
+									/>
+									{#if bookHasCoverProgress(book)}
+										<div class="absolute bottom-0 left-0 right-0 z-10 h-1 bg-slate-700">
+											<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
+										</div>
+									{/if}
+									{#if formatOnCover && getBookFormat(book)}
+										{@const formatColor = getFormatColor(getBookFormat(book))}
+										<div
+											class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+											style="background-color: {formatColor.bg}; color: {formatColor.text};"
+										>
+											{getBookFormat(book)}
+										</div>
+									{/if}
+									{#if book.status === 'reading' || book.status === 'finished'}
+										<span class="absolute bottom-2 right-2 z-20 h-3 w-3 rounded-full border border-black/30 {book.status === 'reading' ? 'bg-blue-500' : 'bg-emerald-500'} shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></span>
+									{/if}
+								</a>
+								{#if progressChipOnCover && bookHasCoverProgress(book)}
+									<BookCoverProgressChip
+										href={getReaderUrl(book)}
+										percent={book.percent}
+										title={getBookTitle(book)}
+										format={getBookFormat(book)}
+										disabled={bulkSelectMode}
+									/>
 								{/if}
 							</div>
-							<h3 class="text-sm font-medium text-[var(--color-surface-text)] truncate">{getBookTitle(book)}</h3>
-							{#if getBookAuthors(book)}
-								<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{getBookAuthors(book)}</p>
-							{/if}
-						</a>
+							<a href={getBookDetailHref(book.id)} class="block" onclick={(event) => openBookDetailFromList(event, book.id)}>
+								<h3 class="text-sm font-medium text-[var(--color-surface-text)] truncate">{getBookTitle(book)}</h3>
+								{#if getBookAuthors(book)}
+									<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{getBookAuthors(book)}</p>
+								{/if}
+							</a>
+						</div>
 						<button
 							type="button"
 							onclick={(event) => toggleBookSelection(book.id, event)}
