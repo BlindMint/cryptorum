@@ -155,9 +155,10 @@
 	const LONG_PRESS_MOVE_TOLERANCE = 10;
 
 	let libraryFilter = $derived($page.url.searchParams.get('library') || '');
-	let librarySearch = $state('');
+	let librarySearch = $state($page.url.searchParams.get('q') || '');
 	let currentOffset = $state(0);
 	const BATCH_SIZE = 80;
+	const SCOPED_SEARCH_DEBOUNCE_MS = 650;
 	const BACKGROUND_REFRESH_ACTIVE_INTERVAL_MS = 3000;
 	const BACKGROUND_REFRESH_IDLE_INTERVAL_MS = 30000;
 	const MAX_REFRESH_LIMIT = 200;
@@ -178,6 +179,9 @@
 	let backgroundRefreshing = false;
 	let backgroundRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 	let searchUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+	let appliedLibrarySearch = $state($page.url.searchParams.get('q') || '');
+	let pendingLibrarySearch: string | null = null;
+	let searchInputComposing = false;
 	let activeBulkSelectionScope = '';
 
 	function getQueryValues(params: URLSearchParams, key: string, splitComma: boolean = false): string[] {
@@ -475,7 +479,16 @@
 			clearBulkSelectionState();
 		}
 		activeBulkSelectionScope = nextSelectionScope;
-		librarySearch = $page.url.searchParams.get('q') || '';
+		const nextAppliedSearch = $page.url.searchParams.get('q') || '';
+		if (nextAppliedSearch !== appliedLibrarySearch) {
+			appliedLibrarySearch = nextAppliedSearch;
+			if (pendingLibrarySearch === nextAppliedSearch) {
+				pendingLibrarySearch = null;
+			} else {
+				pendingLibrarySearch = null;
+				librarySearch = nextAppliedSearch;
+			}
+		}
 		sortBy = getSortByForUrl($page.url);
 		sortDir = getSortDirForUrl($page.url);
 		fetchBooks(true);
@@ -852,24 +865,52 @@
 		navigateWithFilters(url, true, false);
 	}
 
+	function commitScopedSearch() {
+		if (searchUpdateTimer) clearTimeout(searchUpdateTimer);
+		searchUpdateTimer = null;
+		const query = librarySearch.trim();
+		if (query === appliedLibrarySearch) return;
+
+		pendingLibrarySearch = query;
+		const url = new URL(window.location.href);
+		if (query) {
+			url.searchParams.set('q', query);
+		} else {
+			url.searchParams.delete('q');
+		}
+		navigateWithFilters(url, true, false);
+	}
+
 	function updateScopedSearch(value: string) {
 		librarySearch = value;
 		if (searchUpdateTimer) clearTimeout(searchUpdateTimer);
-		searchUpdateTimer = setTimeout(() => {
-			const url = new URL(window.location.href);
-			const query = librarySearch.trim();
-			if (query) {
-				url.searchParams.set('q', query);
-			} else {
-				url.searchParams.delete('q');
-			}
-			navigateWithFilters(url, true, false);
-		}, 300);
+		if (searchInputComposing) return;
+		searchUpdateTimer = setTimeout(commitScopedSearch, SCOPED_SEARCH_DEBOUNCE_MS);
+	}
+
+	function handleScopedSearchKeydown(event: KeyboardEvent) {
+		if (event.key !== 'Enter' || event.isComposing) return;
+		event.preventDefault();
+		commitScopedSearch();
+	}
+
+	function handleScopedSearchCompositionStart() {
+		searchInputComposing = true;
+		if (searchUpdateTimer) clearTimeout(searchUpdateTimer);
+		searchUpdateTimer = null;
+	}
+
+	function handleScopedSearchCompositionEnd(event: CompositionEvent & { currentTarget: HTMLInputElement }) {
+		searchInputComposing = false;
+		updateScopedSearch(event.currentTarget.value);
 	}
 
 	function clearScopedSearch() {
 		if (searchUpdateTimer) clearTimeout(searchUpdateTimer);
+		searchUpdateTimer = null;
 		librarySearch = '';
+		if (!appliedLibrarySearch) return;
+		pendingLibrarySearch = '';
 		const url = new URL(window.location.href);
 		url.searchParams.delete('q');
 		navigateWithFilters(url, true, false);
@@ -1493,8 +1534,12 @@
 						type="search"
 						value={librarySearch}
 						oninput={(event) => updateScopedSearch(event.currentTarget.value)}
+						onkeydown={handleScopedSearchKeydown}
+						oncompositionstart={handleScopedSearchCompositionStart}
+						oncompositionend={handleScopedSearchCompositionEnd}
 						placeholder="Search current results"
 						aria-label="Search current library results"
+						enterkeyhint="search"
 						class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-2 pl-9 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none {librarySearch ? 'pr-9' : 'pr-3'}"
 					/>
 					{#if librarySearch}
