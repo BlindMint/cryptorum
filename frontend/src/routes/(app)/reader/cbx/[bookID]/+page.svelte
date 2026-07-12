@@ -155,6 +155,7 @@
 		const handleReaderVisibilityChange = () => {
 			if (document.visibilityState === 'hidden') {
 				resetInterruptedGestureState();
+				void saveProgress(true);
 			}
 		};
 		const unsubscribeSettings = readerSettings.subscribe(s => {
@@ -177,6 +178,7 @@
 		handlePageExit = () => {
 			resetInterruptedGestureState();
 			if (closeTasksStarted) return;
+			void saveProgress(true);
 			void readerSettings.flushPendingSave(true);
 			void endSession(true);
 		};

@@ -323,7 +323,7 @@
 		currentPage = targetPage;
 		embedPdfInitialPage = targetPage;
 
-		const attemptRestore = (isFinalAttempt = false) => {
+		const attemptRestore = () => {
 			if (!embedPdfScroll || !embedPdfRestoringInitialPage) return;
 			try {
 				const scopedScroll = embedPdfScroll.forDocument?.(embedPdfDocumentId);
@@ -336,17 +336,10 @@
 				console.warn('Failed to restore saved PDF page:', e);
 				return;
 			}
-
-			if (isFinalAttempt && embedPdfRestoringInitialPage && !embedPdfRestoreSettling) {
-				embedPdfRestoringInitialPage = false;
-			}
 		};
 
-		embedPdfRestoreTimers = embedPdfRestoreDelays.map((delay, index) =>
-			setTimeout(
-				() => attemptRestore(index === embedPdfRestoreDelays.length - 1),
-				delay
-			)
+		embedPdfRestoreTimers = embedPdfRestoreDelays.map((delay) =>
+			setTimeout(attemptRestore, delay)
 		);
 	}
 
@@ -532,6 +525,7 @@
 		if (document.visibilityState === 'hidden') {
 			wasPageInterrupted = true;
 			recoverInterruptedPdfGesture();
+			void saveProgress(true);
 			return;
 		}
 
@@ -761,6 +755,8 @@
 			if (total && total > 0 && total !== numPages) {
 				numPages = total;
 			}
+			embedPdfViewerReady = true;
+			topBarVisible = true;
 			settleEmbedPdfSavedPageRestore();
 			return;
 		}
@@ -787,7 +783,7 @@
 
 	function handleEmbedPdfReady(registry: any) {
 		embedPdfScroll = registry.getPlugin?.('scroll')?.provides?.() ?? null;
-		embedPdfViewerReady = true;
+		embedPdfViewerReady = embedPdfInitialPage <= 1;
 		pdfLoadRetryAttempts = 0;
 		topBarVisible = true;
 		restoreEmbedPdfSavedPage();

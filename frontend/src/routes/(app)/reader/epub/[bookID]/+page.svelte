@@ -1735,6 +1735,7 @@
 		const handleReaderVisibilityChange = () => {
 			if (document.visibilityState === 'hidden') {
 				resetInterruptedGestureState();
+				flushProgressSave();
 			}
 		};
 		const handlePageExit = () => {
