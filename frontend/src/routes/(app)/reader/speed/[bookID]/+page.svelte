@@ -45,7 +45,18 @@
 	// Word picker state
 	let wordPickerPending = $state(0);   // word the user is about to jump to
 	let wordPickerOrigin = $state(0);    // word the user was at when panel opened
-	const WORD_PICKER_WINDOW_RADIUS = 450;
+	let wordPickerParagraphs = $state<{ start: number; end: number }[]>([]);
+	let wordPickerVisibleStart = $state(0);
+	let wordPickerVisibleEnd = $state(0);
+	let wordPickerScrollEl = $state<HTMLDivElement | null>(null);
+	let wordPickerTopSentinel = $state<HTMLDivElement | null>(null);
+	let wordPickerBottomSentinel = $state<HTMLDivElement | null>(null);
+	let wordPickerObserver: IntersectionObserver | null = null;
+	let wordPickerExtending = false;
+	let wordPickerJumpTimer: ReturnType<typeof setTimeout> | null = null;
+	const WORD_PICKER_INITIAL_RADIUS = 320;
+	const WORD_PICKER_CHUNK_SIZE = 1000;
+	const WORD_PICKER_PRELOAD_MARGIN = '900px 0px';
 
 	function preprocessText(text: string): string {
 		const result: string[] = [];
@@ -112,9 +123,6 @@
 		return result;
 	}
 
-	let wordPickerParagraphs = $derived(buildParagraphs(words));
-	let wordPickerVisibleStart = $derived(Math.max(0, wordPickerPending - WORD_PICKER_WINDOW_RADIUS));
-	let wordPickerVisibleEnd = $derived(Math.min(words.length, wordPickerPending + WORD_PICKER_WINDOW_RADIUS + 1));
 	let wordPickerVisibleParagraphs = $derived(
 		wordPickerParagraphs
 			.filter((para) => para.end > wordPickerVisibleStart && para.start < wordPickerVisibleEnd)
@@ -249,6 +257,7 @@
 			window.addEventListener('keydown', handleKeyDown);
 			window.addEventListener('wheel', handleWheelNavigation, { passive: false });
 			window.addEventListener('click', globalTapListener);
+			document.addEventListener('visibilitychange', handleReaderVisibilityChange);
 		})();
 
 		return () => {
@@ -272,6 +281,12 @@
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
 			void closeReader();
+		}
+	}
+
+	function handleReaderVisibilityChange() {
+		if (document.visibilityState === 'hidden') {
+			void saveProgress(true);
 		}
 	}
 
@@ -307,6 +322,9 @@
 		}
 		window.removeEventListener('keydown', handleKeyDown);
 		window.removeEventListener('wheel', handleWheelNavigation);
+		document.removeEventListener('visibilitychange', handleReaderVisibilityChange);
+		wordPickerObserver?.disconnect();
+		if (wordPickerJumpTimer) clearTimeout(wordPickerJumpTimer);
 		unsubSettings();
 		unsubTheme();
 		stop();
@@ -361,6 +379,7 @@
 			if (res.ok) {
 				const text = await res.text();
 				words = processText(text);
+				wordPickerParagraphs = buildParagraphs(words);
 				if (words.length === 0) {
 					loadError = 'No text was extracted for speed reading.';
 					currentIndex = 0;
@@ -389,15 +408,6 @@
 		if (!book || words.length === 0) return;
 		const percent = (currentIndex / words.length) * 100;
 		try {
-			await fetch(`/api/books/${book.id}/progress`, {
-				method: 'PUT',
-				keepalive,
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					percent: percent,
-					status: percent >= 100 ? 'finished' : 'reading'
-				})
-			});
 			await fetch(`/api/books/${book.id}/speed-reader`, {
 				method: 'PUT',
 				keepalive,
@@ -506,18 +516,89 @@
 		showWpmMenu = false;
 		wordPickerPending = currentIndex;
 		wordPickerOrigin = currentIndex;
+		setWordPickerWindowAround(currentIndex);
 		showWordPicker = true;
+		void scrollToWordPickerIndex(currentIndex);
 	}
 
 	function confirmWordPicker(e?: Event) {
 		e?.stopPropagation();
 		currentIndex = wordPickerPending;
 		showWordPicker = false;
+		void saveProgress();
 	}
 
 	function cancelWordPicker(e?: Event) {
 		e?.stopPropagation();
 		showWordPicker = false;
+	}
+
+	function setWordPickerWindowAround(index: number) {
+		const safeIndex = Math.max(0, Math.min(words.length - 1, index));
+		wordPickerVisibleStart = Math.max(0, safeIndex - WORD_PICKER_INITIAL_RADIUS);
+		wordPickerVisibleEnd = Math.min(words.length, safeIndex + WORD_PICKER_INITIAL_RADIUS + 1);
+	}
+
+	async function scrollToWordPickerIndex(index: number, behavior: ScrollBehavior = 'auto') {
+		await tick();
+		requestAnimationFrame(() => {
+			document.getElementById(`wk-${index}`)?.scrollIntoView({ behavior, block: 'center' });
+		});
+	}
+
+	async function extendWordPicker(direction: 'up' | 'down') {
+		if (wordPickerExtending || !wordPickerScrollEl) return;
+		const canExtend = direction === 'up'
+			? wordPickerVisibleStart > 0
+			: wordPickerVisibleEnd < words.length;
+		if (!canExtend) return;
+
+		wordPickerExtending = true;
+		const previousHeight = wordPickerScrollEl.scrollHeight;
+		const previousTop = wordPickerScrollEl.scrollTop;
+		if (direction === 'up') {
+			wordPickerVisibleStart = Math.max(0, wordPickerVisibleStart - WORD_PICKER_CHUNK_SIZE);
+		} else {
+			wordPickerVisibleEnd = Math.min(words.length, wordPickerVisibleEnd + WORD_PICKER_CHUNK_SIZE);
+		}
+
+		await tick();
+		if (direction === 'up' && wordPickerScrollEl) {
+			wordPickerScrollEl.scrollTop = previousTop + (wordPickerScrollEl.scrollHeight - previousHeight);
+		}
+		wordPickerExtending = false;
+	}
+
+	function setupWordPickerObserver() {
+		wordPickerObserver?.disconnect();
+		wordPickerObserver = null;
+		if (!showWordPicker || !wordPickerScrollEl) return;
+
+		wordPickerObserver = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) {
+					if (!entry.isIntersecting) continue;
+					if (entry.target === wordPickerTopSentinel) void extendWordPicker('up');
+					if (entry.target === wordPickerBottomSentinel) void extendWordPicker('down');
+				}
+			},
+			{ root: wordPickerScrollEl, rootMargin: WORD_PICKER_PRELOAD_MARGIN }
+		);
+
+		if (wordPickerTopSentinel) wordPickerObserver.observe(wordPickerTopSentinel);
+		if (wordPickerBottomSentinel) wordPickerObserver.observe(wordPickerBottomSentinel);
+	}
+
+	function handleWordPickerSliderInput(event: Event & { currentTarget: HTMLInputElement }) {
+		const index = Number.parseInt(event.currentTarget.value, 10);
+		if (!Number.isFinite(index)) return;
+		wordPickerPending = index;
+		if (wordPickerJumpTimer) clearTimeout(wordPickerJumpTimer);
+		wordPickerJumpTimer = setTimeout(() => {
+			wordPickerJumpTimer = null;
+			setWordPickerWindowAround(index);
+			void scrollToWordPickerIndex(index, 'smooth');
+		}, 100);
 	}
 
 	function showControlsTemporarily() {
@@ -733,16 +814,14 @@
 		void goto(targetUrl, { replaceState: true });
 	}
 
-	// Scroll to the pending word in the word picker, debounced so slider drags don't thrash
 	$effect(() => {
-		if (!showWordPicker) return;
-		const idx = wordPickerPending;
-		const timer = setTimeout(() => {
-			tick().then(() => {
-				const el = document.getElementById(`wk-${idx}`);
-				if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-			});
-		}, 120);
+		showWordPicker;
+		wordPickerScrollEl;
+		wordPickerTopSentinel;
+		wordPickerBottomSentinel;
+		wordPickerVisibleStart;
+		wordPickerVisibleEnd;
+		const timer = setTimeout(setupWordPickerObserver, 0);
 		return () => clearTimeout(timer);
 	});
 
@@ -1133,15 +1212,16 @@
 			</div>
 
 			<!-- Text content -->
-			<div class="flex-1 overflow-y-auto px-6 py-5">
+			<div bind:this={wordPickerScrollEl} class="flex-1 overflow-y-auto px-6 py-5">
 				{#if words.length === 0}
 					<div class="speed-word-picker-loading" style="color: {readerTheme.text}80;">
 						<div class="speed-word-picker-spinner" style="border-color: {readerTheme.text}24; border-bottom-color: {readerTheme.text};"></div>
 						<span>Preparing word list...</span>
 					</div>
 				{:else}
+					<div bind:this={wordPickerTopSentinel} class="h-px" aria-hidden="true"></div>
 					<div class="speed-word-picker-window-note" style="color: {readerTheme.text}60;">
-						Showing words {(wordPickerVisibleStart + 1).toLocaleString()}-{wordPickerVisibleEnd.toLocaleString()} of {words.length.toLocaleString()}
+						Loaded words {(wordPickerVisibleStart + 1).toLocaleString()}-{wordPickerVisibleEnd.toLocaleString()} of {words.length.toLocaleString()}
 					</div>
 					{#each wordPickerVisibleParagraphs as para}
 						<p class="mb-5 leading-loose text-base select-none" style="color: {readerTheme.text}; font-family: Georgia, serif;">
@@ -1177,6 +1257,7 @@
 							{/each}
 						</p>
 						{/each}
+					<div bind:this={wordPickerBottomSentinel} class="h-px" aria-hidden="true"></div>
 				{/if}
 			</div>
 
@@ -1187,7 +1268,7 @@
 					min="0"
 					max={words.length - 1}
 					value={wordPickerPending}
-					oninput={(e) => { wordPickerPending = parseInt(e.currentTarget.value); }}
+					oninput={handleWordPickerSliderInput}
 					class="w-full h-2 rounded-lg appearance-none cursor-pointer"
 					style="background-color: {readerTheme.text}20;"
 				/>

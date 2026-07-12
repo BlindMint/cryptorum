@@ -91,11 +91,19 @@
 
 		handlePageExit = () => {
 			if (closeTasksStarted) return;
+			void saveProgress(true);
 			void endSession(true);
 		};
 		window.addEventListener('pagehide', handlePageExit);
 		window.addEventListener('beforeunload', handlePageExit);
+		document.addEventListener('visibilitychange', handleReaderVisibilityChange);
 	});
+
+	function handleReaderVisibilityChange() {
+		if (document.visibilityState === 'hidden') {
+			void saveProgress(true);
+		}
+	}
 
 	async function fetchProgress() {
 		try {
@@ -170,6 +178,7 @@
 			window.removeEventListener('pagehide', handlePageExit);
 			window.removeEventListener('beforeunload', handlePageExit);
 		}
+		document.removeEventListener('visibilitychange', handleReaderVisibilityChange);
 		clearControlsTimer();
 		if (!closeTasksStarted) {
 			void endSession(true);
