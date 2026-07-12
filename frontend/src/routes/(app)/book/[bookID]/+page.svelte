@@ -4,13 +4,15 @@
 	import { goto } from '$app/navigation';
 	import AutocompleteInput from '$lib/components/AutocompleteInput.svelte';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
+	import BookCoverProgressChip from '$lib/components/BookCoverProgressChip.svelte';
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
 	import PathDisplay from '$lib/components/PathDisplay.svelte';
 	import ShelfPickerRow from '$lib/components/ShelfPickerRow.svelte';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
-	import { showFormatOnCover, getFormatColor } from '$lib/stores';
+	import { showFormatOnCover, showProgressChipOnCover, getFormatColor } from '$lib/stores';
 	import { addMetadataSuggestionsFromPayload, refreshMetadataSuggestions } from '$lib/stores/metadataSuggestions';
 	import { getCoverThumbUrl } from '$lib/utils/covers';
+	import { bookHasCoverProgress } from '$lib/utils/cover-progress';
 	import {
 		getBookDetailContextUrl,
 		getInlineMetadataEditUrl,
@@ -71,6 +73,7 @@
 	let shelfActionMessage = $state('');
 	let formatMenuOpen = $state(false);
 	let formatOnCover = $state(true);
+	let progressChipOnCover = $state(true);
 	let convertMenuFileId = $state<number | null>(null);
 	let selectedConvertFormat = $state<'epub' | 'fb2' | 'txt' | 'rtf'>('epub');
 	let statusSaving = $state(false);
@@ -99,8 +102,14 @@
 		return unsub;
 	});
 
+	$effect(() => {
+		const unsub = showProgressChipOnCover.subscribe((value: boolean) => progressChipOnCover = value);
+		return unsub;
+	});
+
 	onMount(() => {
 		showFormatOnCover.init();
+		showProgressChipOnCover.init();
 		void updateBookTabIndicator();
 		window.addEventListener('resize', updateBookTabIndicator);
 		return () => window.removeEventListener('resize', updateBookTabIndicator);
@@ -1739,28 +1748,51 @@
 							{:else}
 								<div class="grid grid-cols-2 gap-4 sm:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] sm:justify-items-center">
 									{#each similarBooks as similar}
-										<a href="/book/{similar.id}" class="group relative block w-full min-w-0 rounded-xl p-2 transition-all duration-200 ease-out hover:-translate-y-1 hover:bg-[var(--color-surface-overlay)] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:max-w-[12rem]">
-											<BookCoverFrame
-												src={similar.cover_path ? getCoverThumbUrl(similar.id, 'medium', similar.cover_updated_on) : null}
-												alt={similar.title}
-												format={similar.format}
-												mode="contain"
-												frameClass="aspect-[2/3] w-full mb-2"
-												imageClass="transition-all duration-200 ease-out group-hover:scale-[1.02] group-hover:opacity-80"
-												placeholderSize="md"
-											/>
-											{#if formatOnCover && similar.format}
-												{@const formatColor = getFormatColor(similar.format)}
-												<div
-													class="absolute left-4 top-4 z-10 rounded border border-black/20 px-1.5 py-0.5 text-[10px] font-medium uppercase shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
-													style="background-color: {formatColor.bg}; color: {formatColor.text};"
+										<div class="group relative w-full min-w-0 rounded-xl p-2 transition-all duration-200 ease-out hover:-translate-y-1 hover:bg-[var(--color-surface-overlay)] hover:shadow-lg sm:max-w-[12rem]">
+											<div class="relative mb-2 overflow-hidden rounded-lg">
+												<a
+													href="/book/{similar.id}"
+													class="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+													aria-label="View details for {similar.title || 'book'}"
 												>
-													{similar.format}
-												</div>
-											{/if}
-											<h4 class="truncate text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 group-hover:text-[var(--color-primary-400)]">{similar.title}</h4>
-											<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{parseAuthors(similar.authors).join(', ')}</p>
-										</a>
+													<BookCoverFrame
+														src={similar.cover_path ? getCoverThumbUrl(similar.id, 'medium', similar.cover_updated_on) : null}
+														alt={similar.title}
+														format={similar.format}
+														mode="contain"
+														frameClass="aspect-[2/3] w-full"
+														imageClass="transition-all duration-200 ease-out group-hover:scale-[1.02] group-hover:opacity-80"
+														placeholderSize="md"
+													/>
+													{#if bookHasCoverProgress(similar)}
+														<div class="absolute bottom-0 left-0 right-0 z-10 h-1 bg-slate-700">
+															<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {similar.percent}%"></div>
+														</div>
+													{/if}
+													{#if formatOnCover && similar.format}
+														{@const formatColor = getFormatColor(similar.format)}
+														<div
+															class="absolute left-2 top-2 z-10 rounded border border-black/20 px-1.5 py-0.5 text-[10px] font-medium uppercase shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+															style="background-color: {formatColor.bg}; color: {formatColor.text};"
+														>
+															{similar.format}
+														</div>
+													{/if}
+												</a>
+												{#if progressChipOnCover && bookHasCoverProgress(similar)}
+													<BookCoverProgressChip
+														href={getBookReaderHref(similar.id, similar.format, getCurrentBookDetailUrl())}
+														percent={similar.percent}
+														title={similar.title}
+														format={similar.format}
+													/>
+												{/if}
+											</div>
+											<a href="/book/{similar.id}" class="block">
+												<h4 class="truncate text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 group-hover:text-[var(--color-primary-400)]">{similar.title}</h4>
+												<p class="text-xs text-[var(--color-surface-text-muted)] truncate">{parseAuthors(similar.authors).join(', ')}</p>
+											</a>
+										</div>
 									{/each}
 								</div>
 							{/if}

@@ -3,8 +3,10 @@
 	import { flip } from 'svelte/animate';
 	import { cubicOut } from 'svelte/easing';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
-	import { showFormatOnCover, getFormatColor } from '$lib/stores';
-	import { getBookReaderHref, isAudioFormat } from '$lib/utils/book-formats';
+	import BookCoverProgressChip from '$lib/components/BookCoverProgressChip.svelte';
+	import { showFormatOnCover, showProgressChipOnCover, getFormatColor } from '$lib/stores';
+	import { bookHasCoverProgress } from '$lib/utils/cover-progress';
+	import { getBookReaderHref } from '$lib/utils/book-formats';
 
  	let stats = $state({
  		books: 0,
@@ -21,6 +23,7 @@
 	let recentBooksLoading = $state(true);
 	let discoverBooksLoading = $state(true);
  	let formatOnCover = $state(true);
+ 	let progressChipOnCover = $state(true);
  	let continueReadingRowEl = $state<HTMLDivElement | null>(null);
  	let recentBooksRowEl = $state<HTMLDivElement | null>(null);
  	let discoverBooksRowEl = $state<HTMLDivElement | null>(null);
@@ -32,7 +35,6 @@
  	let visibleContinueReadingCount = $state(0);
  	let visibleRecentBooksCount = $state(0);
  	let visibleDiscoverBooksCount = $state(0);
-	let activeDashboardBookActions = $state<number | null>(null);
 
  	// Dashboard configuration
  	let dashboardConfig = $state({
@@ -49,6 +51,11 @@
  	$effect(() => {
  		const unsub = showFormatOnCover.subscribe((v: boolean) => formatOnCover = v);
  		return unsub;
+	});
+
+	$effect(() => {
+		const unsub = showProgressChipOnCover.subscribe((v: boolean) => progressChipOnCover = v);
+		return unsub;
 	});
 
 	$effect(() => {
@@ -134,6 +141,7 @@
 
  	onMount(async () => {
  		showFormatOnCover.init();
+		showProgressChipOnCover.init();
 		await Promise.allSettled([
 			loadDashboardSummary(),
 			loadContinueReading(),
@@ -229,31 +237,6 @@
 
 	function getReaderUrl(book: any): string {
 		return getBookReaderHref(book.id, book.format, '/');
-	}
-
-	function getReaderActionLabel(book: any, continuing = false): string {
-		const title = book.title || 'book';
-		if (isAudioFormat(book.format)) {
-			return continuing ? `Continue listening to ${title}` : `Play audio for ${title}`;
-		}
-		return continuing ? `Continue reading ${title}` : `Read ${title}`;
-	}
-
-	function isTouchLike(): boolean {
-		return typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
-	}
-
-	function handleDashboardCoverTap(event: MouseEvent, bookId: number) {
-		if (!isTouchLike()) return;
-		event.preventDefault();
-		event.stopPropagation();
-		activeDashboardBookActions = activeDashboardBookActions === bookId ? null : bookId;
-	}
-
-	function handleDashboardCoverKeydown(event: KeyboardEvent, bookId: number) {
-		if (event.key !== 'Enter' && event.key !== ' ') return;
-		event.preventDefault();
-		activeDashboardBookActions = activeDashboardBookActions === bookId ? null : bookId;
 	}
 
 	function handleDashboardRowWheel(event: WheelEvent) {
@@ -352,7 +335,8 @@
 						{@const readerUrl = getReaderUrl(book)}
 						<div class="dashboard-book-item relative group min-w-0 self-start" animate:flip={{ duration: 90, easing: cubicOut }}>
 							<div class="flex min-w-0 flex-col">
-								<div class="relative mb-1.5 overflow-hidden rounded-lg" role="button" tabindex="0" onclick={(event) => handleDashboardCoverTap(event, book.id)} onkeydown={(event) => handleDashboardCoverKeydown(event, book.id)}>
+								<div class="relative mb-1.5 overflow-hidden rounded-lg">
+									<a href="/book/{book.id}" class="block" aria-label="View details for {book.title || 'book'}">
 										<BookCoverFrame
 											src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
 											alt={book.title}
@@ -363,43 +347,40 @@
 											placeholderSize="md"
 											retryCount={2}
 										/>
-									{#if book.status === 'reading'}
-										<div class="absolute bottom-2 right-2 z-10 h-3 w-3 rounded-full border border-black/30 bg-blue-500 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></div>
+										{#if book.status === 'reading'}
+											<div class="absolute bottom-2 right-2 z-10 h-3 w-3 rounded-full border border-black/30 bg-blue-500 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"></div>
+										{/if}
+										{#if bookHasCoverProgress(book)}
+											<div class="absolute bottom-0 left-0 right-0 z-10 h-1 bg-slate-700">
+												<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
+											</div>
+										{/if}
+										{#if formatOnCover && book.format}
+											{@const formatColor = getFormatColor(book.format)}
+											<div
+												class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+												style="background-color: {formatColor.bg}; color: {formatColor.text};"
+											>
+												{book.format}
+											</div>
+										{/if}
+									</a>
+									{#if progressChipOnCover && bookHasCoverProgress(book)}
+										<BookCoverProgressChip
+											href={readerUrl}
+											percent={book.percent}
+											title={book.title}
+											format={book.format}
+										/>
 									{/if}
-									{#if book.opened && book.percent > 0}
-										<div class="absolute bottom-0 left-0 right-0 z-10 h-1 bg-slate-700">
-											<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
-										</div>
-									{/if}
-									{#if formatOnCover && book.format}
-										{@const formatColor = getFormatColor(book.format)}
-										<div
-											class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
-											style="background-color: {formatColor.bg}; color: {formatColor.text};"
-										>
-											{book.format}
-										</div>
-									{/if}
-									<div class="cover-action-overlay {activeDashboardBookActions === book.id ? 'is-active' : ''}">
-										<a href="/book/{book.id}" class="cover-action-button top-action" aria-label="View details for {book.title || 'book'}" onclick={(event) => event.stopPropagation()}>
-											<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11v5m0-8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-											</svg>
-										</a>
-										<a href={readerUrl} class="cover-action-button bottom-action" aria-label={getReaderActionLabel(book, true)} onclick={(event) => event.stopPropagation()}>
-											<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-												<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
-											</svg>
-										</a>
-									</div>
 								</div>
-								<div class="shrink-0">
+								<a href="/book/{book.id}" class="shrink-0 block">
 									<h3 class="text-xs font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
 									{#if book.authors && book.authors !== '[]'}
 										{@const authorStr = (() => { try { const a = JSON.parse(book.authors); return Array.isArray(a) ? a.join(', ') : book.authors; } catch { return book.authors; } })()}
 										<p class="text-[10px] text-[var(--color-surface-text-muted)] truncate">{authorStr}</p>
 									{/if}
-								</div>
+								</a>
 							</div>
 						</div>
 					{/each}
@@ -435,46 +416,49 @@
 					{#each recentBooks.slice(0, dashboardConfig.recentlyAddedLimit) as book (book.id)}
 						{@const readerUrl = getReaderUrl(book)}
 						<div class="dashboard-book-item group flex min-w-0 flex-col self-start" animate:flip={{ duration: 90, easing: cubicOut }}>
-							<div class="relative mb-1.5 overflow-hidden rounded-lg" role="button" tabindex="0" onclick={(event) => handleDashboardCoverTap(event, book.id)} onkeydown={(event) => handleDashboardCoverKeydown(event, book.id)}>
-								<BookCoverFrame
-									src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
-									alt={book.title}
-									format={book.format}
-									mode="cover"
-									frameClass="aspect-[2/3]"
-									imageClass="group-hover:scale-105 transition-transform"
-									placeholderSize="md"
-									retryCount={2}
-								/>
-								{#if formatOnCover && book.format}
-									{@const formatColor = getFormatColor(book.format)}
-									<div
-										class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
-										style="background-color: {formatColor.bg}; color: {formatColor.text};"
-									>
-										{book.format}
-									</div>
+							<div class="relative mb-1.5 overflow-hidden rounded-lg">
+								<a href="/book/{book.id}" class="block" aria-label="View details for {book.title || 'book'}">
+									<BookCoverFrame
+										src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
+										alt={book.title}
+										format={book.format}
+										mode="cover"
+										frameClass="aspect-[2/3]"
+										imageClass="group-hover:scale-105 transition-transform"
+										placeholderSize="md"
+										retryCount={2}
+									/>
+									{#if bookHasCoverProgress(book)}
+										<div class="absolute bottom-0 left-0 right-0 z-10 h-1 bg-slate-700">
+											<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
+										</div>
+									{/if}
+									{#if formatOnCover && book.format}
+										{@const formatColor = getFormatColor(book.format)}
+										<div
+											class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+											style="background-color: {formatColor.bg}; color: {formatColor.text};"
+										>
+											{book.format}
+										</div>
+									{/if}
+								</a>
+								{#if progressChipOnCover && bookHasCoverProgress(book)}
+									<BookCoverProgressChip
+										href={readerUrl}
+										percent={book.percent}
+										title={book.title}
+										format={book.format}
+									/>
 								{/if}
-								<div class="cover-action-overlay {activeDashboardBookActions === book.id ? 'is-active' : ''}">
-									<a href="/book/{book.id}" class="cover-action-button top-action" aria-label="View details for {book.title || 'book'}" onclick={(event) => event.stopPropagation()}>
-										<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11v5m0-8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-										</svg>
-									</a>
-									<a href={readerUrl} class="cover-action-button bottom-action" aria-label={getReaderActionLabel(book)} onclick={(event) => event.stopPropagation()}>
-										<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-											<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
-										</svg>
-									</a>
-								</div>
 							</div>
-							<div class="shrink-0">
+							<a href="/book/{book.id}" class="shrink-0 block">
 								<h3 class="text-xs font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
 								{#if book.authors && book.authors !== '[]'}
 									{@const authorStr = (() => { try { const a = JSON.parse(book.authors); return Array.isArray(a) ? a.join(', ') : book.authors; } catch { return book.authors; } })()}
 									<p class="text-[10px] text-[var(--color-surface-text-muted)] truncate">{authorStr}</p>
 								{/if}
-							</div>
+							</a>
 						</div>
 					{/each}
 				</div>
@@ -518,46 +502,49 @@
 					{#each discoverBooks.slice(0, dashboardConfig.discoverLimit) as book (book.id)}
 						{@const readerUrl = getReaderUrl(book)}
 						<div class="dashboard-book-item group flex min-w-0 flex-col self-start" animate:flip={{ duration: 90, easing: cubicOut }}>
-							<div class="relative mb-1.5 overflow-hidden rounded-lg" role="button" tabindex="0" onclick={(event) => handleDashboardCoverTap(event, book.id)} onkeydown={(event) => handleDashboardCoverKeydown(event, book.id)}>
-								<BookCoverFrame
-									src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
-									alt={book.title}
-									format={book.format}
-									mode="cover"
-									frameClass="aspect-[2/3]"
-									imageClass="group-hover:scale-105 transition-transform"
-									placeholderSize="md"
-									retryCount={2}
-								/>
-								{#if formatOnCover && book.format}
-									{@const formatColor = getFormatColor(book.format)}
-									<div
-										class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
-										style="background-color: {formatColor.bg}; color: {formatColor.text};"
-									>
-										{book.format}
-									</div>
+							<div class="relative mb-1.5 overflow-hidden rounded-lg">
+								<a href="/book/{book.id}" class="block" aria-label="View details for {book.title || 'book'}">
+									<BookCoverFrame
+										src={book.cover_path ? `/api/covers/${book.id}/thumb` : null}
+										alt={book.title}
+										format={book.format}
+										mode="cover"
+										frameClass="aspect-[2/3]"
+										imageClass="group-hover:scale-105 transition-transform"
+										placeholderSize="md"
+										retryCount={2}
+									/>
+									{#if bookHasCoverProgress(book)}
+										<div class="absolute bottom-0 left-0 right-0 z-10 h-1 bg-slate-700">
+											<div class="h-full bg-[var(--color-primary-500)] transition-all duration-300" style="width: {book.percent}%"></div>
+										</div>
+									{/if}
+									{#if formatOnCover && book.format}
+										{@const formatColor = getFormatColor(book.format)}
+										<div
+											class="absolute right-2 top-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase border border-black/20 shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+											style="background-color: {formatColor.bg}; color: {formatColor.text};"
+										>
+											{book.format}
+										</div>
+									{/if}
+								</a>
+								{#if progressChipOnCover && bookHasCoverProgress(book)}
+									<BookCoverProgressChip
+										href={readerUrl}
+										percent={book.percent}
+										title={book.title}
+										format={book.format}
+									/>
 								{/if}
-								<div class="cover-action-overlay {activeDashboardBookActions === book.id ? 'is-active' : ''}">
-									<a href="/book/{book.id}" class="cover-action-button top-action" aria-label="View details for {book.title || 'book'}" onclick={(event) => event.stopPropagation()}>
-										<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11v5m0-8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-										</svg>
-									</a>
-									<a href={readerUrl} class="cover-action-button bottom-action" aria-label={getReaderActionLabel(book)} onclick={(event) => event.stopPropagation()}>
-										<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-											<path d="M8 5.5v13l10-6.5-10-6.5z"></path>
-										</svg>
-									</a>
-								</div>
 							</div>
-							<div class="shrink-0">
+							<a href="/book/{book.id}" class="shrink-0 block">
 								<h3 class="text-xs font-medium text-[var(--color-surface-text)] truncate">{book.title || 'Untitled'}</h3>
 								{#if book.authors && book.authors !== '[]'}
 									{@const authorStr = (() => { try { const a = JSON.parse(book.authors); return Array.isArray(a) ? a.join(', ') : book.authors; } catch { return book.authors; } })()}
 									<p class="text-[10px] text-[var(--color-surface-text-muted)] truncate">{authorStr}</p>
 								{/if}
-							</div>
+							</a>
 						</div>
 					{/each}
 				</div>
@@ -596,6 +583,19 @@
 						<div class="flex items-center justify-between">
 							<label class="text-sm font-medium text-[var(--color-surface-text)]" for="dashboard-show-discover">Show Discover</label>
 							<input id="dashboard-show-discover" type="checkbox" bind:checked={dashboardConfig.showDiscover} class="rounded">
+						</div>
+						<div class="flex items-center justify-between gap-3">
+							<div class="min-w-0">
+								<label class="text-sm font-medium text-[var(--color-surface-text)]" for="dashboard-show-progress-chip">Show Progress Chip on Cover</label>
+								<p class="mt-0.5 text-xs text-[var(--color-surface-text-muted)]">When a book has progress, a tappable % chip opens the reader.</p>
+							</div>
+							<input
+								id="dashboard-show-progress-chip"
+								type="checkbox"
+								checked={progressChipOnCover}
+								onchange={(event) => showProgressChipOnCover.set(event.currentTarget.checked)}
+								class="rounded"
+							>
 						</div>
 					</div>
 
@@ -682,62 +682,5 @@
 
 	.dashboard-book-item a {
 		width: 100%;
-	}
-
-	.cover-action-overlay {
-		position: absolute;
-		inset: 0;
-		z-index: 20;
-		opacity: 0;
-		pointer-events: none;
-		transition: opacity 160ms ease;
-	}
-
-	@media (hover: hover) and (pointer: fine) {
-		.group:hover .cover-action-overlay {
-			opacity: 1;
-			pointer-events: auto;
-		}
-	}
-
-	.cover-action-overlay.is-active {
-		opacity: 1;
-		pointer-events: auto;
-	}
-
-	.cover-action-button {
-		position: absolute;
-		left: 50%;
-		display: inline-flex;
-		width: 2.5rem !important;
-		height: 2.5rem;
-		min-width: 2.5rem;
-		padding: 0;
-		transform: translateX(-50%);
-		align-items: center;
-		justify-content: center;
-		border-radius: 9999px;
-		border: 1px solid var(--color-surface-text-muted);
-		background: color-mix(in srgb, var(--color-surface-base) 88%, transparent);
-		color: var(--color-surface-text-muted);
-		box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
-		backdrop-filter: blur(8px);
-		line-height: 1;
-		transition: transform 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
-	}
-
-	.cover-action-button:hover {
-		transform: translateX(-50%) scale(1.06);
-		border-color: var(--color-surface-text);
-		color: var(--color-surface-text);
-		box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-surface-text) 28%, transparent), 0 0 18px color-mix(in srgb, var(--color-surface-text) 32%, transparent), 0 10px 28px rgba(0, 0, 0, 0.38);
-	}
-
-	.cover-action-button.top-action {
-		top: 18%;
-	}
-
-	.cover-action-button.bottom-action {
-		bottom: 18%;
 	}
 </style>
