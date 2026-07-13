@@ -334,6 +334,10 @@ func initRoutes(r *chi.Mux) {
 				r.Get("/progress", GetReadingProgressHandler)
 				r.Put("/progress", UpdateReadingProgressHandler)
 				r.Put("/speed-reader", UpdateSpeedReaderProgressHandler)
+				r.Post("/reading-sessions", StartReadingPositionSessionHandler)
+				r.Get("/reading-sessions/{sessionID}/position", GetReadingPositionSessionHandler)
+				r.Put("/reading-sessions/{sessionID}/position", SaveReadingPositionHandler)
+				r.Put("/reading-sessions/{sessionID}", EndReadingPositionSessionHandler)
 				r.Post("/cover/regenerate", RegenerateBookCoverHandler)
 				r.Post("/cover/custom", UploadBookCoverHandler)
 				r.Delete("/cover/custom", ResetBookCoverHandler)
@@ -575,6 +579,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 	discoveryOnly := r.URL.Query().Get("discovery") == "true"
+	standardProgressOnly := r.URL.Query().Get("standard_progress") == "true"
 	includeTotal := r.URL.Query().Get("include_total") != "false"
 	filterMode = normalizeAcrossFilterMode(filterMode)
 
@@ -608,6 +613,9 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	args := []interface{}{userIDForScopedRows(current)}
 	var conditions []string
 	var filterGroups []sqlFilterGroup
+	if standardProgressOnly {
+		conditions = append(conditions, "rp.file_id IS NOT NULL AND COALESCE(rp.percent, 0) > 0")
+	}
 
 	queryValues := func(key string, splitComma bool) []string {
 		values := r.URL.Query()[key]
@@ -765,7 +773,8 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(rp.percent, 0) as percent,
 		       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened,
 		       COALESCE(rp.updated_at, 0) as last_read_at,
-		       COALESCE(bf.format, '') as format`
+		       COALESCE((SELECT resume_bf.format FROM book_file resume_bf WHERE resume_bf.id = rp.file_id AND resume_bf.missing_at IS NULL), bf.format, '') as format,
+		       COALESCE(rp.file_id, 0) as resume_file_id`
 	query += baseQuery
 
 	var total int
@@ -812,6 +821,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		Opened              bool    `json:"opened"`
 		LastReadAt          int64   `json:"last_read_at"`
 		Format              string  `json:"format"`
+		ResumeFileID        int64   `json:"resume_file_id,omitempty"`
 	}
 
 	type BooksResponse struct {
@@ -826,7 +836,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var b BookResponse
 		var opened int
-		if err := rows.Scan(&b.ID, &b.LibraryID, &b.AddedAt, &b.Title, &b.Authors, &b.Series, &b.SeriesNumber, &b.SeriesNumberDisplay, &b.CoverPath, &b.CoverUpdatedOn, &b.Status, &b.Percent, &opened, &b.LastReadAt, &b.Format); err != nil {
+		if err := rows.Scan(&b.ID, &b.LibraryID, &b.AddedAt, &b.Title, &b.Authors, &b.Series, &b.SeriesNumber, &b.SeriesNumberDisplay, &b.CoverPath, &b.CoverUpdatedOn, &b.Status, &b.Percent, &opened, &b.LastReadAt, &b.Format, &b.ResumeFileID); err != nil {
 			continue
 		}
 		b.Opened = opened == 1
@@ -1160,6 +1170,10 @@ type BookDetail struct {
 	Status              string   `json:"status"`
 	Percent             float64  `json:"percent"`
 	SpeedReaderPercent  float64  `json:"speed_reader_percent"`
+	SpeedReaderFileID   int64    `json:"speed_reader_file_id,omitempty"`
+	SpeedReaderFormat   string   `json:"speed_reader_format,omitempty"`
+	ResumeFileID        int64    `json:"resume_file_id,omitempty"`
+	ResumeFormat        string   `json:"resume_format,omitempty"`
 	Opened              bool     `json:"opened"`
 	LibraryPaths        []string `json:"library_paths"`
 }
@@ -1192,6 +1206,10 @@ func fetchBookDetail(bookID int64, user *AppUser) (BookDetail, error) {
 		       COALESCE(rp.status, 'unread') as status,
 		       COALESCE(rp.percent, 0) as percent,
 		       COALESCE(rp.speed_reader_percent, 0) as speed_reader_percent,
+		       COALESCE(rp.speed_file_id, 0) as speed_reader_file_id,
+		       COALESCE((SELECT speed_bf.format FROM book_file speed_bf WHERE speed_bf.id = rp.speed_file_id AND speed_bf.missing_at IS NULL), '') as speed_reader_format,
+		       COALESCE(rp.file_id, 0) as resume_file_id,
+		       COALESCE((SELECT resume_bf.format FROM book_file resume_bf WHERE resume_bf.id = rp.file_id AND resume_bf.missing_at IS NULL), '') as resume_format,
 		       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened
 			FROM book b
 			LEFT JOIN library l ON b.library_id = l.id
@@ -1203,7 +1221,7 @@ func fetchBookDetail(bookID int64, user *AppUser) (BookDetail, error) {
 		&book.Title, &book.Authors, &book.Series, &book.SeriesNumber,
 		&book.SeriesNumberDisplay, &book.Publisher, &book.PubDate, &book.Description, &book.CoverPath, &book.CoverSource,
 		&book.CoverUpdatedOn, &book.Rating, &book.Genres, &book.Tags, &book.ISBN, &book.ASIN, &book.Language, &book.PageCount, &book.ComicSpreadFallback,
-		&book.Status, &book.Percent, &book.SpeedReaderPercent, &opened,
+		&book.Status, &book.Percent, &book.SpeedReaderPercent, &book.SpeedReaderFileID, &book.SpeedReaderFormat, &book.ResumeFileID, &book.ResumeFormat, &opened,
 	)
 
 	if err != nil {
@@ -1365,9 +1383,9 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 		bookIDInt, _ := strconv.ParseInt(bookID, 10, 64)
 		_, err = appDB.Exec(`
 			INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
-			VALUES (?, ?, 0, ?, ?)
-			ON CONFLICT(book_id, owner_user_id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at
-		`, bookIDInt, req.Status, time.Now().Unix(), current.ID)
+			VALUES (?, ?, 0, 0, ?)
+			ON CONFLICT(book_id, owner_user_id) DO UPDATE SET status = excluded.status
+		`, bookIDInt, req.Status, current.ID)
 		if err != nil {
 			errorResponse(w, http.StatusInternalServerError, "Failed to update reading status")
 			return
@@ -1413,22 +1431,19 @@ func updateBookStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().Unix()
 	_, err = appDB.Exec(`
 			INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
-			VALUES (?, ?, 0, ?, ?)
+			VALUES (?, ?, 0, 0, ?)
 			ON CONFLICT(book_id, owner_user_id) DO UPDATE SET
-				status = excluded.status,
-				updated_at = excluded.updated_at
-	`, bookIDInt, req.Status, now, current.ID)
+				status = excluded.status
+	`, bookIDInt, req.Status, current.ID)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to update reading status")
 		return
 	}
 
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status":     req.Status,
-		"updated_at": now,
+		"status": req.Status,
 	})
 }
 
@@ -1705,7 +1720,8 @@ func getBookFilesHandler(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := appDB.Query(`
 		SELECT id, path, format, size, hash, last_modified
-		FROM book_file WHERE book_id = ?
+		FROM book_file WHERE book_id = ? AND missing_at IS NULL
+		ORDER BY id
 	`, bookID)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to fetch files")
@@ -2003,9 +2019,15 @@ func getSimilarBooksHandler(w http.ResponseWriter, r *http.Request) {
 		Opened         bool    `json:"opened"`
 		Score          int     `json:"score"`
 		MatchType      string  `json:"match_type"`
+		ResumeFileID   int64   `json:"resume_file_id,omitempty"`
 	}
 
-	progressByID := map[int64]float64{}
+	type similarProgress struct {
+		Percent float64
+		FileID  int64
+		Format  string
+	}
+	progressByID := map[int64]similarProgress{}
 	if len(result) > 0 {
 		placeholders := make([]string, len(result))
 		args := make([]interface{}, 0, len(result)+1)
@@ -2015,17 +2037,18 @@ func getSimilarBooksHandler(w http.ResponseWriter, r *http.Request) {
 			args = append(args, c.ID)
 		}
 		progressRows, progressErr := appDB.Query(`
-			SELECT book_id, COALESCE(percent, 0)
-			FROM reading_progress
-			WHERE owner_user_id = ? AND book_id IN (`+strings.Join(placeholders, ",")+`)
+			SELECT rp.book_id, COALESCE(rp.percent, 0), COALESCE(rp.file_id, 0), COALESCE(bf.format, '')
+			FROM reading_progress rp
+			LEFT JOIN book_file bf ON bf.id = rp.file_id AND bf.missing_at IS NULL
+			WHERE rp.owner_user_id = ? AND rp.book_id IN (`+strings.Join(placeholders, ",")+`)
 		`, args...)
 		if progressErr == nil {
 			defer progressRows.Close()
 			for progressRows.Next() {
 				var bookID int64
-				var percent float64
-				if err := progressRows.Scan(&bookID, &percent); err == nil {
-					progressByID[bookID] = percent
+				var progress similarProgress
+				if err := progressRows.Scan(&bookID, &progress.Percent, &progress.FileID, &progress.Format); err == nil {
+					progressByID[bookID] = progress
 				}
 			}
 		}
@@ -2033,18 +2056,23 @@ func getSimilarBooksHandler(w http.ResponseWriter, r *http.Request) {
 
 	similarResult := make([]SimilarBook, len(result))
 	for i, c := range result {
-		percent, opened := progressByID[c.ID]
+		progress, opened := progressByID[c.ID]
+		format := c.Format
+		if progress.Format != "" {
+			format = progress.Format
+		}
 		similarResult[i] = SimilarBook{
 			ID:             c.ID,
 			Title:          c.Title,
 			Authors:        c.Authors,
 			CoverPath:      c.CoverPath,
 			CoverUpdatedOn: c.CoverUpdatedOn,
-			Format:         c.Format,
-			Percent:        percent,
+			Format:         format,
+			Percent:        progress.Percent,
 			Opened:         opened,
 			Score:          c.Score,
 			MatchType:      c.MatchType,
+			ResumeFileID:   progress.FileID,
 		}
 	}
 
@@ -4119,11 +4147,11 @@ func getCbxPageCountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	filePath, format, err := selectBookFileForRequest(r, bookIDInt, requestedFormat)
 	if err != nil || (requestedFormat == "" && format != "cbz" && format != "cbr" && format != "cb7") {
 		err = appDB.QueryRow(`
 			SELECT path, format FROM book_file
-			WHERE book_id = ? AND format IN ('cbz', 'cbr', 'cb7')
+			WHERE book_id = ? AND missing_at IS NULL AND format IN ('cbz', 'cbr', 'cb7')
 			ORDER BY id
 			LIMIT 1
 		`, bookIDInt).Scan(&filePath, &format)
@@ -4168,11 +4196,11 @@ func getPdfPageCountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	filePath, format, err := selectBookFileForRequest(r, bookIDInt, requestedFormat)
 	if err != nil || (requestedFormat == "" && format != "pdf") {
 		err = appDB.QueryRow(`
 			SELECT path, format FROM book_file
-			WHERE book_id = ? AND format = 'pdf'
+			WHERE book_id = ? AND missing_at IS NULL AND format = 'pdf'
 			ORDER BY id
 			LIMIT 1
 		`, bookIDInt).Scan(&filePath, &format)

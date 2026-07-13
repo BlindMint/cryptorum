@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import TopBar from '$lib/components/TopBar.svelte';
+	import ProgressConflictBanner from '$lib/components/ProgressConflictBanner.svelte';
 	import { mobileMenuOpen } from '$lib/stores';
 	import { readerSettings } from '$lib/stores/readerSettings';
 
@@ -125,6 +126,7 @@
 					return;
 				}
 				if (disposed) return;
+				sessionStorage.setItem('cryptorumUserId', String(data.user_id ?? 'default'));
 				authenticated = true;
 				await readerSettings.syncWithBackend();
 				if (disposed) return;
@@ -154,6 +156,7 @@
 		<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
 	</div>
 {:else if authenticated}
+	<ProgressConflictBanner />
 	<div class="h-[100dvh] bg-transparent relative overflow-x-hidden">
 		<!-- Subtle background texture -->
 		<div class="absolute inset-0 opacity-[0.02] pointer-events-none" style="background-image: radial-gradient(circle at 25% 25%, rgba(255,255,255,0.1) 1px, transparent 1px), radial-gradient(circle at 75% 75%, rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 20px 20px;"></div>

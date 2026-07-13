@@ -8,6 +8,13 @@
 	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
 	import { getReaderDisplayTitle } from '$lib/utils/reader-title';
+	import {
+		ReadingProgressController,
+		readingPositionAsLegacy,
+		selectReaderFile,
+		withReaderFile,
+		type ReaderFile
+	} from '$lib/services/reading-progress';
 
 	interface ProcessedWord {
 		text: string;
@@ -40,6 +47,8 @@
 	let handlePageExit: (() => void) | null = null;
 	let closeTasksStarted = false;
 	let requestedFormat = $state('');
+	let activeFile = $state<ReaderFile | null>(null);
+	let progressController: ReadingProgressController | null = null;
 	const readerTitle = $derived(getReaderDisplayTitle(book, readerFiles, loading, requestedFormat));
 
 	// Word picker state
@@ -236,9 +245,9 @@
 						if (filesRes.ok) {
 							readerFiles = await filesRes.json();
 						}
-						await fetchProgress();
+						activeFile = selectReaderFile(readerFiles, requestedFormat, ['epub', 'pdf', 'txt', 'html', 'mobi', 'azw3', 'fb2']);
+						await startSession();
 						await loadText();
-					await startSession();
 				}
 			} catch (e) {
 				console.error('Failed to load book:', e);
@@ -315,7 +324,7 @@
 		stepWord(dominantDelta > 0 ? 1 : -1);
 	}
 
-	onDestroy(() => {
+		onDestroy(() => {
 		if (handlePageExit) {
 			window.removeEventListener('pagehide', handlePageExit);
 			window.removeEventListener('beforeunload', handlePageExit);
@@ -331,51 +340,32 @@
 		if (!closeTasksStarted) {
 			void endSession(true);
 		}
+		progressController?.destroy();
 	});
 
-	async function fetchProgress() {
-		try {
-			const res = await fetch(`/api/books/${book.id}/progress`);
-			if (res.ok) {
-				savedProgress = await res.json();
-			}
-		} catch (e) {
-			console.error('Failed to fetch progress:', e);
-		}
-	}
-
 	async function startSession() {
-		try {
-			const res = await fetch(`/api/books/${book.id}/sessions`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ reader_type: 'speed' })
-			});
-			if (res.ok) {
-				const data = await res.json();
-				currentSessionId = data.id;
-			}
-		} catch (e) {
-			console.error('Failed to start session:', e);
-		}
+		if (!book?.id || !activeFile) return;
+		progressController?.destroy();
+		progressController = new ReadingProgressController({
+			bookId: book.id,
+			file: activeFile,
+			channel: 'speed',
+			readerMode: 'speed'
+		});
+		const position = await progressController.start();
+		savedProgress = readingPositionAsLegacy(position, 'speed');
+		progressController.startPeriodicCheckpoint(() => isPlaying ? getSpeedCheckpoint(false) : null);
 	}
 
 	async function endSession(keepalive = false) {
-		if (sessionEnded || currentSessionId === null) return;
+		if (sessionEnded || !progressController) return;
 		sessionEnded = true;
-		try {
-			await fetch(`/api/books/${book.id}/sessions/${currentSessionId}`, {
-				method: 'PUT',
-				keepalive
-			});
-		} catch (e) {
-			console.error('Failed to end session:', e);
-		}
+		await progressController.end(keepalive);
 	}
 
 	async function loadText() {
 		try {
-			const res = await fetch(`/api/books/${book.id}/text${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`);
+			const res = await fetch(withReaderFile(`/api/books/${book.id}/text${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`, activeFile));
 			if (res.ok) {
 				const text = await res.text();
 				words = processText(text);
@@ -383,14 +373,25 @@
 				if (words.length === 0) {
 					loadError = 'No text was extracted for speed reading.';
 					currentIndex = 0;
-				} else if (savedProgress?.speed_reader_word_index > 0) {
+				} else if (
+					savedProgress?.speed_reader_word_index >= 0 &&
+					savedProgress?.speed_reader_word_count === words.length &&
+					savedProgress?.speed_reader_text_fingerprint === textFingerprint()
+				) {
 					loadError = '';
 					currentIndex = Math.max(0, Math.min(words.length - 1, savedProgress.speed_reader_word_index));
+				} else if (Array.isArray(savedProgress?.speed_reader_anchor_words) && savedProgress.speed_reader_anchor_words.length > 0) {
+					loadError = '';
+					const anchor = savedProgress.speed_reader_anchor_words as string[];
+					const found = words.findIndex((_, index) => anchor.every((word, offset) => words[index + offset]?.text === word));
+					currentIndex = found >= 0
+						? Math.min(words.length - 1, found + Math.min(3, anchor.length - 1))
+						: Math.max(0, Math.min(words.length - 1, Math.round((savedProgress.speed_reader_percent / 100) * Math.max(0, words.length - 1))));
 				} else if (savedProgress?.speed_reader_percent > 0) {
 					loadError = '';
 					currentIndex = Math.max(
 						0,
-						Math.min(words.length - 1, Math.floor((savedProgress.speed_reader_percent / 100) * words.length))
+						Math.min(words.length - 1, Math.round((savedProgress.speed_reader_percent / 100) * Math.max(0, words.length - 1)))
 					);
 				} else {
 					loadError = '';
@@ -404,22 +405,37 @@
 		}
 	}
 
-	async function saveProgress(keepalive = false) {
-		if (!book || words.length === 0) return;
-		const percent = (currentIndex / words.length) * 100;
-		try {
-			await fetch(`/api/books/${book.id}/speed-reader`, {
-				method: 'PUT',
-				keepalive,
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					word_index: currentIndex,
-					percent: percent
-				})
-			});
-		} catch (e) {
-			console.error('Failed to save progress:', e);
+	function textFingerprint() {
+		const sample = [...words.slice(0, 24), ...words.slice(-24)].map((word) => word.text).join('\u001f');
+		let hash = 2166136261;
+		for (let index = 0; index < sample.length; index++) {
+			hash ^= sample.charCodeAt(index);
+			hash = Math.imul(hash, 16777619);
 		}
+		return (hash >>> 0).toString(16);
+	}
+
+	function getSpeedCheckpoint(reachedEnd = false) {
+		if (words.length === 0) return null;
+		const denominator = Math.max(1, words.length - 1);
+		return {
+			readerMode: 'speed' as const,
+			percent: (currentIndex / denominator) * 100,
+			locator: {
+				type: 'word_index',
+				word_index: currentIndex,
+				word_count: words.length,
+				text_fingerprint: textFingerprint(),
+				anchor_words: words.slice(Math.max(0, currentIndex - 3), currentIndex + 4).map((word) => word.text)
+			},
+			reachedEnd
+		};
+	}
+
+	async function saveProgress(_keepalive = false, reachedEnd = false) {
+		const checkpoint = getSpeedCheckpoint(reachedEnd);
+		if (!checkpoint || !progressController) return;
+		await progressController.checkpoint(checkpoint);
 	}
 
 	function calculateAutoSentencePause(wpm: number): number {
@@ -459,7 +475,7 @@
 				const delay = getWordDelay(words[currentIndex]);
 				intervalId = window.setTimeout(advanceWord, delay);
 			} else {
-				stop();
+				stop(true);
 			}
 		};
 
@@ -467,13 +483,13 @@
 		intervalId = window.setTimeout(advanceWord, delay);
 	}
 
-	function stop() {
+	function stop(reachedEnd = false) {
 		isPlaying = false;
 		if (intervalId) {
 			clearTimeout(intervalId);
 			intervalId = null;
 		}
-		saveProgress();
+		void saveProgress(false, reachedEnd);
 		showControlsTemporarily();
 	}
 

@@ -13,6 +13,14 @@
 	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
 	import { isBottomSystemGestureStart } from '$lib/utils/system-gesture-guard';
 	import {
+		ReadingProgressController,
+		readingPositionAsLegacy,
+		selectReaderFile,
+		withReaderFile,
+		type ReaderFile,
+		type ReaderMode
+	} from '$lib/services/reading-progress';
+	import {
 		getCachedBook,
 		cacheBook,
 		isBookCached,
@@ -38,7 +46,8 @@
 	let currentChapter = $state('');
 	let savedProgress = $state<any>(null);
 	let epubToc = $state<any[]>([]);
-	let currentSessionId = $state<number | null>(null);
+	let activeFile = $state<ReaderFile | null>(null);
+	let progressController: ReadingProgressController | null = null;
 	let appTheme = $state<FullTheme | null>(null);
 	let closeTasksStarted = false;
 	let readerReady = $state(false);
@@ -125,6 +134,7 @@
 
 	const progress = $derived(currentProgress);
 	const readerTitle = $derived(getReaderDisplayTitle(book, readerFiles, loading, bookFormat));
+	const bookCacheFormat = $derived(activeFile ? `${bookFormat}-${activeFile.id}` : bookFormat);
 	const progressPreviewLabel = $derived(
 		progressPreviewPercent !== null
 			? progressPreviewSection !== null && numChapters() > 0
@@ -170,21 +180,6 @@
 		return book?.id ? `/book/${book.id}` : '/library';
 	}
 
-	function createFetchTimeout(timeoutMs?: number) {
-		if (!timeoutMs || timeoutMs <= 0) return null;
-
-		const controller = new AbortController();
-		const timer = setTimeout(() => controller.abort(), timeoutMs);
-		return {
-			signal: controller.signal,
-			cleanup: () => clearTimeout(timer)
-		};
-	}
-
-	function isAbortError(error: unknown) {
-		return error instanceof DOMException && error.name === 'AbortError';
-	}
-
 	async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
 		const text = (await response.text().catch(() => '')).trim();
 		if (!text) return fallback;
@@ -219,6 +214,7 @@
 				bookFormat = requestedFormat && getReaderRouteKind(requestedFormat) === 'epub'
 					? requestedFormat
 					: preferredFormat || 'epub';
+				activeFile = selectReaderFile(files, bookFormat, preferredFormat ? [preferredFormat, 'epub'] : ['epub']);
 			}
 		} catch (e) {
 			console.error('Failed to load book:', e);
@@ -248,8 +244,8 @@
 	async function preloadBookContent() {
 		if (!book || !book.id) return false;
 		
-		if (isBookCached(book.id, bookFormat)) {
-			const cached = getCachedBook(book.id, bookFormat);
+		if (isBookCached(book.id, bookCacheFormat)) {
+			const cached = getCachedBook(book.id, bookCacheFormat);
 			if (cached) {
 				continuousContent = cached;
 				await tick();
@@ -266,7 +262,7 @@
 		processingMessage = 'Extracting text content...';
 		
 		try {
-			const res = await fetch(`/api/books/${book.id}/continuous?format=${encodeURIComponent(bookFormat)}`);
+			const res = await fetch(withReaderFile(`/api/books/${book.id}/continuous?format=${encodeURIComponent(bookFormat)}`, activeFile));
 			if (res.ok) {
 				const content = await res.text();
 				if (!content.trim()) {
@@ -274,7 +270,7 @@
 					return false;
 				}
 				continuousContent = content;
-				cacheBook(book.id, content, bookFormat);
+				cacheBook(book.id, content, bookCacheFormat);
 				processingMessage = 'Applying styles...';
 				await tick();
 				applyContinuousContentStyles();
@@ -295,38 +291,37 @@
 	}
 
 	async function startSession() {
-		if (!book || !book.id) return;
-		try {
-			const res = await fetch(`/api/books/${book.id}/sessions`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ reader_type: 'epub' })
-			});
-			if (res.ok) {
-				const data = await res.json();
-				currentSessionId = data.id;
-			}
-		} catch (e) {
-			console.error('Failed to start session:', e);
-		}
+		if (!book?.id || !activeFile) return;
+		const mode: ReaderMode = bookFormat === 'epub' && !settings.continuousMode ? 'epub_paginated' : 'continuous_text';
+		progressController?.destroy();
+		progressController = new ReadingProgressController({
+			bookId: book.id,
+			file: activeFile,
+			channel: 'standard',
+			readerMode: mode
+		});
+		const position = await progressController.start();
+		savedProgress = readingPositionAsLegacy(position, mode);
+		progressController.startPeriodicCheckpoint(() => {
+			if (!readerReady || isRestoringContinuousProgress || isRestoringPaginatedProgress) return null;
+			const paginated = bookFormat === 'epub' && !settings.continuousMode;
+			return {
+				readerMode: paginated ? 'epub_paginated' : 'continuous_text',
+				percent: currentProgress,
+				locator: paginated && currentLocation
+					? { type: 'epub_cfi', cfi: currentLocation }
+					: captureContinuousTextAnchor(),
+				reachedEnd: paginated
+					? !canNext && currentProgress >= 99.999
+					: !!continuousScrollEl && continuousScrollEl.scrollTop + continuousScrollEl.clientHeight >= continuousScrollEl.scrollHeight - 2
+			};
+		});
 	}
 
-	async function endSession(keepalive = false, timeoutMs = keepalive ? 3500 : 0) {
-		if (sessionEnded || currentSessionId === null || !book || !book.id) return;
+	async function endSession(keepalive = false, _timeoutMs = 0) {
+		if (sessionEnded || !progressController) return;
 		sessionEnded = true;
-		const timeout = createFetchTimeout(timeoutMs);
-		try {
-			await fetch(`/api/books/${book.id}/sessions/${currentSessionId}`, {
-				method: 'PUT',
-				keepalive,
-				signal: timeout?.signal
-			});
-		} catch (e) {
-			if (isAbortError(e)) return;
-			console.error('Failed to end session:', e);
-		} finally {
-			timeout?.cleanup();
-		}
+		await progressController.end(keepalive);
 	}
 
 	onDestroy(() => {
@@ -337,6 +332,7 @@
 		clearTopBarHideTimeout();
 		clearContinuousRestoreTimers();
 		unsubTheme();
+		progressController?.destroy();
 	});
 
 	function startCloseBackgroundTasks(defer = false) {
@@ -691,7 +687,7 @@
 
 	async function loadOriginalStyles() {
 		try {
-			const response = await fetch(`/api/books/${book.id}/continuous/styles?format=${encodeURIComponent(bookFormat)}`);
+			const response = await fetch(withReaderFile(`/api/books/${book.id}/continuous/styles?format=${encodeURIComponent(bookFormat)}`, activeFile));
 			if (response.ok) {
 				const css = await response.text();
 				const originalStyleEl = document.getElementById('original-styles');
@@ -1355,25 +1351,25 @@
 	async function ensurePaginatedBookReady() {
 		if (!browser || !book || epubInstance) return;
 
-		let bookData = getCachedProcessedEpub(book.id, bookFormat);
+		let bookData = getCachedProcessedEpub(book.id, bookCacheFormat);
 		if (!bookData) {
-			const response = await fetch(`/api/books/${book.id}/processed-file?format=${encodeURIComponent(bookFormat)}`);
+			const response = await fetch(withReaderFile(`/api/books/${book.id}/processed-file?format=${encodeURIComponent(bookFormat)}`, activeFile));
 			if (!response.ok) {
 				throw new Error(`Failed to fetch processed EPUB file: ${response.status}`);
 			}
 			bookData = await response.arrayBuffer();
-			cacheProcessedEpub(book.id, bookData, bookFormat);
+			cacheProcessedEpub(book.id, bookData, bookCacheFormat);
 		}
 
 		epubInstance = ePub(bookData);
 		await epubInstance.ready;
 
-		const cachedLocations = getCachedEpubLocations(book.id, bookFormat);
+		const cachedLocations = getCachedEpubLocations(book.id, bookCacheFormat);
 		if (cachedLocations) {
 			epubInstance.locations.load(cachedLocations);
 		} else {
 			await epubInstance.locations.generate(1200);
-			cacheEpubLocations(book.id, epubInstance.locations.save(), bookFormat);
+			cacheEpubLocations(book.id, epubInstance.locations.save(), bookCacheFormat);
 		}
 
 		epubToc = epubInstance.toc || [];
@@ -1459,17 +1455,13 @@
 	}
 
 	async function fetchProgress() {
-		try {
-			const res = await fetch(`/api/books/${book.id}/progress`);
-			if (res.ok) {
-				savedProgress = await res.json();
-				if (typeof savedProgress?.percent === 'number') {
-					setCurrentProgress(savedProgress.percent);
-					lastSavedProgress = currentProgress;
-				}
+		if (progressController) {
+			const mode: ReaderMode = bookFormat === 'epub' && !settings.continuousMode ? 'epub_paginated' : 'continuous_text';
+			savedProgress = readingPositionAsLegacy(progressController.position, mode);
+			if (typeof savedProgress?.percent === 'number') {
+				setCurrentProgress(savedProgress.percent);
+				lastSavedProgress = currentProgress;
 			}
-		} catch (e) {
-			console.error('Failed to fetch progress:', e);
 		}
 	}
 
@@ -1518,42 +1510,44 @@
 		pendingProgressCfi = undefined;
 	}
 
-	async function saveProgressNow(cfi?: string, timeoutMs = 3500) {
-		if (!book) return;
-		const timeout = createFetchTimeout(timeoutMs);
-		try {
-			const percent = currentProgress;
-			await fetch(`/api/books/${book.id}/progress`, {
-				method: 'PUT',
-				keepalive: true,
-				signal: timeout?.signal,
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					cfi: cfi || savedProgress?.cfi,
-					percent,
-					status: percent >= 100 ? 'finished' : 'reading'
-				})
-			});
-			lastSavedProgress = percent;
-			savedProgress = {
-				...(savedProgress || {}),
-				cfi: cfi || savedProgress?.cfi,
-				percent,
-				status: percent >= 100 ? 'finished' : 'reading'
-			};
-		} catch (e) {
-			if (isAbortError(e)) return;
-			console.error('Failed to save progress:', e);
-		} finally {
-			timeout?.cleanup();
-		}
+	async function saveProgressNow(cfi?: string, _timeoutMs = 3500) {
+		if (!book || !progressController) return;
+		const percent = currentProgress;
+		const paginated = bookFormat === 'epub' && !settings.continuousMode;
+		const mode: ReaderMode = paginated ? 'epub_paginated' : 'continuous_text';
+		const locator = paginated && cfi
+			? { type: 'epub_cfi', cfi }
+			: captureContinuousTextAnchor();
+		const reachedEnd = paginated
+			? !canNext && percent >= 99.999
+			: !!continuousScrollEl && continuousScrollEl.scrollTop + continuousScrollEl.clientHeight >= continuousScrollEl.scrollHeight - 2;
+		await progressController.checkpoint({ readerMode: mode, percent, locator, reachedEnd });
+		lastSavedProgress = percent;
+		savedProgress = readingPositionAsLegacy(progressController.position, mode);
+	}
+
+	function continuousTextBlocks(): HTMLElement[] {
+		if (!continuousScrollEl) return [];
+		return Array.from(continuousScrollEl.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6, p, li, blockquote, pre'));
+	}
+
+	function captureContinuousTextAnchor(): Record<string, unknown> {
+		if (!continuousScrollEl) return { type: 'text_percent' };
+		const containerTop = continuousScrollEl.getBoundingClientRect().top;
+		const blocks = continuousTextBlocks();
+		const index = blocks.findIndex((block) => block.getBoundingClientRect().bottom > containerTop + 12);
+		const blockIndex = index >= 0 ? index : Math.max(0, blocks.length - 1);
+		const exact = (blocks[blockIndex]?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 280);
+		return exact
+			? { type: 'text_quote', exact, block_index: blockIndex }
+			: { type: 'text_percent' };
 	}
 
 	async function loadContinuousContent() {
 		if (!book) return;
 		continuousLoading = true;
 		try {
-			const res = await fetch(`/api/books/${book.id}/continuous?format=${encodeURIComponent(bookFormat)}`);
+			const res = await fetch(withReaderFile(`/api/books/${book.id}/continuous?format=${encodeURIComponent(bookFormat)}`, activeFile));
 			if (res.ok) {
 				const content = await res.text();
 				if (!content.trim()) {
@@ -1561,7 +1555,7 @@
 					return;
 				}
 				continuousContent = content;
-				cacheBook(book.id, continuousContent, bookFormat);
+				cacheBook(book.id, continuousContent, bookCacheFormat);
 				loadContinuousToc();
 			} else {
 				error = await responseErrorMessage(res, 'Failed to load continuous content.');
@@ -1599,7 +1593,23 @@
 
 			isRestoringContinuousProgress = true;
 			continuousRestoreSuppressUntil = performance.now() + 250;
-			continuousScrollEl.scrollTop = (savedPercent / 100) * maxScroll;
+			const anchor = savedProgress?.text_anchor;
+			const blocks = continuousTextBlocks();
+			let anchored = false;
+			if (anchor?.exact && blocks.length > 0) {
+				const preferred = Number.isInteger(anchor.block_index) ? blocks[anchor.block_index] : null;
+				const target = preferred?.textContent?.replace(/\s+/g, ' ').trim().includes(anchor.exact)
+					? preferred
+					: blocks.find((block) => block.textContent?.replace(/\s+/g, ' ').trim().includes(anchor.exact));
+				if (target) {
+					const containerTop = continuousScrollEl.getBoundingClientRect().top;
+					continuousScrollEl.scrollTop += target.getBoundingClientRect().top - containerTop;
+					anchored = true;
+				}
+			}
+			if (!anchored) {
+				continuousScrollEl.scrollTop = (savedPercent / 100) * maxScroll;
+			}
 
 			requestAnimationFrame(() => {
 				lastContinuousScrollTop = continuousScrollEl?.scrollTop ?? 0;
@@ -1680,7 +1690,7 @@
 	async function loadContinuousToc() {
 		if (!book) return;
 		try {
-			const res = await fetch(`/api/books/${book.id}/continuous/toc?format=${encodeURIComponent(bookFormat)}`);
+			const res = await fetch(withReaderFile(`/api/books/${book.id}/continuous/toc?format=${encodeURIComponent(bookFormat)}`, activeFile));
 			if (res.ok) {
 				continuousToc = await res.json();
 			}
@@ -1824,7 +1834,7 @@
 		const ip = initialProcessing;
 		// Only use cache when not initial processing
 		if (cm && b && bl && !loading2 && !cc && !ip) {
-			const cached = getCachedBook(b.id, bookFormat);
+			const cached = getCachedBook(b.id, bookCacheFormat);
 			if (cached) {
 				continuousContent = cached;
 				tick().then(async () => {

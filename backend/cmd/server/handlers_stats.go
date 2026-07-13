@@ -735,21 +735,33 @@ func GetBookTextHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var files []fileResult
-	rows, err := appDB.Query(`
-		SELECT path, format FROM book_file WHERE book_id = ?
-	`, bookID)
-	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to query book files")
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var fr fileResult
-		if err := rows.Scan(&fr.Path, &fr.Format); err != nil {
-			continue
+	if strings.TrimSpace(r.URL.Query().Get("file_id")) != "" {
+		filePath, format, selectErr := selectBookFileForRequest(r, bookIDInt, requestedFormat)
+		if selectErr != nil {
+			errorResponse(w, http.StatusNotFound, "Book file not found")
+			return
 		}
-		files = append(files, fr)
+		files = append(files, fileResult{Path: filePath, Format: format})
+	}
+
+	if len(files) == 0 {
+		rows, err := appDB.Query(`
+		SELECT path, format FROM book_file WHERE book_id = ? AND missing_at IS NULL
+		ORDER BY id
+	`, bookID)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to query book files")
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var fr fileResult
+			if err := rows.Scan(&fr.Path, &fr.Format); err != nil {
+				continue
+			}
+			files = append(files, fr)
+		}
 	}
 
 	if len(files) == 0 {
@@ -822,7 +834,7 @@ func GetEpubTextHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	filePath, format, err := selectBookFileForRequest(r, bookIDInt, requestedFormat)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "EPUB file not found")
 		return

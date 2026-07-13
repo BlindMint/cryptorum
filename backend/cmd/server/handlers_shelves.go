@@ -245,7 +245,8 @@ func evaluateMagicShelfRules(rulesJSON string, sortBy string, sortDir string, us
 		       COALESCE(rp.percent, 0) as percent,
 		       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened,
 		       COALESCE(rp.updated_at, 0) as last_read_at,
-		       COALESCE(bf.format, '') as format
+		       COALESCE((SELECT resume_bf.format FROM book_file resume_bf WHERE resume_bf.id = rp.file_id AND resume_bf.missing_at IS NULL), bf.format, '') as format,
+		       COALESCE(rp.file_id, 0) as resume_file_id
 			FROM book b
 			JOIN library l ON b.library_id = l.id
 			LEFT JOIN book_metadata bm ON b.id = bm.book_id
@@ -531,7 +532,8 @@ func getShelfBooksHandler(w http.ResponseWriter, r *http.Request) {
 			       COALESCE(rp.percent, 0) as percent,
 			       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened,
 			       COALESCE(rp.updated_at, 0) as last_read_at,
-			       COALESCE(bf.format, '') as format
+			       COALESCE((SELECT resume_bf.format FROM book_file resume_bf WHERE resume_bf.id = rp.file_id AND resume_bf.missing_at IS NULL), bf.format, '') as format,
+			       COALESCE(rp.file_id, 0) as resume_file_id
 			FROM book_shelf bs
 				JOIN book b ON bs.book_id = b.id
 				JOIN library l ON b.library_id = l.id
@@ -570,13 +572,14 @@ func getShelfBooksHandler(w http.ResponseWriter, r *http.Request) {
 		Opened              bool    `json:"opened"`
 		LastReadAt          int64   `json:"last_read_at"`
 		Format              string  `json:"format"`
+		ResumeFileID        int64   `json:"resume_file_id,omitempty"`
 	}
 
 	books := []BookResponse{}
 	for rows.Next() {
 		var b BookResponse
 		var opened int
-		if err := rows.Scan(&b.ID, &b.LibraryID, &b.AddedAt, &b.Title, &b.Authors, &b.Series, &b.SeriesNumber, &b.SeriesNumberDisplay, &b.CoverPath, &b.Status, &b.Percent, &opened, &b.LastReadAt, &b.Format); err != nil {
+		if err := rows.Scan(&b.ID, &b.LibraryID, &b.AddedAt, &b.Title, &b.Authors, &b.Series, &b.SeriesNumber, &b.SeriesNumberDisplay, &b.CoverPath, &b.Status, &b.Percent, &opened, &b.LastReadAt, &b.Format, &b.ResumeFileID); err != nil {
 			continue
 		}
 		b.Opened = opened == 1

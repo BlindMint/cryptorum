@@ -96,7 +96,7 @@
 	async function loadContinueReading() {
 		continueReadingLoading = true;
 		try {
-			const res = await fetch('/api/books?status=reading&sort=last_read&sort_dir=desc&limit=12&include_total=false', { cache: 'no-store' });
+			const res = await fetch('/api/books?status=reading&standard_progress=true&sort=last_read&sort_dir=desc&limit=12&include_total=false', { cache: 'no-store' });
 			if (handleDashboardResponse(res)) {
 				const data = await res.json();
 				continueReadingBooks = data.books || [];
@@ -236,7 +236,7 @@
 	}
 
 	function getReaderUrl(book: any): string {
-		return getBookReaderHref(book.id, book.format, '/');
+		return getBookReaderHref(book.id, book.format, '/', book.resume_file_id);
 	}
 
 	function handleDashboardRowWheel(event: WheelEvent) {

@@ -6,6 +6,13 @@
 	import { readerSettings, waveformStyles, skipIntervalOptions, sleepTimerOptions, type AudioReaderSetting } from '$lib/stores/readerSettings';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
 	import { getReaderDisplayTitle } from '$lib/utils/reader-title';
+	import {
+		ReadingProgressController,
+		readingPositionAsLegacy,
+		selectReaderFile,
+		withReaderFile,
+		type ReaderFile
+	} from '$lib/services/reading-progress';
 
 	let book = $state<any>(null);
 	let readerFiles = $state<any[]>([]);
@@ -33,6 +40,8 @@
 	let sessionEnded = false;
 	let handlePageExit: (() => void) | null = null;
 	let requestedFormat = $state('');
+	let activeFile = $state<ReaderFile | null>(null);
+	let progressController: ReadingProgressController | null = null;
 	let closeTasksStarted = false;
 	const readerTitle = $derived(getReaderDisplayTitle(book, readerFiles, loading, requestedFormat));
 
@@ -69,8 +78,8 @@
 						readerFiles = await filesRes.json();
 					}
 					requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
-				await fetchProgress();
-				await startSession();
+					activeFile = selectReaderFile(readerFiles, requestedFormat, ['m4b', 'mp3', 'm4a', 'flac', 'ogg', 'opus', 'wav', 'aac']);
+					await startSession();
 			}
 		} catch (e) {
 			console.error('Failed to load book:', e);
@@ -105,33 +114,17 @@
 		}
 	}
 
-	async function fetchProgress() {
-		try {
-			const res = await fetch(`/api/books/${book.id}/progress`);
-			if (res.ok) {
-				savedProgress = await res.json();
-			}
-		} catch (e) {
-			console.error('Failed to fetch progress:', e);
-		}
-	}
-
 	async function saveProgress(keepalive = false) {
-		if (!book || !duration) return;
-		const percent = (currentTime / duration) * 100;
-		try {
-			await fetch(`/api/books/${book.id}/progress`, {
-				method: 'PUT',
-				keepalive,
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					percent: percent,
-					status: percent >= 100 ? 'finished' : 'reading'
-				})
-			});
-		} catch (e) {
-			console.error('Failed to save progress:', e);
-		}
+		if (!book || !duration || !progressController) return;
+		const exactTime = audioElement?.currentTime ?? currentTime;
+		currentTime = exactTime;
+		const reachedEnd = exactTime >= Math.max(0, duration - 0.25);
+		await progressController.checkpoint({
+			readerMode: 'audio',
+			percent: duration > 0 ? (exactTime / duration) * 100 : 0,
+			locator: { type: 'audio_time', seconds: exactTime, duration },
+			reachedEnd
+		});
 	}
 
 	function debouncedSaveProgress() {
@@ -144,33 +137,32 @@
 	}
 
 	async function startSession() {
-		if (!book || !book.id) return;
-		try {
-			const res = await fetch(`/api/books/${book.id}/sessions`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ reader_type: 'audio' })
-			});
-			if (res.ok) {
-				const data = await res.json();
-				currentSessionId = data.id;
-			}
-		} catch (e) {
-			console.error('Failed to start session:', e);
-		}
+		if (!book?.id || !activeFile) return;
+		progressController?.destroy();
+		progressController = new ReadingProgressController({
+			bookId: book.id,
+			file: activeFile,
+			channel: 'standard',
+			readerMode: 'audio'
+		});
+		const position = await progressController.start();
+		savedProgress = readingPositionAsLegacy(position, 'audio');
+		progressController.startPeriodicCheckpoint(() => {
+			if (!isPlaying || !duration) return null;
+			const seconds = audioElement?.currentTime ?? currentTime;
+			return {
+				readerMode: 'audio',
+				percent: (seconds / duration) * 100,
+				locator: { type: 'audio_time', seconds, duration },
+				reachedEnd: seconds >= Math.max(0, duration - 0.25)
+			};
+		});
 	}
 
 	async function endSession(keepalive = false) {
-		if (sessionEnded || currentSessionId === null || !book || !book.id) return;
+		if (sessionEnded || !progressController) return;
 		sessionEnded = true;
-		try {
-			await fetch(`/api/books/${book.id}/sessions/${currentSessionId}`, {
-				method: 'PUT',
-				keepalive
-			});
-		} catch (e) {
-			console.error('Failed to end session:', e);
-		}
+		await progressController.end(keepalive);
 	}
 
 	onDestroy(() => {
@@ -183,6 +175,7 @@
 		if (!closeTasksStarted) {
 			void endSession(true);
 		}
+		progressController?.destroy();
 	});
 
 	function resetControlsTimer() {
@@ -245,18 +238,36 @@
 		if (audioElement) {
 			duration = audioElement.duration;
 			setupAudioAnalysis();
-			if (savedProgress && savedProgress.percent > 0 && savedProgress.percent < 100) {
-				const resumeTime = (savedProgress.percent / 100) * duration;
+			if (savedProgress && savedProgress.percent > 0) {
+				const resumeTime = typeof savedProgress.seconds === 'number'
+					? savedProgress.seconds
+					: (savedProgress.percent / 100) * duration;
 				audioElement.currentTime = resumeTime;
+				currentTime = resumeTime;
 			}
 		}
 	}
 
 	function handleEnded() {
 		isPlaying = false;
-		saveProgress();
+		void saveProgress();
 		if (settings.autoAdvance) {
 		}
+	}
+
+	function handleAudioPlay() {
+		isPlaying = true;
+	}
+
+	function handleAudioPause() {
+		isPlaying = false;
+		void saveProgress();
+	}
+
+	function handleAudioSeeked() {
+		if (!audioElement) return;
+		currentTime = audioElement.currentTime;
+		void saveProgress();
 	}
 
 	function startCloseBackgroundTasks() {
@@ -306,7 +317,8 @@
 	function seek(e: Event) {
 		const target = e.target as HTMLInputElement;
 		if (audioElement) {
-			audioElement.currentTime = Number(target.value);
+			currentTime = Number(target.value);
+			audioElement.currentTime = currentTime;
 		}
 	}
 
@@ -320,13 +332,15 @@
 
 	function skipForward() {
 		if (audioElement) {
-			audioElement.currentTime = Math.min(audioElement.currentTime + settings.skipForward, duration);
+			currentTime = Math.min(audioElement.currentTime + settings.skipForward, duration);
+			audioElement.currentTime = currentTime;
 		}
 	}
 
 	function skipBackward() {
 		if (audioElement) {
-			audioElement.currentTime = Math.max(audioElement.currentTime - settings.skipBackward, 0);
+			currentTime = Math.max(audioElement.currentTime - settings.skipBackward, 0);
+			audioElement.currentTime = currentTime;
 		}
 	}
 
@@ -554,8 +568,11 @@
 						bind:this={audioElement}
 						ontimeupdate={handleTimeUpdate}
 						onloadedmetadata={handleLoadedMetadata}
+						onplay={handleAudioPlay}
+						onpause={handleAudioPause}
+						onseeked={handleAudioSeeked}
 						onended={handleEnded}
-						src={book?.id ? `/api/books/${book.id}/file${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}` : ''}
+						src={book?.id ? withReaderFile(`/api/books/${book.id}/file${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`, activeFile) : ''}
 					></audio>
 
 					<!-- Waveform -->

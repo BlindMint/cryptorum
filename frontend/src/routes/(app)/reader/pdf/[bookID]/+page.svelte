@@ -11,6 +11,12 @@
 	import { isBottomSystemGestureStart } from '$lib/utils/system-gesture-guard';
 	import EmbedPDFViewer from '$lib/components/EmbedPDFViewer.svelte';
 	import ReaderProgressTrack from '$lib/components/ReaderProgressTrack.svelte';
+	import {
+		ReadingProgressController,
+		readingPositionAsLegacy,
+		selectReaderFile,
+		type ReaderFile
+	} from '$lib/services/reading-progress';
 
 	let book = $state<any>(null);
 	let readerFiles = $state<any[]>([]);
@@ -19,14 +25,14 @@
 	let currentPage = $state(1);
 	let numPages = $state(0);
 	let savedProgress = $state<any>(null);
-	let currentSessionId = $state<number | null>(null);
 	let requestedFormat = $state('pdf');
+	let activeFile = $state<ReaderFile | null>(null);
+	let progressController: ReadingProgressController | null = null;
 	let embedPdfProgressReady = $state(false);
 	let embedPdfInitialPage = $state(1);
 	let embedPdfViewerReady = $state(false);
 	let embedPdfScroll: any = null;
 	let embedPdfRestoringInitialPage = false;
-	let embedPdfRestoreSettling = false;
 	let embedPdfRestoreTimers: ReturnType<typeof setTimeout>[] = [];
 	let embedPdfSidebarOpen = $state(false);
 	let pdfLoadRetryToken = $state(0);
@@ -52,13 +58,13 @@
 	let pdfProgressBarEl = $state<HTMLElement | null>(null);
 	let activeProgressPointerId: number | null = null;
 
-	const progress = $derived(numPages > 0 ? (currentPage / numPages) * 100 : 0);
+	const progress = $derived(numPages > 1 ? ((currentPage - 1) / (numPages - 1)) * 100 : 0);
 	const progressPreviewProgress = $derived(
-		progressPreviewPage !== null && numPages > 0 ? (progressPreviewPage / numPages) * 100 : null
+		progressPreviewPage !== null && numPages > 1 ? ((progressPreviewPage - 1) / (numPages - 1)) * 100 : 0
 	);
 	const progressPreviewLabel = $derived(
 		progressPreviewPage !== null && numPages > 0
-			? `Page ${progressPreviewPage} / ${numPages} • ${Math.round((progressPreviewPage / numPages) * 100)}%`
+			? `Page ${progressPreviewPage} / ${numPages} • ${Math.round(numPages > 1 ? ((progressPreviewPage - 1) / (numPages - 1)) * 100 : 0)}%`
 			: ''
 	);
 	const readerChromeReady = $derived(embedPdfViewerReady && !loading && !error);
@@ -70,7 +76,6 @@
 	const progressSaveDebounceMs = 750;
 	const embedPdfDocumentId = 'cryptorum-pdf';
 	const embedPdfRestoreDelays = [0, 120, 300, 650, 1200, 2200, 3600, 5600, 8200, 11500, 15500];
-	const embedPdfRestoreSettleDelays = [80, 250, 600, 1200, 2200, 3600];
 
 	const viewModeBgColors: Record<PdfViewMode, string> = {
 		light: '#ffffff',
@@ -85,7 +90,8 @@
 
 	function getSavedProgressPage() {
 		if (savedProgress?.page > 0) {
-			return clampPage(savedProgress.page);
+			// The renderer's document total is authoritative; metadata may be stale.
+			return clampPage(savedProgress.page, 0);
 		}
 
 		if (
@@ -93,7 +99,7 @@
 			savedProgress.percent > 0 &&
 			numPages > 0
 		) {
-			return clampPage(Math.ceil((savedProgress.percent / 100) * numPages));
+			return clampPage(Math.round((savedProgress.percent / 100) * Math.max(0, numPages - 1)) + 1);
 		}
 
 		return 1;
@@ -145,23 +151,11 @@
 		if (pdfLoadRetryToken > 0) {
 			params.set('pdf_retry', String(pdfLoadRetryToken));
 		}
+		if (activeFile) {
+			params.set('file_id', String(activeFile.id));
+		}
 		const query = params.toString();
 		return `/api/books/${book.id}/file${query ? `?${query}` : ''}`;
-	}
-
-	function createFetchTimeout(timeoutMs?: number) {
-		if (!timeoutMs || timeoutMs <= 0) return null;
-
-		const controller = new AbortController();
-		const timer = setTimeout(() => controller.abort(), timeoutMs);
-		return {
-			signal: controller.signal,
-			cleanup: () => clearTimeout(timer)
-		};
-	}
-
-	function isAbortError(error: unknown) {
-		return error instanceof DOMException && error.name === 'AbortError';
 	}
 
 	function controlsNeedToStayVisible() {
@@ -191,7 +185,6 @@
 	function clearEmbedPdfRestoreTimers() {
 		embedPdfRestoreTimers.forEach((timer) => clearTimeout(timer));
 		embedPdfRestoreTimers = [];
-		embedPdfRestoreSettling = false;
 	}
 
 	function queueProgressSave() {
@@ -343,59 +336,23 @@
 		);
 	}
 
-	function settleEmbedPdfSavedPageRestore() {
-		if (!embedPdfScroll || !embedPdfRestoringInitialPage || embedPdfRestoreSettling) return;
-
-		const targetPage = embedPdfInitialPage;
-		clearEmbedPdfRestoreTimers();
-		embedPdfRestoreSettling = true;
-
-		const attemptSettle = (isFinalAttempt = false) => {
-			if (!embedPdfScroll || !embedPdfRestoringInitialPage) return;
-			try {
-				const scopedScroll = embedPdfScroll.forDocument?.(embedPdfDocumentId);
-				scopedScroll?.scrollToPage?.({
-					pageNumber: targetPage,
-					behavior: 'instant',
-					alignY: 0
-				});
-			} catch (e) {
-				console.warn('Failed to settle restored PDF page:', e);
-			}
-
-			if (isFinalAttempt) {
-				embedPdfRestoringInitialPage = false;
-				embedPdfRestoreSettling = false;
-			}
-		};
-
-		embedPdfRestoreTimers = embedPdfRestoreSettleDelays.map((delay, index) =>
-			setTimeout(
-				() => attemptSettle(index === embedPdfRestoreSettleDelays.length - 1),
-				delay
-			)
-		);
-	}
-
-	function navigateToPage(pageNum: number, behavior: ScrollBehavior = 'smooth', save = true) {
+	function navigateToPage(pageNum: number, behavior: ScrollBehavior = 'smooth', _save = true) {
 		if (pageNum < 1 || (numPages > 0 && pageNum > numPages)) return;
-		currentPage = clampPage(pageNum);
+		const targetPage = clampPage(pageNum);
 
 		clearEmbedPdfRestoreTimers();
 		embedPdfRestoringInitialPage = false;
-		embedPdfInitialPage = currentPage;
 		try {
 			embedPdfScroll?.forDocument?.(embedPdfDocumentId)?.scrollToPage?.({
-				pageNumber: currentPage,
+				pageNumber: targetPage,
 				behavior,
 				alignY: 0
 			});
 		} catch (e) {
 			console.warn('Failed to navigate EmbedPDF page:', e);
 		}
-		if (save) {
-			void saveProgress();
-		}
+		// Progress is queued by handleEmbedPdfPageChange only after the viewport
+		// reports the requested page. Never save this optimistic command target.
 	}
 
 	function jumpToPage(pageNum: number) {
@@ -413,7 +370,7 @@
 
 		const x = clientX - rect.left;
 		const percentage = Math.max(0, Math.min(1, x / rect.width));
-		return clampPage(Math.round(percentage * numPages), numPages);
+		return clampPage(Math.round(percentage * Math.max(0, numPages - 1)) + 1, numPages);
 	}
 
 	function updateProgressDrag(clientX: number) {
@@ -630,57 +587,24 @@
 	}
 
 	async function startSession() {
-		if (!book || !book.id) return;
-		try {
-			const res = await fetch(`/api/books/${book.id}/sessions`, {
-				method: 'POST',
-				credentials: 'same-origin',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ reader_type: 'pdf' })
-			});
-			if (res.ok) {
-				const data = await res.json();
-				currentSessionId = data.id;
-			}
-		} catch (e) {
-			console.error('Failed to start session:', e);
-		}
+		if (!book?.id || !activeFile) return;
+		progressController?.destroy();
+		progressController = new ReadingProgressController({
+			bookId: book.id,
+			file: activeFile,
+			channel: 'standard',
+			readerMode: 'pdf'
+		});
+		const position = await progressController.start();
+		savedProgress = readingPositionAsLegacy(position, 'pdf');
+		if (savedProgress?.page > 0) lastSavedPage = savedProgress.page;
+		progressLoaded = true;
 	}
 
-	async function endSession(keepalive = false, timeoutMs = keepalive ? 3500 : 0) {
-		if (sessionEnded || currentSessionId === null || !book || !book.id) return;
+	async function endSession(keepalive = false, _timeoutMs = 0) {
+		if (sessionEnded || !progressController) return;
 		sessionEnded = true;
-		const timeout = createFetchTimeout(timeoutMs);
-		try {
-			await fetch(`/api/books/${book.id}/sessions/${currentSessionId}`, {
-				method: 'PUT',
-				credentials: 'same-origin',
-				keepalive,
-				signal: timeout?.signal
-			});
-		} catch (e) {
-			if (isAbortError(e)) return;
-			console.error('Failed to end session:', e);
-		} finally {
-			timeout?.cleanup();
-		}
-	}
-
-	async function fetchProgress() {
-		try {
-			const res = await fetch(`/api/books/${book.id}/progress`, {
-				credentials: 'same-origin'
-			});
-			if (res.ok) {
-				savedProgress = await res.json();
-				if (savedProgress?.page > 0) {
-					lastSavedPage = savedProgress.page;
-				}
-				progressLoaded = true;
-			}
-		} catch (e) {
-			console.error('Failed to fetch progress:', e);
-		}
+		await progressController.end(keepalive);
 	}
 
 	async function fetchPdfPageCount() {
@@ -692,7 +616,7 @@
 
 		try {
 			const res = await fetch(
-				`/api/books/${book.id}/pdf/pages${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`,
+				`/api/books/${book.id}/pdf/pages?format=${encodeURIComponent(requestedFormat)}${activeFile ? `&file_id=${activeFile.id}` : ''}`,
 				{ credentials: 'same-origin' }
 			);
 			if (!res.ok) return;
@@ -706,34 +630,18 @@
 		}
 	}
 
-	async function saveProgress(keepalive = false, timeoutMs = keepalive ? 3500 : 0) {
-		if (!book) return;
+	async function saveProgress(_keepalive = false, _timeoutMs = 0) {
+		if (!book || !progressController) return;
 		if (!progressLoaded || !embedPdfProgressReady || embedPdfRestoringInitialPage) return;
 		clearProgressSaveTimer();
-		const percent = numPages > 0 ? (currentPage / numPages) * 100 : (savedProgress?.percent ?? 0);
-		const timeout = createFetchTimeout(timeoutMs);
-		try {
-			const res = await fetch(`/api/books/${book.id}/progress`, {
-				method: 'PUT',
-				credentials: 'same-origin',
-				keepalive,
-				signal: timeout?.signal,
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					page: currentPage,
-					percent: percent,
-					status: percent >= 100 ? 'finished' : 'reading'
-				})
-			});
-			if (res.ok) {
-				lastSavedPage = currentPage;
-			}
-		} catch (e) {
-			if (isAbortError(e)) return;
-			console.error('Failed to save progress:', e);
-		} finally {
-			timeout?.cleanup();
-		}
+		const percent = numPages > 1 ? ((currentPage - 1) / (numPages - 1)) * 100 : 0;
+		await progressController.checkpoint({
+			readerMode: 'pdf',
+			percent,
+			locator: { type: 'pdf_page', page: currentPage, total_pages: numPages },
+			reachedEnd: numPages > 0 && currentPage === numPages
+		});
+		lastSavedPage = currentPage;
 	}
 
 	function handleEmbedPdfPageChange(pageNum: number, total?: number) {
@@ -757,7 +665,8 @@
 			}
 			embedPdfViewerReady = true;
 			topBarVisible = true;
-			settleEmbedPdfSavedPageRestore();
+			clearEmbedPdfRestoreTimers();
+			embedPdfRestoringInitialPage = false;
 			return;
 		}
 
@@ -786,7 +695,6 @@
 		embedPdfViewerReady = embedPdfInitialPage <= 1;
 		pdfLoadRetryAttempts = 0;
 		topBarVisible = true;
-		restoreEmbedPdfSavedPage();
 		resetTopBarBehavior();
 	}
 
@@ -827,11 +735,12 @@
 					]);
 					if (bookRes.ok) {
 						book = await bookRes.json();
-						if (filesRes.ok) {
-							readerFiles = await filesRes.json();
-						}
-						numPages = book.page_count || 0;
-						await fetchProgress();
+					if (filesRes.ok) {
+						readerFiles = await filesRes.json();
+					}
+					activeFile = selectReaderFile(readerFiles, requestedFormat, ['pdf']);
+					numPages = book.page_count || 0;
+					await startSession();
 					if (
 						numPages <= 0 &&
 						(savedProgress?.page > 0 || savedProgress?.percent > 0)
@@ -842,7 +751,6 @@
 					embedPdfInitialPage = currentPage;
 					embedPdfRestoringInitialPage = embedPdfInitialPage > 1;
 					embedPdfProgressReady = true;
-					await startSession();
 					} else {
 						error = `Failed to load book details: ${bookRes.status}`;
 					}
@@ -901,6 +809,7 @@
 		if (closeTasksStarted) return;
 		void saveProgress(true);
 		void endSession(true);
+		progressController?.destroy();
 	});
 </script>
 

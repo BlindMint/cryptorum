@@ -33,6 +33,7 @@ type SearchResult struct {
 	Opened              bool    `json:"opened"`
 	AddedAt             int64   `json:"added_at"`
 	LastReadAt          int64   `json:"last_read_at"`
+	ResumeFileID        int64   `json:"resume_file_id,omitempty"`
 }
 
 type SearchResultsPage struct {
@@ -208,7 +209,7 @@ func queryFTSBookCandidates(ftsQuery string, libraryID string, current *AppUser,
 		       COALESCE(bm.series, '') as series,
 		       COALESCE(bm.series_number, 0) as series_number,
 		       COALESCE(bm.series_number_display, '') as series_number_display,
-		       COALESCE((SELECT bf.format FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL ORDER BY bf.format ASC LIMIT 1), '') as format,
+		       COALESCE((SELECT resume_bf.format FROM book_file resume_bf WHERE resume_bf.id = rp.file_id AND resume_bf.missing_at IS NULL), (SELECT bf.format FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL ORDER BY bf.format ASC LIMIT 1), '') as format,
 		       `+activeFileSearchTextSQL+` as file_path,
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(rp.status, 'unread') as status,
@@ -216,6 +217,7 @@ func queryFTSBookCandidates(ftsQuery string, libraryID string, current *AppUser,
 		       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened,
 		       b.added_at,
 		       COALESCE(rp.updated_at, 0) as last_read_at,
+		       COALESCE(rp.file_id, 0) as resume_file_id,
 		       bm25(book_fts, 5.0, 3.0, 0.5, 2.0) as rank
 		FROM book_fts
 		JOIN book_metadata bm ON bm.id = book_fts.rowid
@@ -250,6 +252,7 @@ func queryFTSBookCandidates(ftsQuery string, libraryID string, current *AppUser,
 			&candidate.result.Opened,
 			&candidate.result.AddedAt,
 			&candidate.result.LastReadAt,
+			&candidate.result.ResumeFileID,
 			&candidate.ftsRank,
 		); err != nil {
 			continue
@@ -304,14 +307,15 @@ func queryTokenLikeBookCandidates(
 		       COALESCE(bm.series, '') as series,
 		       COALESCE(bm.series_number, 0) as series_number,
 		       COALESCE(bm.series_number_display, '') as series_number_display,
-		       COALESCE((SELECT bf.format FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL ORDER BY bf.format ASC LIMIT 1), '') as format,
+		       COALESCE((SELECT resume_bf.format FROM book_file resume_bf WHERE resume_bf.id = rp.file_id AND resume_bf.missing_at IS NULL), (SELECT bf.format FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL ORDER BY bf.format ASC LIMIT 1), '') as format,
 		       `+activeFileSearchTextSQL+` as file_path,
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(rp.status, 'unread') as status,
 		       COALESCE(rp.percent, 0) as percent,
 		       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened,
 		       b.added_at,
-		       COALESCE(rp.updated_at, 0) as last_read_at
+		       COALESCE(rp.updated_at, 0) as last_read_at,
+		       COALESCE(rp.file_id, 0) as resume_file_id
 		FROM book_metadata bm
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
@@ -346,6 +350,7 @@ func queryTokenLikeBookCandidates(
 			&candidate.result.Opened,
 			&candidate.result.AddedAt,
 			&candidate.result.LastReadAt,
+			&candidate.result.ResumeFileID,
 		); err != nil {
 			continue
 		}
@@ -376,14 +381,15 @@ func queryFallbackBookCandidates(libraryID string, current *AppUser, filters Boo
 		       COALESCE(bm.series, '') as series,
 		       COALESCE(bm.series_number, 0) as series_number,
 		       COALESCE(bm.series_number_display, '') as series_number_display,
-		       COALESCE((SELECT bf.format FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL ORDER BY bf.format ASC LIMIT 1), '') as format,
+		       COALESCE((SELECT resume_bf.format FROM book_file resume_bf WHERE resume_bf.id = rp.file_id AND resume_bf.missing_at IS NULL), (SELECT bf.format FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL ORDER BY bf.format ASC LIMIT 1), '') as format,
 		       `+activeFileSearchTextSQL+` as file_path,
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(rp.status, 'unread') as status,
 		       COALESCE(rp.percent, 0) as percent,
 		       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened,
 		       b.added_at,
-		       COALESCE(rp.updated_at, 0) as last_read_at
+		       COALESCE(rp.updated_at, 0) as last_read_at,
+		       COALESCE(rp.file_id, 0) as resume_file_id
 		FROM book_metadata bm
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
@@ -416,6 +422,7 @@ func queryFallbackBookCandidates(libraryID string, current *AppUser, filters Boo
 			&candidate.result.Opened,
 			&candidate.result.AddedAt,
 			&candidate.result.LastReadAt,
+			&candidate.result.ResumeFileID,
 		); err != nil {
 			continue
 		}

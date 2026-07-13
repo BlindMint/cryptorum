@@ -36,6 +36,16 @@
 		type MetadataEditForm
 	} from '$lib/utils/metadata-edit';
 	import {
+		createMetadataDraftId,
+		getLatestMetadataDraft,
+		getMetadataDraft,
+		persistMetadataDraft,
+		prepareMetadataDraftRestore,
+		removeMetadataDraft,
+		removeMetadataDraftsForBook,
+		type MetadataDraft
+	} from '$lib/utils/metadata-draft';
+	import {
 		getBookReaderHref,
 		getFormatDisplayLabel,
 		getPreferredBookFormat,
@@ -90,6 +100,13 @@
 	let currentBookRouteId: string | null = null;
 	let bookRequestToken = 0;
 	let exitingInlineMetadataEdit = false;
+	let activeMetadataDraftId = $state<string | null>(null);
+	let recoverableMetadataDraft = $state<MetadataDraft | null>(null);
+	let metadataDraftNotice = $state('');
+	let metadataDraftWarning = $state('');
+	let metadataDraftSaveFailed = $state(false);
+	let metadataDraftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+	let activeMetadataDraftBaseline: Record<string, unknown> | null = null;
 
 	type CoverMutationResponse = {
 		cover_path?: string;
@@ -107,12 +124,50 @@
 		return unsub;
 	});
 
+	$effect(() => {
+		if (!editing || !book?.id || saving) return;
+		// Reading the payload here makes draft persistence follow every form edit.
+		getCurrentMetadataPayload();
+		if (metadataDraftSaveTimer) clearTimeout(metadataDraftSaveTimer);
+		if (!hasUnsavedMetadataChanges()) {
+			removeMetadataDraft(activeMetadataDraftId);
+			metadataDraftSaveFailed = false;
+			return;
+		}
+		metadataDraftSaveTimer = setTimeout(() => {
+			metadataDraftSaveTimer = null;
+			persistMetadataDraftNow();
+		}, 300);
+		return () => {
+			if (metadataDraftSaveTimer) {
+				clearTimeout(metadataDraftSaveTimer);
+				metadataDraftSaveTimer = null;
+			}
+		};
+	});
+
 	onMount(() => {
 		showFormatOnCover.init();
 		showProgressChipOnCover.init();
 		void updateBookTabIndicator();
+		const preserveMetadataDraft = () => {
+			if (editing) persistMetadataDraftNow();
+		};
+		const warnBeforeDiscard = (event: BeforeUnloadEvent) => {
+			preserveMetadataDraft();
+			if (!hasUnsavedMetadataChanges()) return;
+			event.preventDefault();
+			event.returnValue = '';
+		};
 		window.addEventListener('resize', updateBookTabIndicator);
-		return () => window.removeEventListener('resize', updateBookTabIndicator);
+		window.addEventListener('pagehide', preserveMetadataDraft);
+		window.addEventListener('beforeunload', warnBeforeDiscard);
+		return () => {
+			window.removeEventListener('resize', updateBookTabIndicator);
+			window.removeEventListener('pagehide', preserveMetadataDraft);
+			window.removeEventListener('beforeunload', warnBeforeDiscard);
+			if (metadataDraftSaveTimer) clearTimeout(metadataDraftSaveTimer);
+		};
 	});
 
 	function loadSelectionSession() {
@@ -150,7 +205,7 @@
 			if (bookId !== currentBookRouteId) {
 				currentBookRouteId = bookId;
 				void fetchBook({ bookId, mode: book ? 'navigate' : 'initial', resetRelated: true });
-			} else if (book && shouldOpenInlineMetadataEdit() && !editing) {
+			} else if (book && shouldOpenInlineMetadataEdit() && !editing && !exitingInlineMetadataEdit) {
 				startEditing();
 			}
 		}
@@ -378,7 +433,21 @@
 	}
 
 	function getCurrentBookDetailUrl(): string {
+		if (editing && book?.id) {
+			let returnUrl = getInlineMetadataEditUrl(Number(book.id), selectionSession, getSelectionIndex());
+			if (activeMetadataDraftId && hasUnsavedMetadataChanges()) {
+				returnUrl += `&metadata_draft=${encodeURIComponent(activeMetadataDraftId)}`;
+			}
+			return returnUrl;
+		}
 		return `${$page.url.pathname}${$page.url.search}`;
+	}
+
+	function handleReaderLaunch(event: MouseEvent) {
+		if (!editing || !hasUnsavedMetadataChanges()) return;
+		if (persistMetadataDraftNow()) return;
+		event.preventDefault();
+		saveError = 'Unable to preserve the unsaved metadata draft on this device. Save or cancel the edits before opening the reader.';
 	}
 
 	const readableFormats = $derived(getReadableFormats());
@@ -533,18 +602,115 @@
 		}
 	}
 
+	function restoreMetadataDraft(draft: MetadataDraft, automatically = false) {
+		const savedPayload = getSavedMetadataPayload();
+		const prepared = prepareMetadataDraftRestore(draft, savedPayload);
+		editForm = prepared.form;
+		authorsList = prepareAuthorRows([...draft.authors]);
+		activeMetadataDraftId = draft.id;
+		activeMetadataDraftBaseline = prepared.baselinePayload;
+		recoverableMetadataDraft = null;
+		metadataDraftSaveFailed = false;
+		metadataDraftNotice = automatically
+			? 'Unsaved metadata edits were restored after reading.'
+			: 'Unsaved metadata draft restored.';
+		metadataDraftWarning = prepared.serverChanged
+			? 'The saved metadata changed after this draft was created. Review the restored fields before applying them.'
+			: '';
+	}
+
 	function startEditing() {
 		exitingInlineMetadataEdit = false;
 		editForm = createMetadataEditForm(book);
 		authorsList = prepareAuthorRows(parseAuthors(book.authors || '[]'));
 		editing = true;
+		metadataDraftNotice = '';
+		metadataDraftWarning = '';
+		metadataDraftSaveFailed = false;
+		const requestedDraftId = $page.url.searchParams.get('metadata_draft');
+		const requestedDraft = getMetadataDraft(requestedDraftId, Number(book.id));
+		if (requestedDraft) {
+			restoreMetadataDraft(requestedDraft, true);
+			return;
+		}
+		activeMetadataDraftId = createMetadataDraftId(Number(book.id));
+		activeMetadataDraftBaseline = getSavedMetadataPayload();
+		recoverableMetadataDraft = getLatestMetadataDraft(Number(book.id));
+	}
+
+	function clearMetadataDraftContext() {
+		if (metadataDraftSaveTimer) {
+			clearTimeout(metadataDraftSaveTimer);
+			metadataDraftSaveTimer = null;
+		}
+		if (book?.id) removeMetadataDraftsForBook(Number(book.id));
+		activeMetadataDraftId = null;
+		activeMetadataDraftBaseline = null;
+		recoverableMetadataDraft = null;
+		metadataDraftNotice = '';
+		metadataDraftWarning = '';
+		metadataDraftSaveFailed = false;
 	}
 
 	function cancelEditing() {
+		clearMetadataDraftContext();
 		editing = false;
 		editForm = createMetadataEditForm(book);
 		authorsList = prepareAuthorRows(parseAuthors(book?.authors || '[]'));
 		saveError = null;
+	}
+
+	function handleCancelEditing() {
+		if (shouldOpenInlineMetadataEdit()) {
+			exitInlineMetadataEdit();
+			return;
+		}
+		cancelEditing();
+	}
+
+	function persistMetadataDraftNow(): boolean {
+		if (!editing || !book?.id) return true;
+		if (!hasUnsavedMetadataChanges()) {
+			removeMetadataDraft(activeMetadataDraftId);
+			metadataDraftSaveFailed = false;
+			return true;
+		}
+		if (!activeMetadataDraftId) {
+			activeMetadataDraftId = createMetadataDraftId(Number(book.id));
+		}
+		if (recoverableMetadataDraft && recoverableMetadataDraft.id !== activeMetadataDraftId) {
+			removeMetadataDraft(recoverableMetadataDraft.id);
+			recoverableMetadataDraft = null;
+		}
+		const draft = persistMetadataDraft({
+			id: activeMetadataDraftId,
+			bookId: Number(book.id),
+			form: editForm,
+			authors: authorsList,
+			baselinePayload: activeMetadataDraftBaseline || getSavedMetadataPayload()
+		});
+		metadataDraftSaveFailed = !draft;
+		return !!draft;
+	}
+
+	function restoreRecoverableMetadataDraft() {
+		if (!recoverableMetadataDraft) return;
+		restoreMetadataDraft(recoverableMetadataDraft);
+	}
+
+	function discardRecoverableMetadataDraft() {
+		if (!recoverableMetadataDraft) return;
+		removeMetadataDraft(recoverableMetadataDraft.id);
+		recoverableMetadataDraft = null;
+		metadataDraftNotice = 'Unsaved metadata draft discarded.';
+		metadataDraftWarning = '';
+	}
+
+	function formatMetadataDraftTime(updatedAt: number): string {
+		return new Intl.DateTimeFormat(undefined, {
+			dateStyle: 'medium',
+			timeStyle: 'short'
+		}).format(new Date(updatedAt));
 	}
 
 	async function refreshAfterMetadataApply() {
@@ -656,6 +822,7 @@
 		const targetUrl = editing
 			? getInlineMetadataEditUrl(nextBookId, selectionSession, resolvedIndex)
 			: getBookDetailContextUrl(nextBookId, selectionSession, resolvedIndex);
+		if (editing) clearMetadataDraftContext();
 		goto(targetUrl);
 	}
 
@@ -806,6 +973,7 @@
 			});
 
 			if (res.ok) {
+				clearMetadataDraftContext();
 				await fetchBook({ mode: 'quiet', resetRelated: false });
 				editing = stayEditing && !exitingInlineMetadataEdit;
 				if (editing) {
@@ -1059,7 +1227,7 @@
 							<div class="flex flex-wrap justify-end gap-2">
 								{#if editing}
 									<button
-										onclick={cancelEditing}
+										onclick={handleCancelEditing}
 										disabled={saving}
 										class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:opacity-50"
 									>
@@ -1096,6 +1264,44 @@
 							{/if}
 						</div>
 					</div>
+					{#if editing && recoverableMetadataDraft}
+						<div class="mt-5 flex flex-col gap-3 rounded-xl border border-[var(--color-primary-500)]/35 bg-[var(--color-primary-500)]/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+							<div class="min-w-0">
+								<p class="text-sm font-semibold text-[var(--color-surface-text)]">Unsaved metadata draft available</p>
+								<p class="mt-0.5 text-xs text-[var(--color-surface-text-muted)]">
+									Last updated {formatMetadataDraftTime(recoverableMetadataDraft.updatedAt)} on this device.
+								</p>
+							</div>
+							<div class="flex flex-shrink-0 gap-2">
+								<button
+									type="button"
+									onclick={discardRecoverableMetadataDraft}
+									class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-xs font-medium text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-600)] hover:text-[var(--color-surface-text)]"
+								>
+									Discard
+								</button>
+								<button
+									type="button"
+									onclick={restoreRecoverableMetadataDraft}
+									class="accent-action rounded-lg px-3 py-2 text-xs font-semibold transition-colors"
+								>
+									Restore draft
+								</button>
+							</div>
+						</div>
+					{:else if editing && (metadataDraftNotice || metadataDraftWarning || metadataDraftSaveFailed)}
+						<div
+							class="mt-5 rounded-xl border px-4 py-3 {metadataDraftSaveFailed ? 'border-red-500/35 bg-red-500/10' : metadataDraftWarning ? 'border-amber-500/35 bg-amber-500/10' : 'border-[var(--color-primary-500)]/30 bg-[var(--color-primary-500)]/8'}"
+							aria-live="polite"
+						>
+							{#if metadataDraftSaveFailed}
+								<p class="text-sm font-medium text-red-300">This device could not preserve the unsaved metadata draft. Save or cancel before leaving this page.</p>
+							{:else}
+								{#if metadataDraftNotice}<p class="text-sm font-medium text-[var(--color-surface-text)]">{metadataDraftNotice}</p>{/if}
+								{#if metadataDraftWarning}<p class="mt-1 text-xs text-amber-200">{metadataDraftWarning}</p>{/if}
+							{/if}
+						</div>
+					{/if}
 
 					<div class="mt-7 flex flex-col gap-6 md:flex-row md:items-start md:gap-8">
 					<div class="w-full max-w-[13rem] mx-auto md:mx-0 flex-shrink-0 flex flex-col">
@@ -1205,26 +1411,16 @@
 
 					<div class="mt-3 mb-4 md:mb-0 flex flex-col gap-2">
 						<div class="relative">
-							<div class="flex w-full overflow-hidden rounded-lg {primaryReadFormat && !editing ? 'read-action-control' : ''}">
+							<div class="flex w-full overflow-hidden rounded-lg {primaryReadFormat ? 'read-action-control' : ''}">
 								{#if primaryReadFormat}
-									{#if editing}
-										<button
-											type="button"
-											disabled
-											class="flex min-w-0 flex-1 cursor-not-allowed items-center justify-between gap-3 bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text-muted)] opacity-70 sm:px-4"
-										>
-											<span class="truncate">{getPrimaryReadActionLabel()}</span>
-											<span class="text-[10px] uppercase tracking-[0.14em]">{getFormatDisplayLabel(primaryReadFormat)}</span>
-										</button>
-										{:else}
-											<a
-												href={getBookReaderHref(book.id, primaryReadFormat, getCurrentBookDetailUrl())}
+									<a
+									href={getBookReaderHref(book.id, book.resume_format || primaryReadFormat, getCurrentBookDetailUrl(), book.resume_file_id)}
+										onclick={handleReaderLaunch}
 												class="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2 text-sm font-medium transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
 										>
 											<span class="truncate">{getPrimaryReadActionLabel()}</span>
 											<span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-primary-300)]">{getFormatDisplayLabel(primaryReadFormat)}</span>
 										</a>
-								{/if}
 								{:else}
 									<button
 										type="button"
@@ -1239,8 +1435,7 @@
 									<button
 										type="button"
 										onclick={() => formatMenuOpen = !formatMenuOpen}
-										disabled={editing}
-										class="read-action-format-toggle inline-flex items-center justify-center px-3 transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:bg-[var(--color-surface-700)] disabled:text-[var(--color-surface-text-muted)]"
+										class="read-action-format-toggle inline-flex items-center justify-center px-3 transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 										aria-label="Choose reader format"
 										aria-expanded={formatMenuOpen}
 									>
@@ -1255,12 +1450,15 @@
 									Retry reader check
 								</button>
 							{/if}
-							{#if formatMenuOpen && readableFormats.length > 1 && !editing}
+							{#if formatMenuOpen && readableFormats.length > 1}
 								<div class="absolute right-0 top-full z-20 mt-2 w-56 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-800)] shadow-lg">
 									{#each readableFormats.filter((format) => format !== primaryReadFormat) as format}
 										<a
 											href={getBookReaderHref(book.id, format, getCurrentBookDetailUrl())}
-											onclick={() => formatMenuOpen = false}
+											onclick={(event) => {
+												formatMenuOpen = false;
+												handleReaderLaunch(event);
+											}}
 											class="flex items-center justify-between px-3 py-2 text-sm text-[var(--color-surface-text)] transition-colors duration-200 hover:bg-[var(--color-surface-700)]"
 										>
 											<span>{getFormatDisplayLabel(format)}</span>
@@ -1273,20 +1471,9 @@
 							{/if}
 						</div>
 							{#if primarySpeedReadFormat}
-									{#if editing}
-										<button
-											type="button"
-											disabled
-											class="flex w-full cursor-not-allowed items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text-muted)] opacity-70 sm:px-4"
-										>
-											<svg class="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-											</svg>
-											Speed Read
-										</button>
-									{:else}
-										<a
-											href={getSpeedReaderHref(book.id, primarySpeedReadFormat, getCurrentBookDetailUrl())}
+									<a
+											href={getSpeedReaderHref(book.id, book.speed_reader_format || primarySpeedReadFormat, getCurrentBookDetailUrl(), book.speed_reader_file_id)}
+											onclick={handleReaderLaunch}
 											class="group flex w-full items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
 										>
 											<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-primary-300)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1294,7 +1481,6 @@
 											</svg>
 											Speed Read
 										</a>
-									{/if}
 								{/if}
 								<button
 									type="button"
@@ -1781,7 +1967,7 @@
 												</a>
 												{#if progressChipOnCover && bookHasCoverProgress(similar)}
 													<BookCoverProgressChip
-														href={getBookReaderHref(similar.id, similar.format, getCurrentBookDetailUrl())}
+												href={getBookReaderHref(similar.id, similar.format, getCurrentBookDetailUrl(), similar.resume_file_id)}
 														percent={similar.percent}
 														title={similar.title}
 														format={similar.format}

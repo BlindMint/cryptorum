@@ -9,6 +9,13 @@
 	import { getReaderDisplayTitle } from '$lib/utils/reader-title';
 	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
 	import { isBottomSystemGestureStart } from '$lib/utils/system-gesture-guard';
+	import {
+		ReadingProgressController,
+		readingPositionAsLegacy,
+		selectReaderFile,
+		withReaderFile,
+		type ReaderFile
+	} from '$lib/services/reading-progress';
 
 	let book = $state<any>(null);
 	let readerFiles = $state<any[]>([]);
@@ -17,7 +24,6 @@
 	let currentPage = $state(1);
 	let currentSpreadPages = $state<[number, number] | null>(null);
 	let savedProgress = $state<any>(null);
-	let currentSessionId = $state<number | null>(null);
 
 	let settings = $state<CbxReaderSetting>({
 		pageSpread: 'off',
@@ -46,11 +52,11 @@
 	let progressBarEl = $state<HTMLElement | null>(null);
 	let activeProgressPointerId: number | null = null;
 	const progressPreviewProgress = $derived(
-		progressPreviewPage !== null && numPages > 0 ? (progressPreviewPage / numPages) * 100 : null
+		progressPreviewPage !== null && numPages > 1 ? ((progressPreviewPage - 1) / (numPages - 1)) * 100 : 0
 	);
 	const progressPreviewLabel = $derived(
 		progressPreviewPage !== null && numPages > 0
-			? `Page ${progressPreviewPage} / ${numPages} • ${Math.round((progressPreviewPage / numPages) * 100)}%`
+			? `Page ${progressPreviewPage} / ${numPages} • ${Math.round(numPages > 1 ? ((progressPreviewPage - 1) / (numPages - 1)) * 100 : 0)}%`
 			: ''
 	);
 	let lastWheelNavigationAt = 0;
@@ -60,6 +66,8 @@
 	let sessionEnded = false;
 	let handlePageExit: (() => void) | null = null;
 	let requestedFormat = $state('');
+	let activeFile = $state<ReaderFile | null>(null);
+	let progressController: ReadingProgressController | null = null;
 	let topBarVisible = $state(true);
 	let stripScrollEl = $state<HTMLDivElement | null>(null);
 	let stripProgressSaveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -78,7 +86,7 @@
 	const TOP_BAR_REVEAL_EDGE_PX = 72;
 	const STRIP_PADDING_PX = 16;
 
-	const progress = $derived(numPages > 0 ? (currentPage / numPages) * 100 : 0);
+	const progress = $derived(numPages > 1 ? ((currentPage - 1) / (numPages - 1)) * 100 : 0);
 	const readerTitle = $derived(getReaderDisplayTitle(book, readerFiles, loading, requestedFormat));
 
 	async function loadComic(bookId: string, formatParam: string | null) {
@@ -87,9 +95,11 @@
 		if (loadedComicKey === nextKey && book) return;
 
 		const loadToken = ++activeComicLoadToken;
-		if (book && currentSessionId !== null && !sessionEnded) {
+		if (book && progressController && !sessionEnded) {
 			await endSession();
 		}
+		progressController?.destroy();
+		progressController = null;
 
 		loadedComicKey = nextKey;
 		loading = true;
@@ -101,7 +111,6 @@
 		pendingProgressPage = null;
 		leftSidebarOpen = false;
 		rightSidebarOpen = false;
-			currentSessionId = null;
 			sessionEnded = false;
 			closeTasksStarted = false;
 			requestedFormat = nextFormat;
@@ -118,10 +127,10 @@
 					if (filesRes.ok) {
 						readerFiles = await filesRes.json();
 					}
-					await fetchProgress();
+					activeFile = selectReaderFile(readerFiles, requestedFormat, ['cbz', 'cbr', 'cb7', 'cbt']);
 				if (loadToken !== activeComicLoadToken) return;
 				await startSession();
-				const pagesRes = await fetch(`/api/cbx/${bookId}/pages${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`);
+				const pagesRes = await fetch(withReaderFile(`/api/cbx/${bookId}/pages${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`, activeFile));
 				if (loadToken !== activeComicLoadToken) return;
 				if (pagesRes.ok) {
 					const data = await pagesRes.json();
@@ -129,7 +138,7 @@
 					if (savedProgress && savedProgress.page > 0) {
 						currentPage = Math.max(1, Math.min(numPages, savedProgress.page));
 					} else if (savedProgress?.percent > 0 && numPages > 0) {
-						currentPage = Math.max(1, Math.min(numPages, Math.ceil((savedProgress.percent / 100) * numPages)));
+						currentPage = Math.max(1, Math.min(numPages, Math.round((savedProgress.percent / 100) * Math.max(0, numPages - 1)) + 1));
 					}
 					updateSpreadPages();
 					await tick();
@@ -206,34 +215,15 @@
 		});
 	});
 
-	async function fetchProgress() {
-		try {
-			const res = await fetch(`/api/books/${book.id}/progress`);
-			if (res.ok) {
-				savedProgress = await res.json();
-			}
-		} catch (e) {
-			console.error('Failed to fetch progress:', e);
-		}
-	}
-
-	async function saveProgress(keepalive = false) {
-		if (!book) return;
-		const percent = numPages > 0 ? (currentPage / numPages) * 100 : 0;
-		try {
-			await fetch(`/api/books/${book.id}/progress`, {
-				method: 'PUT',
-				keepalive,
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					page: currentPage,
-					percent: percent,
-					status: percent >= 100 ? 'finished' : 'reading'
-				})
-			});
-		} catch (e) {
-			console.error('Failed to save progress:', e);
-		}
+	async function saveProgress(_keepalive = false) {
+		if (!book || !progressController) return;
+		const percent = numPages > 1 ? ((currentPage - 1) / (numPages - 1)) * 100 : 0;
+		await progressController.checkpoint({
+			readerMode: 'comic',
+			percent,
+			locator: { type: 'comic_page', page: currentPage, total_pages: numPages },
+			reachedEnd: numPages > 0 && currentPage === numPages
+		});
 	}
 
 	function updateSpreadPages() {
@@ -249,33 +239,21 @@
 	}
 
 	async function startSession() {
-		if (!book || !book.id) return;
-		try {
-			const res = await fetch(`/api/books/${book.id}/sessions`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ reader_type: 'comic' })
-			});
-			if (res.ok) {
-				const data = await res.json();
-				currentSessionId = data.id;
-			}
-		} catch (e) {
-			console.error('Failed to start session:', e);
-		}
+		if (!book?.id || !activeFile) return;
+		progressController = new ReadingProgressController({
+			bookId: book.id,
+			file: activeFile,
+			channel: 'standard',
+			readerMode: 'comic'
+		});
+		const position = await progressController.start();
+		savedProgress = readingPositionAsLegacy(position, 'comic');
 	}
 
 	async function endSession(keepalive = false) {
-		if (sessionEnded || currentSessionId === null || !book || !book.id) return;
+		if (sessionEnded || !progressController) return;
 		sessionEnded = true;
-		try {
-			await fetch(`/api/books/${book.id}/sessions/${currentSessionId}`, {
-				method: 'PUT',
-				keepalive
-			});
-		} catch (e) {
-			console.error('Failed to end session:', e);
-		}
+		await progressController.end(keepalive);
 	}
 
 	function clearTopBarHideTimeout() {
@@ -494,6 +472,7 @@
 		if (!closeTasksStarted) {
 			void endSession(true);
 		}
+		progressController?.destroy();
 	});
 
 	function updateSetting(key: string, value: any) {
@@ -836,7 +815,7 @@
 	}
 
 	function getPageUrl(pageNum: number): string {
-		return `/api/cbx/${book.id}/page/${pageNum}${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`;
+		return withReaderFile(`/api/cbx/${book.id}/page/${pageNum}${requestedFormat ? `?format=${encodeURIComponent(requestedFormat)}` : ''}`, activeFile);
 	}
 
 	function getPageImageClass() {
@@ -942,7 +921,7 @@
 			visible={topBarVisible}
 			variant="top"
 			ariaLabel="Reading progress"
-			ariaValueNow={numPages > 0 ? Math.round((currentPage / numPages) * 100) : 0}
+			ariaValueNow={Math.round(progress)}
 		/>
 	</header>
 

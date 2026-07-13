@@ -26,6 +26,7 @@ type dashboardBookResponse struct {
 	Opened         bool    `json:"opened"`
 	LastReadAt     int64   `json:"last_read_at"`
 	Format         string  `json:"format"`
+	ResumeFileID   int64   `json:"resume_file_id,omitempty"`
 }
 
 type dashboardBooksResponse struct {
@@ -161,7 +162,8 @@ func appendDiscoverBooks(books *[]dashboardBookResponse, seenBookIDs map[int64]b
 		       COALESCE(rp.percent, 0) as percent,
 		       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened,
 		       COALESCE(rp.updated_at, 0) as last_read_at,
-		       COALESCE(bf.format, '') as format` + baseFrom + whereClause + `
+		       COALESCE((SELECT resume_bf.format FROM book_file resume_bf WHERE resume_bf.id = rp.file_id AND resume_bf.missing_at IS NULL), bf.format, '') as format,
+		       COALESCE(rp.file_id, 0) as resume_file_id` + baseFrom + whereClause + `
 		ORDER BY b.id ASC
 		LIMIT ?`
 	args = append(args, limit)
@@ -175,7 +177,7 @@ func appendDiscoverBooks(books *[]dashboardBookResponse, seenBookIDs map[int64]b
 	for rows.Next() {
 		var book dashboardBookResponse
 		var opened int
-		if err := rows.Scan(&book.ID, &book.LibraryID, &book.AddedAt, &book.Title, &book.Authors, &book.CoverPath, &book.CoverUpdatedOn, &book.Status, &book.Percent, &opened, &book.LastReadAt, &book.Format); err != nil {
+		if err := rows.Scan(&book.ID, &book.LibraryID, &book.AddedAt, &book.Title, &book.Authors, &book.CoverPath, &book.CoverUpdatedOn, &book.Status, &book.Percent, &opened, &book.LastReadAt, &book.Format, &book.ResumeFileID); err != nil {
 			return err
 		}
 		if seenBookIDs[book.ID] {
