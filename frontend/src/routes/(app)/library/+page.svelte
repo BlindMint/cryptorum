@@ -997,7 +997,7 @@
     }
 
 	function getReaderUrl(book: any): string {
-		return getBookReaderHref(book.id, book.format, '/library');
+		return getBookReaderHref(book.id, book.format, '/library', book.resume_file_id);
 	}
 
     function handleBookKeydown(event: KeyboardEvent) {

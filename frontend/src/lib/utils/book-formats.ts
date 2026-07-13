@@ -45,7 +45,8 @@ function appendReturnTo(href: string, returnTo?: string | null): string {
 export function getBookReaderHref(
 	bookId: number | string,
 	format: string | null | undefined,
-	returnTo?: string | null
+	returnTo?: string | null,
+	fileId?: number | string | null
 ): string {
 	const normalized = normalizeBookFormat(format);
 	const routeKind = getReaderRouteKind(normalized);
@@ -67,13 +68,18 @@ export function getBookReaderHref(
 		default:
 			href = `/reader/epub/${bookId}`;
 	}
+	if (fileId) {
+		const separator = href.includes('?') ? '&' : '?';
+		href = `${href}${separator}file_id=${encodeURIComponent(fileId)}`;
+	}
 	return appendReturnTo(href, returnTo);
 }
 
 export function getSpeedReaderHref(
 	bookId: number | string,
 	format: string | null | undefined,
-	returnTo?: string | null
+	returnTo?: string | null,
+	fileId?: number | string | null
 ): string {
 	const normalized = normalizeBookFormat(format);
 	let href: string;
@@ -81,6 +87,10 @@ export function getSpeedReaderHref(
 		href = `/reader/speed/${bookId}?format=${encodeURIComponent(normalized)}`;
 	} else {
 		href = `/reader/speed/${bookId}`;
+	}
+	if (fileId) {
+		const separator = href.includes('?') ? '&' : '?';
+		href = `${href}${separator}file_id=${encodeURIComponent(fileId)}`;
 	}
 	return appendReturnTo(href, returnTo);
 }

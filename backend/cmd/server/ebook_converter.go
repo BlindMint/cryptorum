@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -126,10 +127,14 @@ func isSupportedTextBookFormat(format string) bool {
 	return supportedTextBookFormats[strings.ToLower(format)]
 }
 
-func getTextBookCachePaths(bookID, format string) textBookCachePaths {
+func getTextBookCachePaths(bookID, format, sourcePath string) textBookCachePaths {
 	cacheKey := strings.TrimSpace(bookID)
 	if normalized := normalizeBookFormatKey(format); normalized != "" {
 		cacheKey = cacheKey + "-" + normalized
+	}
+	if sourcePath != "" {
+		digest := sha256.Sum256([]byte(filepath.Clean(sourcePath)))
+		cacheKey = fmt.Sprintf("%s-%x", cacheKey, digest[:6])
 	}
 	baseDir := filepath.Join(appConfig.GetBookCachePath(), cacheKey)
 	return textBookCachePaths{
@@ -154,7 +159,7 @@ func normalizeBookFormatKey(format string) string {
 }
 
 func ensureProcessedTextBook(bookID, filePath, format string) (*ConversionResult, error) {
-	paths := getTextBookCachePaths(bookID, format)
+	paths := getTextBookCachePaths(bookID, format, filePath)
 
 	if isProcessedTextBookCacheValid(paths, filePath) {
 		result, err := loadProcessedTextBook(paths)

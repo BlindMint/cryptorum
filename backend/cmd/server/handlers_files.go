@@ -513,7 +513,7 @@ func selectBookFileByFormat(bookID int64, preferredFormat string) (string, strin
 	rows, err := appDB.Query(`
 		SELECT path, format
 		FROM book_file
-		WHERE book_id = ?
+		WHERE book_id = ? AND missing_at IS NULL
 		ORDER BY id
 	`, bookID)
 	if err != nil {
@@ -548,6 +548,26 @@ func selectBookFileByFormat(bookID int64, preferredFormat string) (string, strin
 	return fallbackPath, fallbackFormat, nil
 }
 
+// selectBookFileForRequest prefers an exact active file_id. The format fallback
+// remains for old links, while new readers cannot drift between duplicate files.
+func selectBookFileForRequest(r *http.Request, bookID int64, preferredFormat string) (string, string, error) {
+	fileIDValue := strings.TrimSpace(r.URL.Query().Get("file_id"))
+	if fileIDValue == "" {
+		return selectBookFileByFormat(bookID, preferredFormat)
+	}
+	fileID, err := strconv.ParseInt(fileIDValue, 10, 64)
+	if err != nil || fileID <= 0 {
+		return "", "", sql.ErrNoRows
+	}
+	var filePath, format string
+	err = appDB.QueryRow(`
+		SELECT path, format
+		FROM book_file
+		WHERE id = ? AND book_id = ? AND missing_at IS NULL
+	`, fileID, bookID).Scan(&filePath, &format)
+	return filePath, format, err
+}
+
 // ServeBookFileHandler serves the raw book file for download
 func ServeBookFileHandler(w http.ResponseWriter, r *http.Request) {
 	bookID := chi.URLParam(r, "bookID")
@@ -568,7 +588,7 @@ func ServeBookFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	filePath, format, err := selectBookFileForRequest(r, bookIDInt, requestedFormat)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Book file not found")
 		return
@@ -870,11 +890,11 @@ func ServeCbxPageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	filePath, format, err := selectBookFileForRequest(r, bookIDInt, requestedFormat)
 	if err != nil || (requestedFormat == "" && format != "cbz" && format != "cbr" && format != "cb7") {
 		err = appDB.QueryRow(`
 			SELECT path, format FROM book_file
-			WHERE book_id = ? AND format IN ('cbz', 'cbr', 'cb7')
+			WHERE book_id = ? AND missing_at IS NULL AND format IN ('cbz', 'cbr', 'cb7')
 			ORDER BY id
 			LIMIT 1
 		`, bookIDInt).Scan(&filePath, &format)
@@ -1266,7 +1286,7 @@ func ServeContinuousBookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	filePath, format, err := selectBookFileForRequest(r, bookIDInt, requestedFormat)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Book file not found")
 		return
@@ -1299,7 +1319,24 @@ func ServeContinuousBookHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Write([]byte(htmlContent))
+	w.Write([]byte(appendContinuousFileID(htmlContent, bookID, r.URL.Query().Get("file_id"))))
+}
+
+func appendContinuousFileID(content, bookID, fileID string) string {
+	if strings.TrimSpace(fileID) == "" {
+		return content
+	}
+	if parsed, err := strconv.ParseInt(fileID, 10, 64); err != nil || parsed <= 0 {
+		return content
+	}
+	prefix := regexp.QuoteMeta("/api/books/" + bookID + "/continuous/media/")
+	assetURL := regexp.MustCompile(prefix + `[^"'\s)]+`)
+	return assetURL.ReplaceAllStringFunc(content, func(value string) string {
+		if strings.Contains(value, "?") {
+			return value + "&file_id=" + fileID
+		}
+		return value + "?file_id=" + fileID
+	})
 }
 
 // getOrConvertBook returns cached HTML or builds the canonical processed package.
@@ -1333,7 +1370,7 @@ func ServeContinuousMediaHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	filePath, format, err := selectBookFileForRequest(r, bookIDInt, requestedFormat)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Book file not found")
 		return
@@ -1354,7 +1391,7 @@ func ServeContinuousMediaHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	paths := getTextBookCachePaths(bookID, format)
+	paths := getTextBookCachePaths(bookID, format, filePath)
 	explodedPath := filepath.Join(paths.ExplodedDir, filepath.FromSlash(mediaPath))
 
 	// Security: prevent path traversal
@@ -1396,7 +1433,7 @@ func ServeContinuousTocHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	filePath, format, err := selectBookFileForRequest(r, bookIDInt, requestedFormat)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Book file not found")
 		return
@@ -1412,7 +1449,7 @@ func ServeContinuousTocHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Failed to convert book %s for TOC: %v\n", bookID, err)
 			toc = []TocItem{}
 		} else {
-			tocCachePath := getTextBookCachePaths(bookID, format).TocCachePath
+			tocCachePath := getTextBookCachePaths(bookID, format, filePath).TocCachePath
 			if data, err := os.ReadFile(tocCachePath); err == nil {
 				json.Unmarshal(data, &toc)
 			} else {
@@ -1519,7 +1556,7 @@ func ServeContinuousStylesHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusForbidden, "Permission denied")
 		return
 	}
-	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	filePath, format, err := selectBookFileForRequest(r, bookIDInt, requestedFormat)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Book file not found")
 		return
@@ -1535,7 +1572,7 @@ func ServeContinuousStylesHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusInternalServerError, "Failed to process book: "+err.Error())
 		return
 	}
-	cssPath := getTextBookCachePaths(bookID, format).CSSCachePath
+	cssPath := getTextBookCachePaths(bookID, format, filePath).CSSCachePath
 	if _, err := os.Stat(cssPath); os.IsNotExist(err) {
 		w.Header().Set("Content-Type", "text/css")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'")
@@ -1549,7 +1586,12 @@ func ServeContinuousStylesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data: blob:; font-src 'self' data:; script-src 'none'; object-src 'none'; base-uri 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	http.ServeFile(w, r, cssPath)
+	css, err := os.ReadFile(cssPath)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to read preserved styles")
+		return
+	}
+	w.Write([]byte(appendContinuousFileID(string(css), bookID, r.URL.Query().Get("file_id"))))
 }
 
 // ServeProcessedBookFileHandler serves the canonical processed EPUB for text readers.
@@ -1572,7 +1614,7 @@ func ServeProcessedBookFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath, format, err := selectBookFileByFormat(bookIDInt, requestedFormat)
+	filePath, format, err := selectBookFileForRequest(r, bookIDInt, requestedFormat)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Book file not found")
 		return

@@ -645,7 +645,7 @@
 	}
 
 	function getReaderUrl(book: any): string {
-		return getBookReaderHref(book.id, book.format, '/search');
+		return getBookReaderHref(book.id, book.format, '/search', book.resume_file_id);
 	}
 
 	function statusDot(status: string) {

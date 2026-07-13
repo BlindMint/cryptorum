@@ -86,24 +86,6 @@ type ReadingSession struct {
 	EndedAt    *int64 `json:"ended_at,omitempty"`
 }
 
-type readingProgressExecutor interface {
-	Exec(query string, args ...any) (sql.Result, error)
-}
-
-func touchReadingProgressForSession(exec readingProgressExecutor, bookID, ownerUserID, updatedAt int64) error {
-	_, err := exec.Exec(`
-		INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
-			VALUES (?, 'reading', 0, ?, ?)
-			ON CONFLICT(book_id, owner_user_id) DO UPDATE SET
-				updated_at = excluded.updated_at,
-				status = CASE
-					WHEN reading_progress.status = 'finished' THEN reading_progress.status
-					ELSE 'reading'
-				END
-		`, bookID, updatedAt, ownerUserID)
-	return err
-}
-
 func closeStaleReadingSessions(cutoff int64) (int64, error) {
 	if cutoff <= 0 {
 		return 0, nil
@@ -261,6 +243,16 @@ func UpdateReadingProgressHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusForbidden, "Permission denied")
 		return
 	}
+	var hasVersionedPosition int
+	if err := appDB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 FROM reading_position
+			WHERE book_id = ? AND owner_user_id = ? AND channel = 'standard'
+		)
+	`, bookIDInt, current.ID).Scan(&hasVersionedPosition); err == nil && hasVersionedPosition != 0 {
+		jsonResponse(w, http.StatusConflict, map[string]string{"error": "client_upgrade_required", "reason": "client_upgrade_required"})
+		return
+	}
 
 	var req UpdateReadingProgressRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -298,6 +290,10 @@ func UpdateReadingProgressHandler(w http.ResponseWriter, r *http.Request) {
 	status := existing.Status
 	if strings.TrimSpace(req.Status) != "" {
 		status = req.Status
+	}
+	// A renderer checkpoint must not undo a manual or verified Finished state.
+	if existing.Status == "finished" && status == "reading" {
+		status = "finished"
 	}
 	if strings.TrimSpace(status) == "" || status == "unread" && (percent > 0 || page > 0 || cfi != "") {
 		status = "reading"
@@ -354,6 +350,16 @@ func UpdateSpeedReaderProgressHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if !allowed {
 		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+	var hasVersionedPosition int
+	if err := appDB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 FROM reading_position
+			WHERE book_id = ? AND owner_user_id = ? AND channel = 'speed'
+		)
+	`, bookIDInt, current.ID).Scan(&hasVersionedPosition); err == nil && hasVersionedPosition != 0 {
+		jsonResponse(w, http.StatusConflict, map[string]string{"error": "client_upgrade_required", "reason": "client_upgrade_required"})
 		return
 	}
 
@@ -656,6 +662,10 @@ func StartReadingSessionHandler(w http.ResponseWriter, r *http.Request) {
 	if readerType == "" {
 		readerType = "normal"
 	}
+	channel := readingChannelStandard
+	if readerType == "speed" {
+		channel = readingChannelSpeed
+	}
 
 	now := time.Now().Unix()
 
@@ -668,25 +678,20 @@ func StartReadingSessionHandler(w http.ResponseWriter, r *http.Request) {
 
 	_, err = tx.Exec(`
 		UPDATE reading_session
-		SET ended_at = ?
-		WHERE book_id = ? AND ended_at IS NULL AND owner_user_id = ?
-	`, now, bookIDInt, current.ID)
+		SET ended_at = COALESCE(ended_at, ?), superseded_at = COALESCE(superseded_at, ?)
+		WHERE book_id = ? AND owner_user_id = ? AND channel = ? AND superseded_at IS NULL
+	`, now, now, bookIDInt, current.ID, channel)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to start reading session")
 		return
 	}
 
 	result, err := tx.Exec(`
-		INSERT INTO reading_session (book_id, reader_type, started_at, owner_user_id)
-		VALUES (?, ?, ?, ?)
-	`, bookIDInt, readerType, now, current.ID)
+		INSERT INTO reading_session (book_id, reader_type, started_at, owner_user_id, channel, reader_mode)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, bookIDInt, readerType, now, current.ID, channel, readerType)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to start reading session")
-		return
-	}
-
-	if err := touchReadingProgressForSession(tx, bookIDInt, current.ID, now); err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to update reading progress")
 		return
 	}
 
@@ -736,11 +741,6 @@ func EndReadingSessionHandler(w http.ResponseWriter, r *http.Request) {
 	`, now, sessionID, current.ID)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to end reading session")
-		return
-	}
-
-	if err := touchReadingProgressForSession(tx, bookID, current.ID, now); err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to update reading progress")
 		return
 	}
 

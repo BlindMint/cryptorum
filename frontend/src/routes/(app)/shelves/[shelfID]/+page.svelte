@@ -312,7 +312,7 @@
 
 	function getReaderUrl(book: any): string {
 		const shelfPath = shelf?.id ? `/shelves/${shelf.id}` : '/shelves';
-		return getBookReaderHref(book.id, getBookFormat(book), shelfPath);
+		return getBookReaderHref(book.id, getBookFormat(book), shelfPath, book.resume_file_id);
 	}
 
 	async function deleteShelf() {
