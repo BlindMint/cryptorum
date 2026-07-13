@@ -2,10 +2,7 @@
 	import { onDestroy } from 'svelte';
 	import { PDFViewer } from '@embedpdf/svelte-pdf-viewer';
 	import type { EmbedPdfContainer, PluginRegistry } from '@embedpdf/snippet';
-	import type {
-		PageChangeEvent,
-		ScrollCapability
-	} from '@embedpdf/plugin-scroll/preact';
+	import type { ScrollCapability } from '@embedpdf/plugin-scroll/preact';
 	import type { ZoomCapability, ZoomScope } from '@embedpdf/plugin-zoom/preact';
 	import type { DocumentManagerCapability } from '@embedpdf/plugin-document-manager/preact';
 	import type { IPlugin } from '@embedpdf/core';
@@ -52,7 +49,7 @@
 	let restoredInitialPage = false;
 	let layoutReadySeen = false;
 	let restoreAttempts = 0;
-	let unsubscribePageChange: (() => void) | null = null;
+	let unsubscribeScroll: (() => void) | null = null;
 	let unsubscribeLayoutReady: (() => void) | null = null;
 	let unsubscribeSidebarChange: (() => void) | null = null;
 	let restoreTimers: ReturnType<typeof setTimeout>[] = [];
@@ -258,6 +255,35 @@
 		chromePatch.schedule();
 	}
 
+	function reportMeasuredPage(
+		scopedScroll: ReturnType<ScrollCapability['forDocument']>,
+		totalPages?: number
+	) {
+		const targetPage = Math.max(1, Math.floor(initialPage || 1));
+		let measuredPage: number;
+
+		try {
+			// EmbedPDF updates getCurrentPage() before its deferred DOM scroll runs.
+			// Viewport-derived metrics reflect the page that is actually on screen.
+			measuredPage = scopedScroll.getMetrics().currentPage;
+		} catch {
+			return false;
+		}
+
+		if (!restoredInitialPage && targetPage > 1) {
+			if (measuredPage !== Math.min(targetPage, totalPages || targetPage)) {
+				return false;
+			}
+
+			restoredInitialPage = true;
+			clearRestoreTimers();
+		}
+
+		embedPdfCurrentPage = measuredPage;
+		onPageChange?.(measuredPage, totalPages || scopedScroll.getTotalPages());
+		return true;
+	}
+
 	function restoreInitialPage(scroll: ScrollCapability, totalPages?: number, delay = 0) {
 		const targetPage = Math.max(1, Math.floor(initialPage || 1));
 		if (restoredInitialPage || targetPage <= 1) return;
@@ -287,7 +313,7 @@
 				scopedScroll = scroll.forDocument(documentId);
 				scopedScroll.scrollToPage({
 					pageNumber: clampedPage,
-					behavior: 'instant',
+					behavior: 'auto',
 					alignY: 0
 				});
 			} catch {
@@ -295,19 +321,11 @@
 				return;
 			}
 
-			requestAnimationFrame(() => {
-				const currentPage = scopedScroll.getCurrentPage();
-				if (currentPage === clampedPage) {
-					restoredInitialPage = true;
-					clearRestoreTimers();
-					if (onPageChange && totalPages && totalPages > 0) {
-						onPageChange(clampedPage, totalPages);
-					}
-					return;
-				}
-
+			const verifyTimer = setTimeout(() => {
+				if (reportMeasuredPage(scopedScroll, totalPages)) return;
 				retryRestore();
-			});
+			}, 100);
+			restoreTimers.push(verifyTimer);
 		}, delay);
 
 		restoreTimers.push(timer);
@@ -330,12 +348,10 @@
 		embedPdfThumbnailScope = thumbnail?.forDocument?.(documentId) ?? null;
 
 		if (scroll) {
-			unsubscribePageChange?.();
-			unsubscribePageChange = scroll.onPageChange((event: PageChangeEvent) => {
-				embedPdfCurrentPage = event.pageNumber;
-				if (onPageChange) {
-					onPageChange(event.pageNumber, event.totalPages);
-				}
+			const scopedScroll = scroll.forDocument(documentId);
+			unsubscribeScroll?.();
+			unsubscribeScroll = scopedScroll.onScroll(() => {
+				reportMeasuredPage(scopedScroll, scopedScroll.getTotalPages());
 			});
 
 			unsubscribeLayoutReady?.();
@@ -387,7 +403,7 @@
 	}
 
 	onDestroy(() => {
-		unsubscribePageChange?.();
+		unsubscribeScroll?.();
 		unsubscribeLayoutReady?.();
 		unsubscribeSidebarChange?.();
 		embedPdfZoomScope = null;
