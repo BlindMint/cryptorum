@@ -97,6 +97,7 @@
 	let showLookupConfirm = $state(false);
 	let topMatchOnly = $state(false);
 	let applyMessage = $state('');
+	let overwriteProtectedFields = $state(false);
 	let coverSelections = $state<Record<string, boolean>>({});
 	let appliedBookIds = $state<Set<number>>(new Set());
 	let pollTimer: number | null = null;
@@ -416,8 +417,8 @@
 
 			const endpoint = payload.length === 1 ? '/api/metadata/apply' : '/api/jobs/metadata-apply';
 			const body = payload.length === 1
-				? { book_id: payload[0].book_id, metadata: payload[0].metadata }
-				: { items: payload, include_cover: includeCover };
+				? { book_id: payload[0].book_id, metadata: payload[0].metadata, override_locked: overwriteProtectedFields }
+				: { items: payload, include_cover: includeCover, override_locked: overwriteProtectedFields };
 			if (payload.length > 1) {
 				pendingJob = appActivity.startPendingJob({
 					job_type: 'metadata_apply',
@@ -532,6 +533,10 @@
 						{job?.completed_items ?? 0} / {totalCount()} checked, {matchedItems.length} match{matchedItems.length === 1 ? '' : 'es'}, {job?.failed_items ?? 0} failed
 					</div>
 					<div class="flex flex-wrap items-center gap-2">
+						<label class="flex items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-2 py-1 text-sm text-amber-200">
+							<input type="checkbox" bind:checked={overwriteProtectedFields} class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-amber-500 focus:ring-amber-500" />
+							Overwrite protected
+						</label>
 						<label class="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)]">
 							<input type="checkbox" bind:checked={topMatchOnly} disabled={!!job || queueingLookup} class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)] disabled:opacity-50" />
 							Top match only

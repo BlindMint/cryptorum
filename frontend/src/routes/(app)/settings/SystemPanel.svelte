@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { appActivity } from '$lib/stores';
-	import UsersPanel from './UsersPanel.svelte';
 
 	type BackupItem = {
 		name: string;
@@ -169,8 +168,8 @@
 <div class="space-y-6">
 	<div class="flex flex-wrap items-end justify-between gap-3">
 		<div>
-			<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Admin</h2>
-			<p class="text-sm text-[var(--color-surface-text-muted)]">Backups, restore actions, and user administration</p>
+			<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">System</h2>
+			<p class="text-sm text-[var(--color-surface-text-muted)]">Backups, restore actions, and server maintenance</p>
 		</div>
 		<button
 			onclick={loadBackups}
@@ -290,6 +289,4 @@
 			{/if}
 		</div>
 	</section>
-
-	<UsersPanel />
 </div>

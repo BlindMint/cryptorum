@@ -5,6 +5,7 @@
 	import { filterPanelWidth, gridScale, showFormatOnCover, showProgressChipOnCover, getFormatColor } from '$lib/stores';
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
+	import { createDebouncedSearchInput } from '$lib/utils/debounced-search-input';
 	import { getBookReaderHref } from '$lib/utils/book-formats';
 	import { bookHasCoverProgress } from '$lib/utils/cover-progress';
 	import { DEFAULT_GRID_SCALE, getResponsiveGridLayout, getResponsiveGridStyle, GRID_SCALE_STEP, MAX_GRID_SCALE, MIN_GRID_SCALE } from '$lib/utils/responsive-grid';
@@ -33,6 +34,8 @@
 
 	const BATCH_SIZE = 80;
 	const COMPACT_TOOLBAR_WIDTH = 720;
+	const SEARCH_DEBOUNCE_MS = 650;
+	const SEARCH_COMPOSITION_FALLBACK_MS = 1000;
 	const FILTER_PANEL_PARAM_KEYS = ['author', 'series', 'genre', 'genre_mode', 'tags', 'tag_mode', 'format', 'status', 'filter_mode', 'value_filter_mode'];
 	const sortOptions = [
 		{ value: 'relevance', label: 'Relevance' },
@@ -45,6 +48,7 @@
 
 	let query = $state($page.url.searchParams.get('q') || '');
 	let appliedQuery = $state($page.url.searchParams.get('q') || '');
+	let pendingQuery: string | null = null;
 	let libraryFilter = $state($page.url.searchParams.get('library') || '');
 	let libraryName = $state('');
 	let results = $state<any[]>([]);
@@ -90,6 +94,11 @@
 	let progressChipOnCover = $state(true);
 	let toolbarContainer = $state<HTMLDivElement | null>(null);
 	let toolbarWidth = $state(0);
+	const searchInput = createDebouncedSearchInput({
+		debounceMs: SEARCH_DEBOUNCE_MS,
+		compositionFallbackMs: SEARCH_COMPOSITION_FALLBACK_MS,
+		onCommit: (value) => commitSearchInput(value)
+	});
 
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
 	let hasMore = $derived(serverHasMore);
@@ -215,9 +224,18 @@
 		lastUrlSearch = currentSearch;
 
 		const nextAppliedQuery = $page.url.searchParams.get('q') || '';
+		const acknowledgesPendingQuery = pendingQuery === nextAppliedQuery;
+		if (!acknowledgesPendingQuery) searchInput.cancel();
 		if (nextAppliedQuery !== appliedQuery) {
 			appliedQuery = nextAppliedQuery;
-			query = nextAppliedQuery;
+			if (acknowledgesPendingQuery) {
+				pendingQuery = null;
+			} else {
+				pendingQuery = null;
+				query = nextAppliedQuery;
+			}
+		} else if (acknowledgesPendingQuery) {
+			pendingQuery = null;
 		}
 		libraryFilter = $page.url.searchParams.get('library') || '';
 		sortBy = $page.url.searchParams.get('sort') || 'relevance';
@@ -293,6 +311,7 @@
 	});
 
 	onDestroy(() => {
+		searchInput.cancel();
 		if (observer) {
 			observer.disconnect();
 			observer = null;
@@ -393,28 +412,57 @@
 		url.searchParams.set('sort_dir', sortDir);
 		const nextSearch = url.search;
 		if (nextSearch === $page.url.search) {
+			pendingQuery = null;
 			void search(true);
 		} else {
+			pendingQuery = query.trim();
 			navigateWithSearchParams(url);
 		}
 	}
 
+	function commitSearchInput(value: string) {
+		query = value;
+		submitSearch();
+	}
+
+	function updateSearchInput(value: string, isComposing = false) {
+		query = value;
+		searchInput.input(value, isComposing);
+	}
+
+	function handleSearchCompositionStart() {
+		searchInput.compositionStart();
+	}
+
+	function handleSearchCompositionEnd(event: CompositionEvent & { currentTarget: HTMLInputElement }) {
+		query = event.currentTarget.value;
+		searchInput.compositionEnd(event.currentTarget.value);
+	}
+
+	function submitSearchInput() {
+		searchInput.submit(query);
+	}
+
 	function clearSearch() {
+		searchInput.cancel();
 		query = '';
 		const url = new URL($page.url);
 		const hadAppliedQuery = url.searchParams.has('q') || results.length > 0;
 		if (!hadAppliedQuery) return;
 		url.searchParams.delete('q');
 		if (url.search === $page.url.search) {
+			pendingQuery = null;
 			void search(true);
 		} else {
+			pendingQuery = '';
 			navigateWithSearchParams(url);
 		}
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'Enter') {
-			submitSearch();
+			e.preventDefault();
+			searchInput.submit((e.currentTarget as HTMLInputElement).value);
 		}
 	}
 
@@ -828,13 +876,27 @@
 			{#if libraryName}
 				<p class="mb-4 text-sm text-[var(--color-surface-text-muted)]">Scoped to {libraryName}</p>
 			{/if}
-			<div class="flex flex-col gap-3 sm:flex-row">
+			<form
+				class="flex flex-col gap-3 sm:flex-row"
+				onsubmit={(event) => {
+					event.preventDefault();
+					submitSearchInput();
+				}}
+			>
 				<div class="relative min-w-0 flex-1">
 					<input
 						type="search"
-						bind:value={query}
+						value={query}
+						oninput={(event) =>
+							updateSearchInput(
+								event.currentTarget.value,
+								(event as unknown as InputEvent).isComposing
+							)}
 						onkeydown={handleKeydown}
+						oncompositionstart={handleSearchCompositionStart}
+						oncompositionend={handleSearchCompositionEnd}
 						placeholder="Search books by title, author, or description..."
+						enterkeyhint="search"
 						class="min-w-0 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-3 pl-4 text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-transparent focus:ring-2 focus:ring-[var(--color-primary-500)] {query ? 'pr-9' : 'pr-4'}"
 					>
 					{#if query}
@@ -851,14 +913,13 @@
 					{/if}
 				</div>
 				<button
-					type="button"
-					onclick={submitSearch}
+					type="submit"
 					disabled={loading}
 					class="accent-action rounded-lg px-6 py-3 font-medium transition-colors"
 				>
 					{loading ? 'Searching...' : 'Search'}
 				</button>
-			</div>
+			</form>
 		</div>
 	{/if}
 
@@ -980,16 +1041,31 @@
 							{/if}
 					</div>
 
+						<form
+							class="contents"
+							onsubmit={(event) => {
+								event.preventDefault();
+								submitSearchInput();
+							}}
+						>
 						<div class="relative col-start-1 row-start-1 min-w-0">
 							<svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"></path>
 							</svg>
 						<input
 							type="search"
-							bind:value={query}
+							value={query}
+							oninput={(event) =>
+								updateSearchInput(
+									event.currentTarget.value,
+									(event as unknown as InputEvent).isComposing
+								)}
 								onkeydown={handleKeydown}
+								oncompositionstart={handleSearchCompositionStart}
+								oncompositionend={handleSearchCompositionEnd}
 								placeholder="Search books..."
 								aria-label="Search books"
+								enterkeyhint="search"
 								class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-2 pl-9 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none {query ? 'pr-9' : 'pr-3'}"
 							>
 							{#if query}
@@ -1007,8 +1083,7 @@
 						</div>
 
 						<button
-							type="button"
-							onclick={submitSearch}
+							type="submit"
 							disabled={loading}
 								class="accent-action col-start-2 row-start-1 inline-flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors {compactToolbar ? 'w-10 px-0' : 'w-10 sm:w-auto sm:px-3'}"
 							aria-label="Search books"
@@ -1026,6 +1101,7 @@
 							{/if}
 							<span class={compactToolbar ? 'hidden' : 'hidden sm:inline'}>{loading ? 'Searching...' : 'Search'}</span>
 						</button>
+						</form>
 
 						<div class="relative col-start-4 row-start-1">
 						{#if showSortMenu}

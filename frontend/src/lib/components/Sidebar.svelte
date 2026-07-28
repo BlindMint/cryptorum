@@ -7,6 +7,8 @@
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { parseLibraryIcon } from '$lib/utils/library-icons';
 
+	let { authDisabled = false } = $props<{ authDisabled?: boolean }>();
+
 	interface Library {
 		id: number;
 		name: string;
@@ -788,20 +790,22 @@
 		</div>
 	</nav>
 
+	{#if !authDisabled}
 		<footer class="flex-shrink-0 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] border-t border-[var(--color-surface-border)] space-y-1 bg-[var(--color-surface-overlay)]">
-		<button
-			onclick={async () => {
-				await fetch('/api/auth/logout', { method: 'POST' });
-				window.location.href = '/login';
-			}}
-			class="w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-[var(--color-surface-text)] hover:bg-red-500/20 hover:text-red-400 transition-colors"
-		>
-			<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
-			</svg>
-			<span>Logout</span>
-		</button>
-	</footer>
+			<button
+				onclick={async () => {
+					await fetch('/api/auth/logout', { method: 'POST' });
+					window.location.href = '/login';
+				}}
+				class="w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-[var(--color-surface-text)] hover:bg-red-500/20 hover:text-red-400 transition-colors"
+			>
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 013-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+				</svg>
+				<span>Logout</span>
+			</button>
+		</footer>
+	{/if}
 </div>
 	<div
 		class={`group absolute inset-y-0 -right-1 hidden w-3 lg:flex cursor-col-resize touch-none select-none ${$desktopSidebarCollapsed ? 'lg:pointer-events-none lg:opacity-0' : ''}`}

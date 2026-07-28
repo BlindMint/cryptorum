@@ -11,6 +11,7 @@
 		book_count?: number;
 		exclude_from_suggestions?: boolean;
 		comic_spread_fallback?: string;
+		metadata_protection_enabled?: boolean;
 		is_importing?: boolean;
 		paths?: string[];
 	}
@@ -23,6 +24,7 @@
 		onSaved?: (result: { library: LibraryModalLibrary; isEditing: boolean; foldersChanged: boolean }) => void | Promise<void>;
 		onScan?: (library: LibraryModalLibrary) => void | Promise<void>;
 		onRegenerateCovers?: (library: LibraryModalLibrary, mode: CoverMode) => void | Promise<void>;
+		onMetadataProtectionChanged?: (library: LibraryModalLibrary, enabled: boolean) => void | Promise<void>;
 	};
 
 	let {
@@ -32,7 +34,8 @@
 		onClose,
 		onSaved,
 		onScan,
-		onRegenerateCovers
+		onRegenerateCovers,
+		onMetadataProtectionChanged
 	}: Props = $props();
 
 	const inheritedComicSpreadFallbackOptions = [
@@ -57,6 +60,9 @@
 	let currentDirectory = $state('/');
 	let directoryContents = $state<any[]>([]);
 	let directoryLoading = $state(false);
+	let metadataProtectionEnabled = $state(false);
+	let isSavingMetadataProtection = $state(false);
+	let metadataProtectionMessage = $state('');
 
 	let currentLibraryIcon = $derived(parseLibraryIcon(form.icon));
 	let isEditing = $derived(!!library?.id);
@@ -79,6 +85,9 @@
 		currentDirectory = '/';
 		directoryContents = [];
 		directoryLoading = false;
+		metadataProtectionEnabled = !!library?.metadata_protection_enabled;
+		isSavingMetadataProtection = false;
+		metadataProtectionMessage = '';
 	}
 
 	function closeModal() {
@@ -211,6 +220,52 @@
 	async function handleRegenerateCovers(mode: CoverMode) {
 		if (!library?.id) return;
 		await onRegenerateCovers?.(library, mode);
+	}
+
+	async function toggleMetadataProtection(event: Event) {
+		const checkbox = event.currentTarget as HTMLInputElement;
+		if (!library?.id || isSavingMetadataProtection) {
+			checkbox.checked = metadataProtectionEnabled;
+			return;
+		}
+		const enabled = checkbox.checked;
+		if (!enabled && !confirm('Allow automatic metadata updates for this library? Fields changed by users will remain individually protected.')) {
+			checkbox.checked = metadataProtectionEnabled;
+			return;
+		}
+		const previousEnabled = metadataProtectionEnabled;
+		metadataProtectionEnabled = enabled;
+		isSavingMetadataProtection = true;
+		metadataProtectionMessage = '';
+		try {
+			const response = await fetch(`/api/libraries/${library.id}/metadata-protection`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ enabled })
+			});
+			if (!response.ok) {
+				metadataProtectionMessage = await response.text();
+				metadataProtectionEnabled = previousEnabled;
+				checkbox.checked = previousEnabled;
+				return;
+			}
+			const result = await response.json();
+			metadataProtectionEnabled = !!result.metadata_protection_enabled;
+			metadataProtectionMessage = metadataProtectionEnabled
+				? `Automatic metadata updates are disabled for ${libraryBookCount} existing books.`
+				: 'Automatic metadata updates are allowed; user-edited fields remain protected.';
+			await onMetadataProtectionChanged?.(
+				{ ...library, metadata_protection_enabled: metadataProtectionEnabled },
+				metadataProtectionEnabled
+			);
+		} catch (error) {
+			console.error('Failed to update library metadata protection:', error);
+			metadataProtectionMessage = 'Unable to update metadata protection.';
+			metadataProtectionEnabled = previousEnabled;
+			checkbox.checked = previousEnabled;
+		} finally {
+			isSavingMetadataProtection = false;
+		}
 	}
 
 	$effect(() => {
@@ -431,6 +486,27 @@
 								{/if}
 							</button>
 						</div>
+						<label
+							class="mt-4 flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3 transition-colors hover:border-[var(--color-primary-500)]/60"
+							class:cursor-wait={isSavingMetadataProtection}
+						>
+							<span>
+								<span class="block text-sm font-medium text-[var(--color-surface-text)]">Protect existing metadata</span>
+								<span class="mt-1 block text-xs leading-5 text-[var(--color-surface-text-muted)]">
+									Preserve current values during scans, refreshes, provider lookups, and cover regeneration. New books still receive their initial metadata.
+								</span>
+							</span>
+							<input
+								type="checkbox"
+								checked={metadataProtectionEnabled}
+								disabled={isSavingMetadataProtection}
+								onchange={toggleMetadataProtection}
+								class="mt-0.5 h-5 w-5 shrink-0 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+							/>
+						</label>
+						{#if metadataProtectionMessage}
+							<p class="mt-3 text-xs text-[var(--color-surface-text-muted)]">{metadataProtectionMessage}</p>
+						{/if}
 					</div>
 				{/if}
 

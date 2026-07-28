@@ -29,11 +29,10 @@ type ServerConfig struct {
 
 // AuthConfig holds authentication configuration
 type AuthConfig struct {
-	Mode            string        `mapstructure:"mode"` // none, password, trusted_network
+	Mode            string        `mapstructure:"mode"` // none, password
 	Username        string        `mapstructure:"username"`
 	PasswordHash    string        `mapstructure:"password_hash"`
 	SessionDuration time.Duration `mapstructure:"session_duration"`
-	TrustedNetworks []string      `mapstructure:"trusted_networks"`
 }
 
 // LibraryConfig holds library configuration
@@ -97,7 +96,6 @@ func Load(configPath string) (*Config, error) {
 	// Set defaults
 	viper.SetDefault("server.port", "6060")
 	viper.SetDefault("server.data_path", "./data")
-	viper.SetDefault("auth.mode", "none")
 	viper.SetDefault("auth.session_duration", "720h")
 	viper.SetDefault("bookdrop.path", "./bookdrop")
 	viper.SetDefault("metadata.auto_fetch_on_import", true)
@@ -150,8 +148,10 @@ func Load(configPath string) (*Config, error) {
 func validate(config *Config) error {
 	// Validate auth mode
 	switch config.Auth.Mode {
-	case "none", "password", "trusted_network":
+	case "none", "password":
 		// valid
+	case "":
+		return fmt.Errorf("auth.mode must be explicitly set to none or password")
 	default:
 		return fmt.Errorf("invalid auth mode: %s", config.Auth.Mode)
 	}

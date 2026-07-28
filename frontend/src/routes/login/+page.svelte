@@ -82,6 +82,7 @@
 						bind:value={username}
 						class="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all"
 						placeholder="Enter username"
+						autocomplete="username"
 						required
 					/>
 				</div>
@@ -94,6 +95,7 @@
 						bind:value={password}
 						class="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all"
 						placeholder="Enter password"
+						autocomplete="current-password"
 						required
 					/>
 				</div>
