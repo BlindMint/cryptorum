@@ -125,6 +125,8 @@
 	let availableSeries = $state<any[]>([]);
 	let availableTags = $state<any[]>([]);
 	let availableFormats = $state<any[]>([]);
+	let availablePublishers = $state<any[]>([]);
+	let availableLanguages = $state<any[]>([]);
 
 	// Bulk selection state
 	let selectedBooks = $state<Set<number>>(new Set());
@@ -166,7 +168,7 @@
 	const MAX_REFRESH_LIMIT = 200;
 	const BULK_SELECTION_STORAGE_KEY = 'cryptorumLibraryBulkSelection';
 	const LIBRARY_NAME_CACHE_KEY = 'cryptorumLibraryNames';
-	const FILTER_PANEL_PARAM_KEYS = ['author', 'series', 'genre', 'genre_mode', 'tags', 'tag_mode', 'format', 'status', 'filter_mode', 'value_filter_mode'];
+	const FILTER_PANEL_PARAM_KEYS = ['author', 'series', 'genre', 'genre_mode', 'tags', 'tag_mode', 'format', 'publisher', 'language', 'status', 'filter_mode', 'value_filter_mode'];
 	const LATIN_CONFUSABLE_SORT_MAP: Record<string, string> = {
 		'Α': 'A', 'А': 'A', 'Β': 'B', 'В': 'B', 'Ε': 'E', 'Е': 'E', 'Ζ': 'Z',
 		'Η': 'H', 'Н': 'H', 'Ι': 'I', 'І': 'I', 'Κ': 'K', 'К': 'K', 'Μ': 'M',
@@ -292,6 +294,8 @@
 		const genres = getQueryValues(params, 'genre');
 		const tags = getQueryValues(params, 'tags');
 		const formats = getQueryValues(params, 'format');
+		const publishers = getQueryValues(params, 'publisher');
+		const languages = getQueryValues(params, 'language');
 		const statuses = getQueryValues(params, 'status');
 		const filterMode = getFilterMode();
 		const valueFilterMode = getValueFilterMode();
@@ -309,6 +313,8 @@
 		for (const genre of genres) queryParams.append('genre', genre);
 		for (const tag of tags) queryParams.append('tags', tag);
 		for (const format of formats) queryParams.append('format', format);
+		for (const publisher of publishers) queryParams.append('publisher', publisher);
+		for (const language of languages) queryParams.append('language', language);
 		for (const status of statuses) queryParams.append('status', status);
 		if (filterMode !== 'AND') queryParams.set('filter_mode', filterMode);
 		if (valueFilterMode !== 'OR') queryParams.set('value_filter_mode', valueFilterMode);
@@ -464,6 +470,8 @@
 			availableSeries = data.series ?? [];
 			availableTags = data.tags ?? [];
 			availableFormats = data.formats ?? [];
+			availablePublishers = data.publishers ?? [];
+			availableLanguages = data.languages ?? [];
 		} catch (e) {
 			console.error('Failed to fetch filter options:', e);
 		}
@@ -1108,6 +1116,8 @@
 			genre: getQueryValues($page.url.searchParams, 'genre'),
 			tags: getQueryValues($page.url.searchParams, 'tags'),
 			format: getQueryValues($page.url.searchParams, 'format'),
+			publisher: getQueryValues($page.url.searchParams, 'publisher'),
+			language: getQueryValues($page.url.searchParams, 'language'),
 			status: getQueryValues($page.url.searchParams, 'status'),
 			q: $page.url.searchParams.get('q') || undefined,
 			filter_mode: getFilterMode(),
@@ -1241,8 +1251,15 @@
 		for (const format of getQueryValues(params, 'format')) {
 			filters.push({ key: 'format', value: format, label: `Format: ${format.toUpperCase()}` });
 		}
+		for (const publisher of getQueryValues(params, 'publisher')) {
+			filters.push({ key: 'publisher', value: publisher, label: `Publisher: ${publisher}` });
+		}
+		for (const language of getQueryValues(params, 'language')) {
+			filters.push({ key: 'language', value: language, label: `Language: ${language}` });
+		}
 		for (const status of getQueryValues(params, 'status')) {
-			filters.push({ key: 'status', value: status, label: `Status: ${status}` });
+			const label = status === 'reading' ? 'Reading' : status === 'finished' ? 'Finished' : 'Unread';
+			filters.push({ key: 'status', value: status, label: `Status: ${label}` });
 		}
 		const search = params.get('q')?.trim();
 		if (search) {
@@ -1358,12 +1375,28 @@
 		return getQueryValues($page.url.searchParams, 'status').includes(status);
 	}
 
+	function isPublisherSelected(publisher: string): boolean {
+		return getQueryValues($page.url.searchParams, 'publisher').includes(publisher);
+	}
+
+	function isLanguageSelected(language: string): boolean {
+		return getQueryValues($page.url.searchParams, 'language').includes(language);
+	}
+
 	function applyStatusFilter(status: string) {
 		toggleRepeatedFilter('status', status);
 	}
 
 	function applyFormatFilter(format: string) {
 		toggleRepeatedFilter('format', format);
+	}
+
+	function applyPublisherFilter(publisher: string) {
+		toggleRepeatedFilter('publisher', publisher);
+	}
+
+	function applyLanguageFilter(language: string) {
+		toggleRepeatedFilter('language', language);
 	}
 
 	function getSelectionCount(): number {
@@ -1432,7 +1465,8 @@
 					<button
 						onclick={() => showSettingsMenu = !showSettingsMenu}
 						aria-label="Library settings"
-						class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors"
+						aria-expanded={showSettingsMenu}
+						class="toolbar-action inline-flex h-10 w-10 items-center justify-center rounded-lg border font-medium transition-colors"
 					>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
@@ -1614,7 +1648,8 @@
 
 					<button
 						onclick={() => showFilterPanel = !showFilterPanel}
-						class="relative col-start-4 row-start-1 inline-flex h-10 items-center rounded-lg bg-[var(--color-surface-overlay)] hover:bg-[var(--color-surface-700)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] font-medium transition-colors {compactToolbar ? 'w-10 justify-center px-0 hover:text-[var(--color-primary-400)]' : 'px-3 sm:px-4'}"
+						aria-expanded={showFilterPanel}
+						class="toolbar-action relative col-start-4 row-start-1 inline-flex h-10 items-center rounded-lg border font-medium transition-colors {compactToolbar ? 'w-10 justify-center px-0' : 'px-3 sm:px-4'}"
 					>
 						<svg class="w-4 h-4 {compactToolbar ? '' : 'mr-2'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
@@ -1661,6 +1696,8 @@
 		series={availableSeries}
 		tags={availableTags}
 		formats={availableFormats}
+		publishers={availablePublishers}
+		languages={availableLanguages}
 		filterMode={getFilterMode()}
 		valueFilterMode={getValueFilterMode()}
 		hasActiveFilters={hasFilterPanelFilters()}
@@ -1672,11 +1709,15 @@
 		onToggleSeries={applySeriesFilter}
 		onToggleTag={toggleTagSelection}
 		onToggleFormat={applyFormatFilter}
+		onTogglePublisher={applyPublisherFilter}
+		onToggleLanguage={applyLanguageFilter}
 		onToggleStatus={applyStatusFilter}
 		isAuthorSelected={isAuthorSelected}
 		isSeriesSelected={isSeriesSelected}
 		isTagSelected={isTagSelected}
 		isFormatSelected={isFormatSelected}
+		isPublisherSelected={isPublisherSelected}
+		isLanguageSelected={isLanguageSelected}
 		isStatusSelected={isStatusSelected}
 		open={showFilterPanel}
 		showBackdrop={filterPanelBackdrop}

@@ -80,6 +80,8 @@ type bulkFilterRequest struct {
 	Genre           filterList `json:"genre"`
 	Tags            filterList `json:"tags"`
 	Format          filterList `json:"format"`
+	Publisher       filterList `json:"publisher"`
+	Language        filterList `json:"language"`
 	Status          filterList `json:"status"`
 	Query           string     `json:"q"`
 	FilterMode      string     `json:"filter_mode"`
@@ -182,6 +184,10 @@ func buildFilterGroup(valueFilterMode string, build func(add func(string, ...int
 	}
 }
 
+func buildORFilterGroup(build func(add func(string, ...interface{}))) (sqlFilterGroup, bool) {
+	return buildFilterGroup("OR", build)
+}
+
 func combineFilterGroups(groups []sqlFilterGroup, filterMode string) (string, []interface{}) {
 	if len(groups) == 0 {
 		return "", nil
@@ -260,10 +266,22 @@ func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []inter
 		}
 	})
 	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range req.Publisher {
+			add("COALESCE(bm.publisher, '') = ?", value)
+		}
+	})
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range req.Language {
+			add("COALESCE(bm.language, '') = ?", value)
+		}
+	})
+	if group, ok := buildORFilterGroup(func(add func(string, ...interface{})) {
 		for _, value := range req.Status {
 			add("COALESCE(rp.status, 'unread') = ?", value)
 		}
-	})
+	}); ok {
+		filterGroups = append(filterGroups, group)
+	}
 	if strings.TrimSpace(req.Query) != "" {
 		searchText := `LOWER(
 			COALESCE(bm.title, '') || ' ' ||
@@ -410,7 +428,6 @@ func initRoutes(r *chi.Mux) {
 		r.Get("/filter-options", getFilterOptionsHandler)
 
 		// Metadata management
-		r.Get("/metadata/{type}", getMetadataHandler)
 		r.Get("/metadata/suggestions", getMetadataSuggestionsHandler)
 
 		// Statistics
@@ -686,11 +703,13 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if status != "" {
-		addFilterGroup(func(add func(string, ...interface{})) {
+		if group, ok := buildORFilterGroup(func(add func(string, ...interface{})) {
 			for _, value := range queryValues("status", false) {
 				add("COALESCE(rp.status, 'unread') = ?", value)
 			}
-		})
+		}); ok {
+			filterGroups = append(filterGroups, group)
+		}
 	}
 
 	if searchQuery != "" {
@@ -759,14 +778,18 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 	// Publisher filter
 	if publisher != "" {
 		addFilterGroup(func(add func(string, ...interface{})) {
-			add("COALESCE(bm.publisher, '') = ?", publisher)
+			for _, value := range queryValues("publisher", false) {
+				add("COALESCE(bm.publisher, '') = ?", value)
+			}
 		})
 	}
 
 	// Language filter
 	if language != "" {
 		addFilterGroup(func(add func(string, ...interface{})) {
-			add("COALESCE(bm.language, '') = ?", language)
+			for _, value := range queryValues("language", false) {
+				add("COALESCE(bm.language, '') = ?", value)
+			}
 		})
 	}
 
@@ -975,11 +998,13 @@ func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
 	}
 
 	if status != "" {
-		addFilterGroup(func(add func(string, ...interface{})) {
+		if group, ok := buildORFilterGroup(func(add func(string, ...interface{})) {
 			for _, value := range queryValues("status", false) {
 				add("COALESCE(rp.status, 'unread') = ?", value)
 			}
-		})
+		}); ok {
+			filterGroups = append(filterGroups, group)
+		}
 	}
 
 	if searchQuery != "" {
@@ -1043,13 +1068,17 @@ func buildBookListQuery(r *http.Request, current *AppUser) bookListQuery {
 
 	if publisher != "" {
 		addFilterGroup(func(add func(string, ...interface{})) {
-			add("COALESCE(bm.publisher, '') = ?", publisher)
+			for _, value := range queryValues("publisher", false) {
+				add("COALESCE(bm.publisher, '') = ?", value)
+			}
 		})
 	}
 
 	if language != "" {
 		addFilterGroup(func(add func(string, ...interface{})) {
-			add("COALESCE(bm.language, '') = ?", language)
+			for _, value := range queryValues("language", false) {
+				add("COALESCE(bm.language, '') = ?", value)
+			}
 		})
 	}
 
@@ -3385,6 +3414,8 @@ func searchBooksHandler(w http.ResponseWriter, r *http.Request) {
 		Tags:            searchQueryValues(r, "tags", false),
 		Status:          searchQueryValues(r, "status", false),
 		Format:          searchQueryValues(r, "format", false),
+		Publisher:       searchQueryValues(r, "publisher", false),
+		Language:        searchQueryValues(r, "language", false),
 		FilterMode:      r.URL.Query().Get("filter_mode"),
 		ValueFilterMode: r.URL.Query().Get("value_filter_mode"),
 		Sort:            r.URL.Query().Get("sort"),
@@ -3892,199 +3923,6 @@ func getSeriesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResponse(w, http.StatusOK, series)
-}
-
-// getMetadataHandler returns metadata items for a specific type (authors, series, genres, etc.)
-func getMetadataHandler(w http.ResponseWriter, r *http.Request) {
-	current := getUserFromContext(r.Context())
-	if !requirePermission(current, PermissionManageMetadata) {
-		errorResponse(w, http.StatusForbidden, "Permission denied")
-		return
-	}
-
-	metadataType := chi.URLParam(r, "type")
-	if metadataType == "tags" {
-		tags, err := getCombinedJSONMetadataOptions("tags", "genres", true, current)
-		if err != nil {
-			errorResponse(w, http.StatusInternalServerError, "Failed to fetch metadata")
-			return
-		}
-		jsonResponse(w, http.StatusOK, tags)
-		return
-	}
-	ownerClause, ownerArgs := userOwnershipClause(current, "l")
-
-	var query string
-	var args []interface{}
-
-	switch metadataType {
-	case "authors":
-		query = `
-			SELECT bm.authors, COUNT(*) as book_count
-			FROM book_metadata bm
-			JOIN book b ON bm.book_id = b.id
-			JOIN library l ON b.library_id = l.id
-			WHERE ` + ownerClause + ` AND bm.authors IS NOT NULL AND bm.authors != '[]' AND bm.authors != ''
-			GROUP BY bm.authors
-			ORDER BY book_count DESC, bm.authors`
-	case "series":
-		query = `
-			SELECT bm.series, COUNT(*) as book_count
-			FROM book_metadata bm
-			JOIN book b ON bm.book_id = b.id
-			JOIN library l ON b.library_id = l.id
-			WHERE ` + ownerClause + ` AND bm.series IS NOT NULL AND bm.series != ''
-			GROUP BY bm.series
-			ORDER BY book_count DESC, bm.series`
-	case "genres":
-		query = `
-			SELECT bm.genres, COUNT(*) as book_count
-			FROM book_metadata bm
-			JOIN book b ON bm.book_id = b.id
-			JOIN library l ON b.library_id = l.id
-			WHERE ` + ownerClause + ` AND bm.genres IS NOT NULL AND bm.genres != '[]' AND bm.genres != ''
-			GROUP BY bm.genres
-			ORDER BY book_count DESC, bm.genres`
-	case "publishers":
-		query = `
-			SELECT bm.publisher, COUNT(*) as book_count
-			FROM book_metadata bm
-			JOIN book b ON bm.book_id = b.id
-			JOIN library l ON b.library_id = l.id
-			WHERE ` + ownerClause + ` AND bm.publisher IS NOT NULL AND bm.publisher != ''
-			GROUP BY bm.publisher
-			ORDER BY book_count DESC, bm.publisher`
-	case "languages":
-		query = `
-			SELECT bm.language, COUNT(*) as book_count
-			FROM book_metadata bm
-			JOIN book b ON bm.book_id = b.id
-			JOIN library l ON b.library_id = l.id
-			WHERE ` + ownerClause + ` AND bm.language IS NOT NULL AND bm.language != ''
-			GROUP BY bm.language
-			ORDER BY book_count DESC, bm.language`
-	case "tags":
-		query = `
-			SELECT bm.tags, COUNT(*) as book_count
-			FROM book_metadata bm
-			JOIN book b ON bm.book_id = b.id
-			JOIN library l ON b.library_id = l.id
-			WHERE ` + ownerClause + ` AND bm.tags IS NOT NULL AND bm.tags != '[]' AND bm.tags != ''
-			GROUP BY bm.tags
-			ORDER BY book_count DESC, bm.tags`
-	default:
-		errorResponse(w, http.StatusBadRequest, "Invalid metadata type")
-		return
-	}
-
-	rows, err := appDB.Query(query, append(ownerArgs, args...)...)
-	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to fetch metadata")
-		return
-	}
-	defer rows.Close()
-
-	type MetadataResponse struct {
-		Name      string `json:"name"`
-		BookCount int64  `json:"book_count"`
-	}
-
-	metadata := []MetadataResponse{}
-
-	for rows.Next() {
-		var name string
-		var bookCount int64
-
-		if metadataType == "authors" {
-			// For authors, we need to parse JSON arrays
-			var jsonStr string
-			if err := rows.Scan(&jsonStr, &bookCount); err != nil {
-				continue
-			}
-
-			var authorList []string
-			if err := json.Unmarshal([]byte(jsonStr), &authorList); err != nil {
-				continue
-			}
-			for _, author := range authorList {
-				key := normalizedAuthorMatchKey(author)
-				if key == "" {
-					continue
-				}
-				found := false
-				for i, existing := range metadata {
-					if normalizedAuthorMatchKey(existing.Name) == key {
-						metadata[i].BookCount += bookCount
-						found = true
-						break
-					}
-				}
-				if !found {
-					metadata = append(metadata, MetadataResponse{
-						Name:      canonicalAuthorOptionName(author),
-						BookCount: bookCount,
-					})
-				}
-			}
-		} else if metadataType == "genres" || metadataType == "tags" {
-			var jsonStr string
-			if err := rows.Scan(&jsonStr, &bookCount); err != nil {
-				continue
-			}
-
-			var values []string
-			if err := json.Unmarshal([]byte(jsonStr), &values); err != nil {
-				continue
-			}
-
-			prefixesInRow := make(map[string]bool)
-			for _, value := range values {
-				parts := strings.Split(value, ".")
-				for i := range parts {
-					prefix := strings.TrimSpace(strings.Join(parts[:i+1], "."))
-					if prefix == "" || prefixesInRow[prefix] {
-						continue
-					}
-					prefixesInRow[prefix] = true
-					found := false
-					for j, existing := range metadata {
-						if existing.Name == prefix {
-							metadata[j].BookCount += bookCount
-							found = true
-							break
-						}
-					}
-					if !found {
-						metadata = append(metadata, MetadataResponse{
-							Name:      prefix,
-							BookCount: bookCount,
-						})
-					}
-				}
-			}
-		} else {
-			// For other types (series, publishers, languages), scan directly
-			if err := rows.Scan(&name, &bookCount); err != nil {
-				continue
-			}
-			if name != "" {
-				metadata = append(metadata, MetadataResponse{
-					Name:      name,
-					BookCount: bookCount,
-				})
-			}
-		}
-	}
-
-	// Sort by book count descending, then by name
-	sort.Slice(metadata, func(i, j int) bool {
-		if metadata[i].BookCount == metadata[j].BookCount {
-			return metadata[i].Name < metadata[j].Name
-		}
-		return metadata[i].BookCount > metadata[j].BookCount
-	})
-
-	jsonResponse(w, http.StatusOK, metadata)
 }
 
 // getMetadataSuggestionsHandler returns distinct values for autocomplete

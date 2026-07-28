@@ -36,7 +36,7 @@
 	const COMPACT_TOOLBAR_WIDTH = 720;
 	const SEARCH_DEBOUNCE_MS = 650;
 	const SEARCH_COMPOSITION_FALLBACK_MS = 1000;
-	const FILTER_PANEL_PARAM_KEYS = ['author', 'series', 'genre', 'genre_mode', 'tags', 'tag_mode', 'format', 'status', 'filter_mode', 'value_filter_mode'];
+	const FILTER_PANEL_PARAM_KEYS = ['author', 'series', 'genre', 'genre_mode', 'tags', 'tag_mode', 'format', 'publisher', 'language', 'status', 'filter_mode', 'value_filter_mode'];
 	const sortOptions = [
 		{ value: 'relevance', label: 'Relevance' },
 		{ value: 'title', label: 'Title' },
@@ -69,6 +69,8 @@
 	let availableSeries = $state<any[]>([]);
 	let availableTags = $state<any[]>([]);
 	let availableFormats = $state<any[]>([]);
+	let availablePublishers = $state<any[]>([]);
+	let availableLanguages = $state<any[]>([]);
 	let selectedBooks = $state<Set<number>>(new Set());
 	let showShelfPicker = $state(false);
 	let showCreateShelfModal = $state(false);
@@ -200,6 +202,8 @@
 		for (const genre of getQueryValues($page.url.searchParams, 'genre')) params.append('genre', genre);
 		for (const tag of getQueryValues($page.url.searchParams, 'tags')) params.append('tags', tag);
 		for (const format of getQueryValues($page.url.searchParams, 'format')) params.append('format', format);
+		for (const publisher of getQueryValues($page.url.searchParams, 'publisher')) params.append('publisher', publisher);
+		for (const language of getQueryValues($page.url.searchParams, 'language')) params.append('language', language);
 		for (const status of getQueryValues($page.url.searchParams, 'status')) params.append('status', status);
 		if (getFilterMode() !== 'AND') params.set('filter_mode', getFilterMode());
 		if (getValueFilterMode() !== 'OR') params.set('value_filter_mode', getValueFilterMode());
@@ -483,6 +487,8 @@
 			availableSeries = data.series ?? [];
 			availableTags = data.tags ?? [];
 			availableFormats = data.formats ?? [];
+			availablePublishers = data.publishers ?? [];
+			availableLanguages = data.languages ?? [];
 		} catch (error) {
 			console.error('Failed to fetch filter options:', error);
 		}
@@ -528,7 +534,12 @@
 		for (const genre of getQueryValues(params, 'genre')) filters.push({ key: 'genre', value: genre, label: `Tag: ${genre}` });
 		for (const tag of getQueryValues(params, 'tags')) filters.push({ key: 'tags', value: tag, label: `Tag: ${tag}` });
 		for (const format of getQueryValues(params, 'format')) filters.push({ key: 'format', value: format, label: `Format: ${format.toUpperCase()}` });
-		for (const status of getQueryValues(params, 'status')) filters.push({ key: 'status', value: status, label: `Status: ${status}` });
+		for (const publisher of getQueryValues(params, 'publisher')) filters.push({ key: 'publisher', value: publisher, label: `Publisher: ${publisher}` });
+		for (const language of getQueryValues(params, 'language')) filters.push({ key: 'language', value: language, label: `Language: ${language}` });
+		for (const status of getQueryValues(params, 'status')) {
+			const label = status === 'reading' ? 'Reading' : status === 'finished' ? 'Finished' : 'Unread';
+			filters.push({ key: 'status', value: status, label: `Status: ${label}` });
+		}
 
 		return filters;
 	}
@@ -624,6 +635,14 @@
 
 	function isFormatSelected(format: string): boolean {
 		return getQueryValues($page.url.searchParams, 'format').includes(format);
+	}
+
+	function isPublisherSelected(publisher: string): boolean {
+		return getQueryValues($page.url.searchParams, 'publisher').includes(publisher);
+	}
+
+	function isLanguageSelected(language: string): boolean {
+		return getQueryValues($page.url.searchParams, 'language').includes(language);
 	}
 
 	function getVisibleBookIds(): number[] {
@@ -928,6 +947,8 @@
 		series={availableSeries}
 		tags={availableTags}
 		formats={availableFormats}
+		publishers={availablePublishers}
+		languages={availableLanguages}
 		filterMode={getFilterMode()}
 		valueFilterMode={getValueFilterMode()}
 		hasActiveFilters={hasFilterPanelFilters()}
@@ -939,11 +960,15 @@
 		onToggleSeries={(value) => toggleRepeatedFilter('series', value)}
 		onToggleTag={toggleTagSelection}
 		onToggleFormat={(value) => toggleRepeatedFilter('format', value)}
+		onTogglePublisher={(value) => toggleRepeatedFilter('publisher', value)}
+		onToggleLanguage={(value) => toggleRepeatedFilter('language', value)}
 		onToggleStatus={(value) => toggleRepeatedFilter('status', value)}
 		isAuthorSelected={isAuthorSelected}
 		isSeriesSelected={isSeriesSelected}
 		isTagSelected={isTagSelected}
 		isFormatSelected={isFormatSelected}
+		isPublisherSelected={isPublisherSelected}
+		isLanguageSelected={isLanguageSelected}
 		isStatusSelected={isStatusSelected}
 		open={showFilterPanel}
 		showBackdrop={filterPanelBackdrop}
@@ -1152,7 +1177,8 @@
 
 					<button
 						onclick={() => showFilterPanel = !showFilterPanel}
-							class="relative col-start-5 row-start-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-primary-400)]"
+						aria-expanded={showFilterPanel}
+						class="toolbar-action relative col-start-5 row-start-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border transition-colors"
 						aria-label="Toggle filters"
 						title="Filters"
 					>

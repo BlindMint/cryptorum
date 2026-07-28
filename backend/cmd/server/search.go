@@ -63,6 +63,8 @@ type BookSearchFilters struct {
 	Tags            []string
 	Status          []string
 	Format          []string
+	Publisher       []string
+	Language        []string
 	FilterMode      string
 	ValueFilterMode string
 	Sort            string
@@ -440,11 +442,13 @@ func buildBookSearchFilterClause(filters BookSearchFilters) (string, []interface
 		}
 	}
 
-	addFilterGroup(func(add func(string, ...interface{})) {
+	if group, ok := buildORFilterGroup(func(add func(string, ...interface{})) {
 		for _, value := range filters.Status {
 			add("COALESCE(rp.status, 'unread') = ?", value)
 		}
-	})
+	}); ok {
+		filterGroups = append(filterGroups, group)
+	}
 	addFilterGroup(func(add func(string, ...interface{})) {
 		for _, value := range filters.Author {
 			addAuthorFilterCondition(add, "bm.authors", value)
@@ -471,6 +475,16 @@ func buildBookSearchFilterClause(filters BookSearchFilters) (string, []interface
 			if format != "" {
 				add("EXISTS (SELECT 1 FROM book_file filter_bf WHERE filter_bf.book_id = b.id AND filter_bf.missing_at IS NULL AND LOWER(filter_bf.format) = ?)", format)
 			}
+		}
+	})
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range filters.Publisher {
+			add("COALESCE(bm.publisher, '') = ?", value)
+		}
+	})
+	addFilterGroup(func(add func(string, ...interface{})) {
+		for _, value := range filters.Language {
+			add("COALESCE(bm.language, '') = ?", value)
 		}
 	})
 

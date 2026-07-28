@@ -49,7 +49,7 @@
 	}
 
 	function sectionBodyClass(expanded: boolean): string {
-		return expanded ? 'max-h-[70vh] overflow-auto' : 'max-h-[22rem] overflow-auto';
+		return expanded ? 'min-h-[16rem]' : 'min-h-[16rem] md:min-h-0 md:flex-1 md:overflow-auto';
 	}
 
 	function sectionButtonLabel(expanded: boolean): string {
@@ -165,21 +165,8 @@
 	onMount(loadBackups);
 </script>
 
-<div class="space-y-6">
-	<div class="flex flex-wrap items-end justify-between gap-3">
-		<div>
-			<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">System</h2>
-			<p class="text-sm text-[var(--color-surface-text-muted)]">Backups, restore actions, and server maintenance</p>
-		</div>
-		<button
-			onclick={loadBackups}
-			class="px-4 py-2 rounded-lg border border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors"
-		>
-			Refresh
-		</button>
-	</div>
-
-	<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] overflow-hidden">
+<div class="flex min-h-full flex-1 flex-col">
+	<section class="flex min-h-[24rem] flex-1 flex-col rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
 		<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-6 py-4">
 			<div>
 				<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Backups</h3>
@@ -187,8 +174,20 @@
 			</div>
 			<div class="flex flex-wrap items-center gap-2">
 				<button
+					type="button"
+					onclick={loadBackups}
+					disabled={backupsLoading}
+					class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--color-surface-border)] text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)] disabled:cursor-wait disabled:opacity-60"
+					title="Refresh backups"
+					aria-label="Refresh backups"
+				>
+					<svg class="h-4 w-4 {backupsLoading ? 'animate-spin' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+					</svg>
+				</button>
+				<button
 					onclick={() => backupsExpanded = !backupsExpanded}
-					class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-[var(--color-primary-500)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] transition-colors"
+					class="hidden rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)] md:inline-flex"
 				>
 					{sectionButtonLabel(backupsExpanded)}
 				</button>
@@ -244,13 +243,13 @@
 				{savingBackupSettings ? 'Saving...' : 'Save Backup Settings'}
 			</button>
 		</div>
-		<div class={sectionBodyClass(backupsExpanded) + ' p-6 space-y-3'}>
+		<div class={sectionBodyClass(backupsExpanded) + ' flex flex-col p-6 space-y-3'}>
 			{#if backupsLoading}
-				<div class="text-sm text-[var(--color-surface-text-muted)]">Loading backups...</div>
+				<div class="flex min-h-[12rem] flex-1 items-center justify-center text-sm text-[var(--color-surface-text-muted)]">Loading backups...</div>
 			{:else if backupError}
 				<div class="text-sm text-red-300">{backupError}</div>
 			{:else if backups.length === 0}
-				<div class="text-sm text-[var(--color-surface-text-muted)]">No backups yet.</div>
+				<div class="flex min-h-[12rem] flex-1 items-center justify-center text-sm text-[var(--color-surface-text-muted)]">No backups yet.</div>
 			{:else}
 				<div class="grid gap-3 lg:grid-cols-2">
 					{#each backups as item}

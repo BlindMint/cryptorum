@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestScoreBookSearchCandidateWordBasedQueries(t *testing.T) {
 	candidate := bookSearchCandidate{
@@ -25,6 +28,23 @@ func TestScoreBookSearchCandidateWordBasedQueries(t *testing.T) {
 				t.Fatalf("expected %q to match, score %.2f below threshold %.2f", query, score, minBookSearchScore)
 			}
 		})
+	}
+}
+
+func TestSearchReadingStatusAlwaysUsesORWithinCategory(t *testing.T) {
+	clause, args := buildBookSearchFilterClause(BookSearchFilters{
+		Status:          []string{"unread", "reading"},
+		ValueFilterMode: "AND",
+	})
+
+	if strings.Contains(clause, "status, 'unread') = ? AND COALESCE(rp.status") {
+		t.Fatalf("status clause used AND semantics: %s", clause)
+	}
+	if !strings.Contains(clause, "status, 'unread') = ? OR COALESCE(rp.status") {
+		t.Fatalf("status clause did not use OR semantics: %s", clause)
+	}
+	if len(args) != 2 || args[0] != "unread" || args[1] != "reading" {
+		t.Fatalf("status args = %#v, want [unread reading]", args)
 	}
 }
 
