@@ -6,6 +6,7 @@
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import BookCoverProgressChip from '$lib/components/BookCoverProgressChip.svelte';
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
+	import MetadataProtectionPanel from '$lib/components/MetadataProtectionPanel.svelte';
 	import PathDisplay from '$lib/components/PathDisplay.svelte';
 	import ShelfPickerRow from '$lib/components/ShelfPickerRow.svelte';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
@@ -1300,6 +1301,20 @@
 								{#if metadataDraftNotice}<p class="text-sm font-medium text-[var(--color-surface-text)]">{metadataDraftNotice}</p>{/if}
 								{#if metadataDraftWarning}<p class="mt-1 text-xs text-amber-200">{metadataDraftWarning}</p>{/if}
 							{/if}
+						</div>
+					{/if}
+
+					{#if editing}
+						<div class="mt-5">
+							<MetadataProtectionPanel
+								bookId={Number(book.id)}
+								lockedFields={book.locked_fields || []}
+								libraryProtectionEnabled={!!book.library_metadata_protection_enabled}
+								onChanged={(fields) => book = { ...book, locked_fields: fields }}
+								onRestored={async () => {
+									await fetchBook({ mode: 'quiet', resetRelated: false });
+								}}
+							/>
 						</div>
 					{/if}
 

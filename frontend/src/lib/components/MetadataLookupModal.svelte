@@ -99,6 +99,7 @@
 	let loading = $state(true);
 	let applying = $state(false);
 	let pendingApply = $state<{ mode: 'single' | 'all'; bookId?: number } | null>(null);
+	let overwriteProtectedFields = $state(false);
 	let initialized = false;
 	let searchControllers = new Map<number, AbortController>();
 
@@ -404,7 +405,7 @@
 		await Promise.all(targets.map((target) => searchTarget(target.bookId)));
 	}
 
-	async function applyMetadata(bookId: number, notifyParent = true) {
+	async function applyMetadata(bookId: number, notifyParent = true, overrideLocked = false) {
 		const target = targets.find((item) => item.bookId === bookId);
 		if (!target || target.selectedIndex < 0 || target.selectedIndex >= target.results.length) return;
 
@@ -418,7 +419,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					book_id: bookId,
-					metadata
+					metadata,
+					override_locked: overrideLocked
 				})
 			});
 
@@ -442,7 +444,7 @@
 		}
 	}
 
-	async function applyAllSelected() {
+	async function applyAllSelected(overrideLocked = false) {
 		const selectedItems = targets
 			.filter((target) => target.selectedIndex >= 0 && target.results[target.selectedIndex])
 			.map((target) => ({
@@ -461,7 +463,7 @@
 		let pendingJob: string | null = null;
 		try {
 			if (selectedItems.length === 1) {
-				await applyMetadata(selectedItems[0].book_id, false);
+				await applyMetadata(selectedItems[0].book_id, false, overrideLocked);
 				await onApplied?.();
 				return;
 			}
@@ -476,7 +478,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					items: selectedItems,
-					include_cover: selectedItems.some((item) => !!item.metadata.cover_url)
+					include_cover: selectedItems.some((item) => !!item.metadata.cover_url),
+					override_locked: overrideLocked
 				})
 			});
 
@@ -507,6 +510,7 @@
 
 	function requestApplyMetadata(bookId: number) {
 		if (confirmBeforeApply) {
+			overwriteProtectedFields = false;
 			pendingApply = { mode: 'single', bookId };
 			return;
 		}
@@ -515,6 +519,7 @@
 
 	function requestApplyAllSelected() {
 		if (confirmBeforeApply) {
+			overwriteProtectedFields = false;
 			pendingApply = { mode: 'all' };
 			return;
 		}
@@ -530,10 +535,11 @@
 		}
 		pendingApply = null;
 		if (action.mode === 'single' && action.bookId) {
-			await applyMetadata(action.bookId);
+			await applyMetadata(action.bookId, true, overwriteProtectedFields);
 		} else {
-			await applyAllSelected();
+			await applyAllSelected(overwriteProtectedFields);
 		}
+		overwriteProtectedFields = false;
 	}
 
 	function getSelectedResult(target: LookupTarget): MetadataCandidate | null {
@@ -946,20 +952,31 @@
 				type="button"
 				class="absolute inset-0 bg-black/70"
 				aria-label="Cancel metadata apply"
-				onclick={() => pendingApply = null}
+				onclick={() => { pendingApply = null; overwriteProtectedFields = false; }}
 			></button>
 			<div class="relative w-full max-w-lg rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 shadow-2xl">
 				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Apply metadata result?</h3>
 				<p class="mt-2 text-sm text-[var(--color-surface-text-muted)]">
-					Applying this result will overwrite existing metadata for this book{pendingApply.mode === 'all' ? ' selection' : ''}.
+					The result will update unprotected metadata for this book{pendingApply.mode === 'all' ? ' selection' : ''}. Protected user changes are preserved by default.
 					{#if hasUnsavedChanges}
 						Unsaved inline edits will be lost unless you apply them first.
 					{/if}
 				</p>
+				<label class="mt-4 flex items-start gap-3 rounded-lg border border-amber-500/25 bg-amber-500/[0.07] p-3">
+					<input
+						type="checkbox"
+						bind:checked={overwriteProtectedFields}
+						class="mt-0.5 h-4 w-4 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-700)] text-amber-500 focus:ring-amber-500"
+					>
+					<span>
+						<span class="block text-sm font-medium text-amber-200">Overwrite protected fields</span>
+						<span class="mt-0.5 block text-xs leading-5 text-[var(--color-surface-text-muted)]">Use this only when the selected result should intentionally replace prior user edits.</span>
+					</span>
+				</label>
 				<div class="mt-5 flex flex-wrap justify-end gap-2">
 					<button
 						type="button"
-						onclick={() => pendingApply = null}
+						onclick={() => { pendingApply = null; overwriteProtectedFields = false; }}
 						class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)]"
 					>
 						Cancel
@@ -980,7 +997,7 @@
 							disabled={applying}
 							class="accent-action rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ease-out hover:-translate-y-px"
 						>
-							Overwrite Metadata
+							Apply Metadata
 						</button>
 				</div>
 			</div>

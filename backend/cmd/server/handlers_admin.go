@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"cryptorum/internal/metaprotection"
 )
 
 type MetadataApplyJobItem struct {
@@ -20,8 +22,10 @@ type MetadataApplyJobItem struct {
 }
 
 type MetadataApplyJobRequest struct {
-	Items        []MetadataApplyJobItem `json:"items"`
-	IncludeCover bool                   `json:"include_cover"`
+	Items          []MetadataApplyJobItem `json:"items"`
+	IncludeCover   bool                   `json:"include_cover"`
+	OverrideLocked bool                   `json:"override_locked,omitempty"`
+	ActorUserID    int64                  `json:"actor_user_id,omitempty"`
 }
 
 type MetadataLookupJobRequest struct {
@@ -384,6 +388,16 @@ func metadataLookupQuery(snapshot MetadataLookupBookSnapshot) string {
 }
 
 func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, includeCover bool) error {
+	return applyMetadataCandidateToBookWithOptions(bookID, candidate, includeCover, false, 0)
+}
+
+func applyMetadataCandidateToBookWithOptions(
+	bookID int64,
+	candidate MetadataCandidate,
+	includeCover bool,
+	overrideLocked bool,
+	actorUserID int64,
+) error {
 	var exists bool
 	if err := appDB.QueryRow("SELECT EXISTS(SELECT 1 FROM book WHERE id = ?)", bookID).Scan(&exists); err != nil {
 		return err
@@ -396,181 +410,131 @@ func applyMetadataCandidateToBook(bookID int64, candidate MetadataCandidate, inc
 	candidateTags := metadataCandidateTags(candidate)
 
 	authorsJSON, _ := json.Marshal(candidate.Authors)
-	emptyJSON, _ := json.Marshal([]string{})
-	candidateTagsJSON, _ := json.Marshal(candidateTags)
 
-	type currentMetadata struct {
-		Title        string
-		Authors      string
-		Series       string
-		SeriesNumber float64
-		Publisher    string
-		PubDate      string
-		Description  string
-		Rating       float64
-		Genres       string
-		Tags         string
-		ISBN         string
-		ASIN         string
-		CoverPath    string
-		CoverUpdated int64
-		PageCount    int64
-		Language     string
-		LockedFields string
+	tx, err := appDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	current, metadataExists, err := metaprotection.LoadSnapshot(tx, bookID)
+	if err != nil {
+		return err
+	}
+	previous := current
+	locked := metaprotection.ParseLocked(current.LockedFields)
+	libraryProtected := false
+	if metadataExists {
+		libraryProtected, err = metaprotection.LibraryProtectionEnabled(tx, bookID)
+		if err != nil {
+			return err
+		}
+	}
+	canUpdate := func(field string) bool {
+		return overrideLocked || (!libraryProtected && !locked[field])
+	}
+	changedFields := []string{}
+	applyString := func(field, incoming string, target *string) {
+		incoming = strings.TrimSpace(incoming)
+		if incoming == "" || !canUpdate(field) || *target == incoming {
+			return
+		}
+		*target = incoming
+		changedFields = append(changedFields, field)
+	}
+	applyFloat := func(field string, incoming float64, target *float64) {
+		if incoming <= 0 || !canUpdate(field) || *target == incoming {
+			return
+		}
+		*target = incoming
+		changedFields = append(changedFields, field)
+	}
+	applyInt := func(field string, incoming int, target *int64) {
+		if incoming <= 0 || !canUpdate(field) || *target == int64(incoming) {
+			return
+		}
+		*target = int64(incoming)
+		changedFields = append(changedFields, field)
 	}
 
-	var current currentMetadata
-	err := appDB.QueryRow(`
-		SELECT COALESCE(title, ''),
-		       COALESCE(authors, '[]'),
-		       COALESCE(series, ''),
-		       COALESCE(series_number, 0),
-		       COALESCE(publisher, ''),
-		       COALESCE(pub_date, ''),
-		       COALESCE(description, ''),
-		       COALESCE(rating, 0),
-		       COALESCE(genres, '[]'),
-		       COALESCE(tags, '[]'),
-		       COALESCE(isbn, ''),
-		       COALESCE(asin, ''),
-		       COALESCE(cover_path, ''),
-		       COALESCE(cover_updated_on, 0),
-		       COALESCE(page_count, 0),
-		       COALESCE(language, ''),
-		       COALESCE(locked_fields, '[]')
-		FROM book_metadata
-		WHERE book_id = ?
-	`, bookID).Scan(
-		&current.Title,
-		&current.Authors,
-		&current.Series,
-		&current.SeriesNumber,
-		&current.Publisher,
-		&current.PubDate,
-		&current.Description,
-		&current.Rating,
-		&current.Genres,
-		&current.Tags,
-		&current.ISBN,
-		&current.ASIN,
-		&current.CoverPath,
-		&current.CoverUpdated,
-		&current.PageCount,
-		&current.Language,
-		&current.LockedFields,
-	)
-
-	if err == sql.ErrNoRows {
-		_, err = appDB.Exec(`
-				INSERT INTO book_metadata (
-					book_id, title, authors, series, series_number, publisher,
-					pub_date, description, rating, genres, tags, isbn, asin, cover_path,
-					cover_updated_on, page_count, language, locked_fields, owner_user_id
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT owner_user_id FROM book WHERE id = ?), 1))
-			`, bookID, candidate.Title, nullString(authorsJSON), candidate.Series,
-			0, candidate.Publisher, candidate.PubDate, candidate.Description,
-			candidate.Rating, nullString(emptyJSON), nullString(candidateTagsJSON), candidate.ISBN, candidate.ASIN, "",
-			0, candidate.PageCount, candidate.Language, "[]", bookID)
-		if err != nil {
-			return err
+	applyString(metaprotection.FieldTitle, candidate.Title, &current.Title)
+	if len(candidate.Authors) > 0 {
+		applyString(metaprotection.FieldAuthors, string(authorsJSON), &current.Authors)
+	}
+	applyString(metaprotection.FieldSeries, candidate.Series, &current.Series)
+	applyString(metaprotection.FieldPublisher, candidate.Publisher, &current.Publisher)
+	applyString(metaprotection.FieldPubDate, candidate.PubDate, &current.PubDate)
+	applyString(metaprotection.FieldDescription, candidate.Description, &current.Description)
+	applyFloat(metaprotection.FieldRating, candidate.Rating, &current.Rating)
+	if len(candidateTags) > 0 && canUpdate(metaprotection.FieldTags) {
+		mergedTagsJSON, _ := json.Marshal(mergeMetadataTagLists(parseMetadataJSONList(current.Tags), candidateTags))
+		if current.Tags != string(mergedTagsJSON) {
+			current.Tags = string(mergedTagsJSON)
+			changedFields = append(changedFields, metaprotection.FieldTags)
 		}
-	} else if err != nil {
+	}
+	applyString(metaprotection.FieldISBN, candidate.ISBN, &current.ISBN)
+	applyString(metaprotection.FieldASIN, candidate.ASIN, &current.ASIN)
+	applyInt(metaprotection.FieldPageCount, candidate.PageCount, &current.PageCount)
+	applyString(metaprotection.FieldLanguage, candidate.Language, &current.Language)
+	changedFields = metaprotection.NormalizeFields(changedFields)
+
+	if !metadataExists {
+		current.BookID = bookID
+		current.Genres = "[]"
+		current.LockedFields = "[]"
+		_ = tx.QueryRow(`SELECT COALESCE(owner_user_id, 1) FROM book WHERE id = ?`, bookID).Scan(&current.OwnerUserID)
+	}
+	if len(changedFields) > 0 {
+		if metadataExists {
+			if err := metaprotection.RecordRevision(tx, previous, changedFields, "provider_apply", actorUserID); err != nil {
+				return err
+			}
+		}
+		current.LockedFields = metaprotection.MergeLocked(current.LockedFields, changedFields...)
+		current.MetadataUpdatedAt = time.Now().Unix()
+	}
+
+	_, err = tx.Exec(`
+		INSERT INTO book_metadata (
+			book_id, title, authors, series, series_number, series_number_display, publisher,
+			pub_date, description, rating, genres, tags, isbn, asin, cover_path, cover_source,
+			cover_updated_on, page_count, language, locked_fields, extracted_from_hash,
+			metadata_updated_at, owner_user_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(book_id) DO UPDATE SET
+			title = excluded.title,
+			authors = excluded.authors,
+			series = excluded.series,
+			publisher = excluded.publisher,
+			pub_date = excluded.pub_date,
+			description = excluded.description,
+			rating = excluded.rating,
+			tags = excluded.tags,
+			isbn = excluded.isbn,
+			asin = excluded.asin,
+			page_count = excluded.page_count,
+			language = excluded.language,
+			locked_fields = excluded.locked_fields,
+			metadata_updated_at = excluded.metadata_updated_at,
+			owner_user_id = excluded.owner_user_id
+	`, current.BookID, current.Title, current.Authors, current.Series, current.SeriesNumber,
+		current.SeriesNumberDisplay, current.Publisher, current.PubDate, current.Description,
+		current.Rating, current.Genres, current.Tags, current.ISBN, current.ASIN,
+		current.CoverPath, current.CoverSource, current.CoverUpdatedOn, current.PageCount,
+		current.Language, current.LockedFields, current.ExtractedFromHash,
+		current.MetadataUpdatedAt, current.OwnerUserID)
+	if err != nil {
 		return err
-	} else {
-		var locked []string
-		if err := json.Unmarshal([]byte(current.LockedFields), &locked); err != nil {
-			locked = nil
-		}
-
-		finalTitle := current.Title
-		if candidate.Title != "" && !contains(locked, "title") {
-			finalTitle = candidate.Title
-		}
-
-		finalAuthors := current.Authors
-		if len(candidate.Authors) > 0 && !contains(locked, "authors") {
-			finalAuthors = nullString(authorsJSON).(string)
-		}
-
-		finalSeries := current.Series
-		if candidate.Series != "" && !contains(locked, "series") {
-			finalSeries = candidate.Series
-		}
-
-		finalSeriesNumber := current.SeriesNumber
-
-		finalPublisher := current.Publisher
-		if candidate.Publisher != "" && !contains(locked, "publisher") {
-			finalPublisher = candidate.Publisher
-		}
-
-		finalPubDate := current.PubDate
-		if candidate.PubDate != "" && !contains(locked, "pub_date") {
-			finalPubDate = candidate.PubDate
-		}
-
-		finalDescription := current.Description
-		if candidate.Description != "" && !contains(locked, "description") {
-			finalDescription = candidate.Description
-		}
-
-		finalRating := current.Rating
-		if candidate.Rating > 0 && !contains(locked, "rating") {
-			finalRating = candidate.Rating
-		}
-
-		finalTags := current.Tags
-		if len(candidateTags) > 0 && !contains(locked, "tags") && !contains(locked, "genres") {
-			mergedTagsJSON, _ := json.Marshal(mergeMetadataTagLists(parseMetadataJSONList(current.Tags), candidateTags))
-			finalTags = string(mergedTagsJSON)
-		}
-
-		finalISBN := current.ISBN
-		if candidate.ISBN != "" && !contains(locked, "isbn") {
-			finalISBN = candidate.ISBN
-		}
-
-		finalASIN := current.ASIN
-		if candidate.ASIN != "" && !contains(locked, "asin") {
-			finalASIN = candidate.ASIN
-		}
-
-		finalPageCount := current.PageCount
-		if candidate.PageCount > 0 && !contains(locked, "page_count") {
-			finalPageCount = int64(candidate.PageCount)
-		}
-
-		finalLanguage := current.Language
-		if candidate.Language != "" && !contains(locked, "language") {
-			finalLanguage = candidate.Language
-		}
-
-		_, err = appDB.Exec(`
-			UPDATE book_metadata SET
-				title = ?,
-				authors = ?,
-				series = ?,
-				series_number = ?,
-				publisher = ?,
-				pub_date = ?,
-				description = ?,
-				rating = ?,
-				tags = ?,
-				isbn = ?,
-				asin = ?,
-				page_count = ?,
-				language = ?
-			WHERE book_id = ?
-		`, finalTitle, finalAuthors, finalSeries, finalSeriesNumber, finalPublisher,
-			finalPubDate, finalDescription, finalRating, finalTags, finalISBN, finalASIN,
-			finalPageCount, finalLanguage, bookID)
-		if err != nil {
-			return err
-		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 
 	if includeCover && candidate.CoverURL != "" {
-		downloadCover(bookID, candidate.CoverURL)
+		if err := downloadCover(bookID, candidate.CoverURL, overrideLocked, actorUserID); err != nil {
+			return err
+		}
 	}
 
 	recordAppLog("info", "metadata", "Applied metadata to book", map[string]any{
@@ -613,6 +577,7 @@ func QueueMetadataApplyJobHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	req.ActorUserID = current.ID
 
 	title := fmt.Sprintf("Bulk metadata update (%d books)", len(req.Items))
 	payload, _ := json.Marshal(req)
@@ -1005,7 +970,13 @@ func processMetadataApplyJob(jobID int64, req MetadataApplyJobRequest, title str
 			Status: "applied",
 		}
 
-		if err := applyMetadataCandidateToBook(item.BookID, item.Metadata, req.IncludeCover); err != nil {
+		if err := applyMetadataCandidateToBookWithOptions(
+			item.BookID,
+			item.Metadata,
+			req.IncludeCover,
+			req.OverrideLocked,
+			req.ActorUserID,
+		); err != nil {
 			result.Status = "failed"
 			result.Error = err.Error()
 			failed++

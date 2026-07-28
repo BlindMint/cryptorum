@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"cryptorum/internal/metaprotection"
 	"cryptorum/internal/seriesnum"
 )
 
@@ -260,6 +261,41 @@ func applyBulkMetadataUpdate(bookID int64, ownerUserID int64, req bulkMetadataRe
 	}
 	defer tx.Rollback()
 
+	current, metadataExists, err := metaprotection.LoadSnapshot(tx, bookID)
+	if err != nil {
+		return err
+	}
+	touchedFields := []string{}
+	if req.Authors != nil || clear["authors"] {
+		touchedFields = append(touchedFields, metaprotection.FieldAuthors)
+	}
+	if req.Publisher != nil || clear["publisher"] {
+		touchedFields = append(touchedFields, metaprotection.FieldPublisher)
+	}
+	if req.Language != nil || clear["language"] {
+		touchedFields = append(touchedFields, metaprotection.FieldLanguage)
+	}
+	if req.Series != nil || clear["series"] {
+		touchedFields = append(touchedFields, metaprotection.FieldSeries)
+	}
+	if updateSeriesNumber || clear["series_number"] || clear["series"] {
+		touchedFields = append(touchedFields, metaprotection.FieldSeriesNumber)
+	}
+	if req.Rating != nil || clear["rating"] {
+		touchedFields = append(touchedFields, metaprotection.FieldRating)
+	}
+	if len(req.AddGenres) > 0 || len(req.RemoveGenres) > 0 ||
+		len(req.AddTags) > 0 || len(req.RemoveTags) > 0 ||
+		clear["genres"] || clear["tags"] {
+		touchedFields = append(touchedFields, metaprotection.FieldTags)
+	}
+	touchedFields = metaprotection.NormalizeFields(touchedFields)
+	if metadataExists && len(touchedFields) > 0 {
+		if err := metaprotection.RecordRevision(tx, current, touchedFields, "bulk_edit", ownerUserID); err != nil {
+			return err
+		}
+	}
+
 	if _, err := tx.Exec(`
 		INSERT INTO book_metadata (book_id, authors, genres, tags, locked_fields, owner_user_id)
 		VALUES (?, '[]', '[]', '[]', '[]', ?)
@@ -353,6 +389,16 @@ func applyBulkMetadataUpdate(bookID int64, ownerUserID int64, req bulkMetadataRe
 	removeTags = append(removeTags, req.RemoveTags...)
 	if len(addTags) > 0 || len(removeTags) > 0 || clear["tags"] {
 		if err := bulkUpdateBookJSONList(tx, bookID, "tags", addTags, removeTags, clear["tags"]); err != nil {
+			return err
+		}
+	}
+	if len(touchedFields) > 0 {
+		lockedFields := metaprotection.MergeLocked(current.LockedFields, touchedFields...)
+		if _, err := tx.Exec(`
+			UPDATE book_metadata
+			SET locked_fields = ?, metadata_updated_at = ?
+			WHERE book_id = ?
+		`, lockedFields, time.Now().Unix(), bookID); err != nil {
 			return err
 		}
 	}

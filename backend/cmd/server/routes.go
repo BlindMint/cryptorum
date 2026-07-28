@@ -5,12 +5,15 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +26,7 @@ import (
 	"cryptorum/internal/config"
 	"cryptorum/internal/coverprefs"
 	"cryptorum/internal/db"
+	"cryptorum/internal/metaprotection"
 	"cryptorum/internal/scanner"
 	"cryptorum/internal/seriesnum"
 )
@@ -293,6 +297,7 @@ func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []inter
 
 func initRoutes(r *chi.Mux) {
 	r.Use(securityHeadersMiddleware)
+	r.Use(sameOriginMutationMiddleware)
 
 	// Health check - public
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -341,6 +346,8 @@ func initRoutes(r *chi.Mux) {
 				r.Post("/cover/regenerate", RegenerateBookCoverHandler)
 				r.Post("/cover/custom", UploadBookCoverHandler)
 				r.Delete("/cover/custom", ResetBookCoverHandler)
+				r.Get("/metadata/revisions", ListBookMetadataRevisionsHandler)
+				r.Post("/metadata/revisions/{revisionID}/restore", RestoreBookMetadataRevisionHandler)
 				r.Get("/annotations", GetAnnotationsHandler)
 				r.Post("/annotations", CreateAnnotationHandler)
 				r.Delete("/annotations/{id}", DeleteAnnotationHandler)
@@ -364,11 +371,14 @@ func initRoutes(r *chi.Mux) {
 			r.Get("/", getLibrariesHandler)
 			r.Post("/", createLibraryHandler)
 			r.Patch("/order", updateLibraryOrderHandler)
+			r.Put("/metadata-protection", updateAllLibrariesMetadataProtectionHandler)
 			r.Route("/{libraryID}", func(r chi.Router) {
 				r.Get("/", getLibraryHandler)
 				r.Put("/", updateLibraryHandler)
 				r.Delete("/", deleteLibraryHandler)
 				r.Post("/scan", scanLibraryHandler)
+				r.Post("/protect-metadata", protectLibraryMetadataHandler)
+				r.Put("/metadata-protection", updateLibraryMetadataProtectionHandler)
 				r.Get("/books", getLibraryBooksHandler)
 			})
 		})
@@ -425,12 +435,6 @@ func initRoutes(r *chi.Mux) {
 			r.Post("/{backupName}/restore", RestoreBackupHandler)
 			r.Delete("/{backupName}", DeleteBackupHandler)
 			r.Get("/{backupName}/download", DownloadBackupHandler)
-		})
-		r.Route("/users", func(r chi.Router) {
-			r.Get("/", ListUsersHandler)
-			r.Post("/", CreateUserHandler)
-			r.Put("/{userID}", UpdateUserHandler)
-			r.Delete("/{userID}", DeleteUserHandler)
 		})
 		r.Route("/notifications", func(r chi.Router) {
 			r.Get("/", ListNotificationsHandler)
@@ -509,6 +513,28 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func sameOriginMutationMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if origin == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		parsed, err := url.Parse(origin)
+		if err != nil || parsed.Host == "" || !strings.EqualFold(parsed.Host, r.Host) {
+			errorResponse(w, http.StatusForbidden, "Cross-origin request denied")
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -1147,6 +1173,7 @@ type BookDetail struct {
 	ID                  int64    `json:"id"`
 	LibraryID           int64    `json:"library_id"`
 	LibraryName         string   `json:"library_name"`
+	LibraryProtection   bool     `json:"library_metadata_protection_enabled"`
 	AddedAt             int64    `json:"added_at"`
 	Title               string   `json:"title"`
 	Authors             string   `json:"authors"`
@@ -1159,6 +1186,9 @@ type BookDetail struct {
 	CoverPath           string   `json:"cover_path"`
 	CoverSource         string   `json:"cover_source"`
 	CoverUpdatedOn      int64    `json:"cover_updated_on"`
+	LockedFields        []string `json:"locked_fields"`
+	ExtractedFromHash   string   `json:"extracted_from_hash"`
+	MetadataUpdatedAt   int64    `json:"metadata_updated_at"`
 	Rating              float64  `json:"rating"`
 	Genres              string   `json:"genres"`
 	Tags                string   `json:"tags"`
@@ -1181,9 +1211,12 @@ type BookDetail struct {
 func fetchBookDetail(bookID int64, user *AppUser) (BookDetail, error) {
 	var book BookDetail
 	var opened int
+	var libraryProtection int
+	var lockedFieldsJSON string
 	err := appDB.QueryRow(`
 		SELECT b.id, b.library_id, b.added_at,
 		       COALESCE(l.name, '') as library_name,
+		       COALESCE(l.metadata_protection_enabled, 0) as library_metadata_protection_enabled,
 		       COALESCE(bm.title, '') as title,
 		       COALESCE(bm.authors, '[]') as authors,
 		       COALESCE(bm.series, '') as series,
@@ -1195,6 +1228,9 @@ func fetchBookDetail(bookID int64, user *AppUser) (BookDetail, error) {
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(bm.cover_source, '') as cover_source,
 		       COALESCE(bm.cover_updated_on, 0) as cover_updated_on,
+		       COALESCE(bm.locked_fields, '[]') as locked_fields,
+		       COALESCE(bm.extracted_from_hash, '') as extracted_from_hash,
+		       COALESCE(bm.metadata_updated_at, 0) as metadata_updated_at,
 		       COALESCE(bm.rating, 0) as rating,
 		       COALESCE(bm.genres, '[]') as genres,
 		       COALESCE(bm.tags, '[]') as tags,
@@ -1217,10 +1253,11 @@ func fetchBookDetail(bookID int64, user *AppUser) (BookDetail, error) {
 			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
 			WHERE b.id = ?
 		`, userIDForScopedRows(user), bookID).Scan(
-		&book.ID, &book.LibraryID, &book.AddedAt, &book.LibraryName,
+		&book.ID, &book.LibraryID, &book.AddedAt, &book.LibraryName, &libraryProtection,
 		&book.Title, &book.Authors, &book.Series, &book.SeriesNumber,
 		&book.SeriesNumberDisplay, &book.Publisher, &book.PubDate, &book.Description, &book.CoverPath, &book.CoverSource,
-		&book.CoverUpdatedOn, &book.Rating, &book.Genres, &book.Tags, &book.ISBN, &book.ASIN, &book.Language, &book.PageCount, &book.ComicSpreadFallback,
+		&book.CoverUpdatedOn, &lockedFieldsJSON, &book.ExtractedFromHash, &book.MetadataUpdatedAt,
+		&book.Rating, &book.Genres, &book.Tags, &book.ISBN, &book.ASIN, &book.Language, &book.PageCount, &book.ComicSpreadFallback,
 		&book.Status, &book.Percent, &book.SpeedReaderPercent, &book.SpeedReaderFileID, &book.SpeedReaderFormat, &book.ResumeFileID, &book.ResumeFormat, &opened,
 	)
 
@@ -1228,6 +1265,8 @@ func fetchBookDetail(bookID int64, user *AppUser) (BookDetail, error) {
 		return book, err
 	}
 
+	book.LibraryProtection = libraryProtection == 1
+	book.LockedFields = metaprotection.NormalizeFields(parseMetadataJSONList(lockedFieldsJSON))
 	book.Tags = mergeMetadataTagJSON(book.Genres, book.Tags)
 
 	pathRows, err := appDB.Query(`SELECT path FROM library_path WHERE library_id = ? ORDER BY length(path) DESC`, book.LibraryID)
@@ -1346,11 +1385,64 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 		updateComicSpreadFallback = 1
 	}
 
-	// Upsert metadata
-	_, err = appDB.Exec(`
+	tx, err := appDB.Begin()
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to start metadata update")
+		return
+	}
+	defer tx.Rollback()
+
+	currentMetadata, metadataExists, err := metaprotection.LoadSnapshot(tx, bookIDInt)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to load existing metadata")
+		return
+	}
+	changedFields := []string{}
+	addChanged := func(field string, changed bool) {
+		if changed {
+			changedFields = append(changedFields, field)
+		}
+	}
+	addChanged(metaprotection.FieldTitle, currentMetadata.Title != req.Title)
+	addChanged(metaprotection.FieldAuthors, !slices.Equal(
+		normalizeMetadataStringList(parseMetadataJSONList(currentMetadata.Authors)),
+		req.Authors,
+	))
+	addChanged(metaprotection.FieldSeries, currentMetadata.Series != req.Series)
+	addChanged(metaprotection.FieldSeriesNumber,
+		currentMetadata.SeriesNumber != seriesNumber || currentMetadata.SeriesNumberDisplay != seriesNumberDisplay)
+	addChanged(metaprotection.FieldPublisher, currentMetadata.Publisher != req.Publisher)
+	addChanged(metaprotection.FieldPubDate, currentMetadata.PubDate != req.PubDate)
+	addChanged(metaprotection.FieldDescription, currentMetadata.Description != req.Description)
+	addChanged(metaprotection.FieldRating, currentMetadata.Rating != req.Rating)
+	addChanged(metaprotection.FieldTags, !slices.Equal(
+		normalizeMetadataStringList(parseMetadataJSONList(currentMetadata.Tags)),
+		req.Tags,
+	))
+	addChanged(metaprotection.FieldISBN, currentMetadata.ISBN != req.ISBN)
+	addChanged(metaprotection.FieldASIN, currentMetadata.ASIN != req.ASIN)
+	addChanged(metaprotection.FieldLanguage, currentMetadata.Language != req.Language)
+	addChanged(metaprotection.FieldPageCount, currentMetadata.PageCount != int64(req.PageCount))
+	changedFields = metaprotection.NormalizeFields(changedFields)
+
+	lockedFields := metaprotection.MergeLocked(currentMetadata.LockedFields, changedFields...)
+	metadataUpdatedAt := currentMetadata.MetadataUpdatedAt
+	if len(changedFields) > 0 {
+		metadataUpdatedAt = time.Now().Unix()
+		if metadataExists {
+			if err := metaprotection.RecordRevision(tx, currentMetadata, changedFields, "manual_edit", current.ID); err != nil {
+				errorResponse(w, http.StatusInternalServerError, "Failed to record metadata revision")
+				return
+			}
+		}
+	}
+
+	// Upsert metadata and protect every field the user actually changed.
+	_, err = tx.Exec(`
 		INSERT INTO book_metadata (book_id, title, authors, series, series_number, series_number_display, publisher, pub_date,
-		                           description, rating, genres, tags, isbn, asin, language, page_count, comic_spread_fallback, owner_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		                           description, rating, genres, tags, isbn, asin, language, page_count, comic_spread_fallback,
+		                           locked_fields, metadata_updated_at, owner_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(book_id) DO UPDATE SET
 		    title = excluded.title,
 		    authors = excluded.authors,
@@ -1368,10 +1460,12 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 		    language = excluded.language,
 		    page_count = excluded.page_count,
 		    comic_spread_fallback = CASE WHEN ? = 1 THEN excluded.comic_spread_fallback ELSE comic_spread_fallback END,
+		    locked_fields = excluded.locked_fields,
+		    metadata_updated_at = excluded.metadata_updated_at,
 		    owner_user_id = excluded.owner_user_id
 	`, bookID, req.Title, string(authorsJSON), req.Series, seriesNumber, seriesNumberDisplay, req.Publisher, req.PubDate,
 		req.Description, req.Rating, string(genresJSON), string(tagsJSON), req.ISBN, req.ASIN, req.Language, req.PageCount,
-		comicSpreadFallback, current.ID, updateComicSpreadFallback)
+		comicSpreadFallback, lockedFields, metadataUpdatedAt, current.ID, updateComicSpreadFallback)
 
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to update book metadata")
@@ -1381,7 +1475,7 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 	// Update reading status if provided
 	if req.Status != "" {
 		bookIDInt, _ := strconv.ParseInt(bookID, 10, 64)
-		_, err = appDB.Exec(`
+		_, err = tx.Exec(`
 			INSERT INTO reading_progress (book_id, status, percent, updated_at, owner_user_id)
 			VALUES (?, ?, 0, 0, ?)
 			ON CONFLICT(book_id, owner_user_id) DO UPDATE SET status = excluded.status
@@ -1390,6 +1484,10 @@ func updateBookHandler(w http.ResponseWriter, r *http.Request) {
 			errorResponse(w, http.StatusInternalServerError, "Failed to update reading status")
 			return
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to commit metadata update")
+		return
 	}
 
 	updatedBook, err := fetchBookDetail(bookIDInt, current)
@@ -2087,13 +2185,15 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT l.id, l.name, COALESCE(l.icon, '') as icon,
 		       COALESCE(l.exclude_from_suggestions, 0) as exclude_from_suggestions,
 		       COALESCE(l.comic_spread_fallback, 'inherit') as comic_spread_fallback,
+		       COALESCE(l.metadata_protection_enabled, 0) as metadata_protection_enabled,
 		       COALESCE(l.sort_order, 0) as sort_order,
 		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL THEN b.id END) as book_count
 		FROM library l
 		LEFT JOIN book b ON l.id = b.library_id
 		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
 		WHERE `+ownerClause+`
-		GROUP BY l.id, l.name, l.icon, l.exclude_from_suggestions, l.comic_spread_fallback, l.sort_order
+		GROUP BY l.id, l.name, l.icon, l.exclude_from_suggestions, l.comic_spread_fallback,
+		         l.metadata_protection_enabled, l.sort_order
 		ORDER BY CASE WHEN COALESCE(l.sort_order, 0) = 0 THEN 1 ELSE 0 END, l.sort_order, l.name
 	`, ownerArgs...)
 	if err != nil {
@@ -2108,6 +2208,7 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 		Icon                   string `json:"icon"`
 		ExcludeFromSuggestions bool   `json:"exclude_from_suggestions"`
 		ComicSpreadFallback    string `json:"comic_spread_fallback"`
+		MetadataProtection     bool   `json:"metadata_protection_enabled"`
 		SortOrder              int64  `json:"sort_order"`
 		BookCount              int64  `json:"book_count"`
 		IsImporting            bool   `json:"is_importing"`
@@ -2117,10 +2218,21 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var lib LibraryResponse
 		var excludeFromSuggestions int
-		if err := rows.Scan(&lib.ID, &lib.Name, &lib.Icon, &excludeFromSuggestions, &lib.ComicSpreadFallback, &lib.SortOrder, &lib.BookCount); err != nil {
+		var metadataProtection int
+		if err := rows.Scan(
+			&lib.ID,
+			&lib.Name,
+			&lib.Icon,
+			&excludeFromSuggestions,
+			&lib.ComicSpreadFallback,
+			&metadataProtection,
+			&lib.SortOrder,
+			&lib.BookCount,
+		); err != nil {
 			continue
 		}
 		lib.ExcludeFromSuggestions = excludeFromSuggestions == 1
+		lib.MetadataProtection = metadataProtection == 1
 		lib.IsImporting = isLibraryScanning(lib.ID)
 		libraries = append(libraries, lib)
 	}
@@ -2139,6 +2251,7 @@ func getLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		Icon                   string   `json:"icon"`
 		ExcludeFromSuggestions bool     `json:"exclude_from_suggestions"`
 		ComicSpreadFallback    string   `json:"comic_spread_fallback"`
+		MetadataProtection     bool     `json:"metadata_protection_enabled"`
 		BookCount              int64    `json:"book_count"`
 		Paths                  []string `json:"paths"`
 	}
@@ -2148,20 +2261,31 @@ func getLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT l.id, l.name, COALESCE(l.icon, '') as icon,
 		       COALESCE(l.exclude_from_suggestions, 0) as exclude_from_suggestions,
 		       COALESCE(l.comic_spread_fallback, 'inherit') as comic_spread_fallback,
+		       COALESCE(l.metadata_protection_enabled, 0) as metadata_protection_enabled,
 		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL THEN b.id END) as book_count
 		FROM library l
 		LEFT JOIN book b ON l.id = b.library_id
 		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
 		WHERE l.id = ? AND ` + ownerClause + `
-		GROUP BY l.id, l.exclude_from_suggestions, l.comic_spread_fallback
+		GROUP BY l.id, l.exclude_from_suggestions, l.comic_spread_fallback, l.metadata_protection_enabled
 	`
 	var excludeFromSuggestions int
-	err := appDB.QueryRow(query, append([]interface{}{libraryID}, ownerArgs...)...).Scan(&lib.ID, &lib.Name, &lib.Icon, &excludeFromSuggestions, &lib.ComicSpreadFallback, &lib.BookCount)
+	var metadataProtection int
+	err := appDB.QueryRow(query, append([]interface{}{libraryID}, ownerArgs...)...).Scan(
+		&lib.ID,
+		&lib.Name,
+		&lib.Icon,
+		&excludeFromSuggestions,
+		&lib.ComicSpreadFallback,
+		&metadataProtection,
+		&lib.BookCount,
+	)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Library not found")
 		return
 	}
 	lib.ExcludeFromSuggestions = excludeFromSuggestions == 1
+	lib.MetadataProtection = metadataProtection == 1
 
 	rows, _ := appDB.Query(`
 		SELECT lp.path
@@ -2854,6 +2978,128 @@ func updateLibraryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func protectLibraryMetadataHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionManageMetadata) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+	libraryID, err := strconv.ParseInt(chi.URLParam(r, "libraryID"), 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid library ID")
+		return
+	}
+	bookCount, err := setLibraryMetadataProtection(current, libraryID, true)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to protect library metadata")
+		return
+	}
+	recordAppLog("info", "metadata", "Protected current library metadata", map[string]any{
+		"library_id": libraryID,
+		"book_count": bookCount,
+	})
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"status":                      "protected",
+		"metadata_protection_enabled": true,
+		"protected_books":             bookCount,
+	})
+}
+
+func updateLibraryMetadataProtectionHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionManageMetadata) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+	libraryID, err := strconv.ParseInt(chi.URLParam(r, "libraryID"), 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid library ID")
+		return
+	}
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid request: enabled is required")
+		return
+	}
+	bookCount, err := setLibraryMetadataProtection(current, libraryID, *req.Enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		errorResponse(w, http.StatusNotFound, "Library not found")
+		return
+	}
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update metadata protection")
+		return
+	}
+	recordAppLog("info", "metadata", "Updated library metadata protection", map[string]any{
+		"library_id": libraryID,
+		"enabled":    *req.Enabled,
+		"book_count": bookCount,
+	})
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"metadata_protection_enabled": *req.Enabled,
+		"book_count":                  bookCount,
+	})
+}
+
+func updateAllLibrariesMetadataProtectionHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	if !requirePermission(current, PermissionManageMetadata) {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid request: enabled is required")
+		return
+	}
+
+	query := `UPDATE library SET metadata_protection_enabled = ?`
+	args := []any{boolToInt(*req.Enabled)}
+	if !userCanAccessAllData(current) {
+		query += ` WHERE owner_user_id = ?`
+		args = append(args, current.ID)
+	}
+	result, err := appDB.Exec(query, args...)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update metadata protection")
+		return
+	}
+	count, _ := result.RowsAffected()
+	recordAppLog("info", "metadata", "Updated metadata protection for all libraries", map[string]any{
+		"enabled":       *req.Enabled,
+		"library_count": count,
+	})
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"metadata_protection_enabled": *req.Enabled,
+		"updated_libraries":           count,
+	})
+}
+
+func setLibraryMetadataProtection(current *AppUser, libraryID int64, enabled bool) (int64, error) {
+	query := `UPDATE library SET metadata_protection_enabled = ? WHERE id = ?`
+	args := []any{boolToInt(enabled), libraryID}
+	if !userCanAccessAllData(current) {
+		query += ` AND owner_user_id = ?`
+		args = append(args, current.ID)
+	}
+	result, err := appDB.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return 0, sql.ErrNoRows
+	}
+	var bookCount int64
+	if err := appDB.QueryRow(`SELECT COUNT(*) FROM book WHERE library_id = ?`, libraryID).Scan(&bookCount); err != nil {
+		return 0, err
+	}
+	return bookCount, nil
 }
 
 func deleteLibraryHandler(w http.ResponseWriter, r *http.Request) {
@@ -3993,12 +4239,14 @@ func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT l.id, l.name, COALESCE(l.icon, '') as icon,
 		       COALESCE(l.exclude_from_suggestions, 0) as exclude_from_suggestions,
 		       COALESCE(l.comic_spread_fallback, 'inherit') as comic_spread_fallback,
+		       COALESCE(l.metadata_protection_enabled, 0) as metadata_protection_enabled,
 		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL THEN b.id END) as book_count
 		FROM library l
 		LEFT JOIN book b ON l.id = b.library_id
 		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
 		WHERE `+ownerClause+`
-		GROUP BY l.id, l.name, l.icon, l.exclude_from_suggestions, l.comic_spread_fallback
+		GROUP BY l.id, l.name, l.icon, l.exclude_from_suggestions, l.comic_spread_fallback,
+		         l.metadata_protection_enabled
 		ORDER BY l.name
 	`, ownerArgs...)
 	if err != nil {
@@ -4013,6 +4261,7 @@ func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		Icon                   string   `json:"icon"`
 		ExcludeFromSuggestions bool     `json:"exclude_from_suggestions"`
 		ComicSpreadFallback    string   `json:"comic_spread_fallback"`
+		MetadataProtection     bool     `json:"metadata_protection_enabled"`
 		BookCount              int64    `json:"book_count"`
 		Paths                  []string `json:"paths"`
 		IsImporting            bool     `json:"is_importing"`
@@ -4022,10 +4271,20 @@ func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var lib LibraryResponse
 		var excludeFromSuggestions int
-		if err := rows.Scan(&lib.ID, &lib.Name, &lib.Icon, &excludeFromSuggestions, &lib.ComicSpreadFallback, &lib.BookCount); err != nil {
+		var metadataProtection int
+		if err := rows.Scan(
+			&lib.ID,
+			&lib.Name,
+			&lib.Icon,
+			&excludeFromSuggestions,
+			&lib.ComicSpreadFallback,
+			&metadataProtection,
+			&lib.BookCount,
+		); err != nil {
 			continue
 		}
 		lib.ExcludeFromSuggestions = excludeFromSuggestions == 1
+		lib.MetadataProtection = metadataProtection == 1
 
 		// Fetch paths
 		paths := []string{}
@@ -4222,11 +4481,37 @@ func getPdfPageCountHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if count > 0 {
-		_, _ = appDB.Exec(`
-			UPDATE book_metadata
-			SET page_count = ?
-			WHERE book_id = ? AND COALESCE(page_count, 0) = 0
-		`, count, bookIDInt)
+		tx, txErr := appDB.Begin()
+		if txErr == nil {
+			defer tx.Rollback()
+			currentMetadata, exists, loadErr := metaprotection.LoadSnapshot(tx, bookIDInt)
+			libraryProtected := false
+			if loadErr == nil && exists {
+				libraryProtected, loadErr = metaprotection.LibraryProtectionEnabled(tx, bookIDInt)
+			}
+			if loadErr == nil && exists && !libraryProtected &&
+				currentMetadata.PageCount == 0 &&
+				!metaprotection.ParseLocked(currentMetadata.LockedFields)[metaprotection.FieldPageCount] {
+				if revisionErr := metaprotection.RecordRevision(
+					tx,
+					currentMetadata,
+					[]string{metaprotection.FieldPageCount},
+					"pdf_page_count",
+					0,
+				); revisionErr == nil {
+					_, txErr = tx.Exec(`
+						UPDATE book_metadata
+						SET page_count = ?, metadata_updated_at = ?
+						WHERE book_id = ? AND COALESCE(page_count, 0) = 0
+					`, count, time.Now().Unix(), bookIDInt)
+				} else {
+					txErr = revisionErr
+				}
+			}
+			if txErr == nil {
+				_ = tx.Commit()
+			}
+		}
 	}
 
 	jsonResponse(w, http.StatusOK, map[string]int{"pages": count})
@@ -4579,7 +4864,7 @@ func authMiddleware(next http.Handler) http.Handler {
 		}
 
 		session, err := sessionStore.ValidateSession(sessionID.Value)
-		if err != nil || session == nil {
+		if err != nil || session == nil || session.UserID != 1 {
 			authFailure(w, r)
 			return
 		}
@@ -4695,34 +4980,20 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var user *AppUser
-	if subtle.ConstantTimeCompare([]byte(req.Username), []byte(appConfig.Auth.Username)) == 1 &&
-		auth.VerifyPasswordHash(req.Password, appConfig.Auth.PasswordHash) {
-		configUser, err := loadUserByUsername(appConfig.Auth.Username)
-		if err != nil {
-			slog.Error("Login matched config credentials but failed to load user", "username", appConfig.Auth.Username, "error", err)
-			errorResponse(w, http.StatusInternalServerError, "Authentication store unavailable")
-			return
-		}
-		user = configUser
-	}
-	if user == nil {
-		dbUser, err := loadUserByUsername(req.Username)
-		if err != nil && err != sql.ErrNoRows {
-			slog.Error("Login failed to load user", "username", req.Username, "error", err)
-			errorResponse(w, http.StatusInternalServerError, "Authentication store unavailable")
-			return
-		}
-		if err == nil && auth.VerifyPasswordHash(req.Password, dbUser.PasswordHash) {
-			user = dbUser
-		}
-	}
-	if user == nil {
+	if subtle.ConstantTimeCompare([]byte(req.Username), []byte(appConfig.Auth.Username)) != 1 ||
+		!auth.VerifyPasswordHash(req.Password, appConfig.Auth.PasswordHash) {
 		recordLoginFailure(throttleKey)
 		errorResponse(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 	clearLoginFailures(throttleKey)
+
+	user, err := loadUserByID(1)
+	if err != nil {
+		slog.Error("Login matched configured credentials but failed to load the single user", "error", err)
+		errorResponse(w, http.StatusInternalServerError, "Authentication store unavailable")
+		return
+	}
 
 	if sessionStore == nil {
 		errorResponse(w, http.StatusInternalServerError, "Session store unavailable")
@@ -4798,9 +5069,17 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 
 func authCheckHandler(w http.ResponseWriter, r *http.Request) {
 	if appConfig.Auth.Mode == "none" {
+		user, err := loadUserByID(1)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Authentication store unavailable")
+			return
+		}
 		jsonResponse(w, http.StatusOK, map[string]interface{}{
 			"authenticated": true,
 			"auth_disabled": true,
+			"auth_mode":     "none",
+			"username":      user.Username,
+			"user_id":       user.ID,
 		})
 		return
 	}
@@ -4813,13 +5092,15 @@ func authCheckHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session, err := sessionStore.ValidateSession(sessionID.Value)
-	if err != nil || session == nil {
+	if err != nil || session == nil || session.UserID != 1 {
 		jsonResponse(w, http.StatusOK, map[string]bool{"authenticated": false})
 		return
 	}
 
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"authenticated": true,
+		"auth_disabled": false,
+		"auth_mode":     "password",
 		"username":      session.Username,
 		"user_id":       session.UserID,
 	})

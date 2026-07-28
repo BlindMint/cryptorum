@@ -9,6 +9,7 @@
 
 	let { children } = $props();
 	let authenticated = $state(false);
+	let authDisabled = $state(false);
 	let loading = $state(true);
 	let wakeLock: WakeLockSentinel | null = null;
 	let wakeLockRequestInFlight = false;
@@ -127,6 +128,7 @@
 				}
 				if (disposed) return;
 				sessionStorage.setItem('cryptorumUserId', String(data.user_id ?? 'default'));
+				authDisabled = data.auth_disabled === true;
 				authenticated = true;
 				await readerSettings.syncWithBackend();
 				if (disposed) return;
@@ -174,7 +176,7 @@
 				></button>
 			{/if}
 			{#if !isReaderPage}
-				<Sidebar />
+				<Sidebar {authDisabled} />
 			{/if}
 				<div class="flex-1 min-w-0 flex flex-col overflow-hidden">
 					<main class="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden {isReaderPage ? '[scrollbar-gutter:auto]' : '[scrollbar-gutter:stable]'} {isReaderPage || isCatalogPage ? '!p-0' : 'p-6'}">

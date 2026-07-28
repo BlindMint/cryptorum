@@ -4,6 +4,7 @@
 	import BookMetadataContext from '$lib/components/BookMetadataContext.svelte';
 	import MetadataFields from '$lib/components/MetadataFields.svelte';
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
+	import MetadataProtectionPanel from '$lib/components/MetadataProtectionPanel.svelte';
 	import {
 		buildMetadataPayload,
 		comicSpreadFallbackOptions,
@@ -405,6 +406,17 @@
 						</button>
 					</div>
 				</div>
+
+				<MetadataProtectionPanel
+					bookId={Number(book.id)}
+					lockedFields={book.locked_fields || []}
+					libraryProtectionEnabled={!!book.library_metadata_protection_enabled}
+					onChanged={(fields) => book = { ...book, locked_fields: fields }}
+					onRestored={(restoredBook) => {
+						book = restoredBook;
+						initializeForm();
+					}}
+				/>
 
 				<MetadataFields bind:editForm bind:authorsList />
 

@@ -3,6 +3,7 @@ package scanner
 import (
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"os"
 	"path/filepath"
@@ -206,6 +207,179 @@ func TestScanChangedSamePathPreservesUserMetadata(t *testing.T) {
 		t.Fatalf("statuses = %#v, want %q", statuses, scanStatusChanged)
 	}
 	assertSingleRelinkedBook(t, db.DB, bookID, 1, path, "User Title")
+}
+
+func TestAutomaticMetadataMergePreservesLockedFieldsAndCustomCover(t *testing.T) {
+	db := setupScannerTestDB(t)
+	coversPath := filepath.Join(t.TempDir(), "covers")
+	scanner := New(db.DB, t.TempDir(), coversPath)
+
+	mustScannerExec(t, db.DB, `
+		INSERT INTO book (id, library_id, added_at, last_scanned, owner_user_id)
+		VALUES (10, 1, 100, 100, 1)
+	`)
+	mustScannerExec(t, db.DB, `
+		INSERT INTO book_file (book_id, path, format, size, hash, hash_algorithm, last_modified, owner_user_id)
+		VALUES (10, 'protected.pdf', 'pdf', 10, 'source-hash', 'sha256-full-v1', 100, 1)
+	`)
+	mustScannerExec(t, db.DB, `
+		INSERT INTO book_metadata (
+			book_id, title, authors, publisher, genres, tags, cover_path, cover_source,
+			locked_fields, owner_user_id
+		) VALUES (
+			10, 'User Title', '["User Author"]', '', '[]', '["Personal"]',
+			'/covers/custom.jpg', 'custom', '["title","authors","tags","cover"]', 1
+		)
+	`)
+
+	coverData, decodeErr := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	if decodeErr != nil {
+		t.Fatalf("decode test cover: %v", decodeErr)
+	}
+	err := scanner.saveMetadataWithSource(10, &metadata.BookMetadata{
+		Title:     "Extracted Title",
+		Authors:   []string{"Extracted Author"},
+		Publisher: "Extracted Publisher",
+		Genres:    []string{"Extracted Tag"},
+		CoverData: coverData,
+	}, 1, "scan_repair")
+	if err != nil {
+		t.Fatalf("merge extracted metadata: %v", err)
+	}
+
+	var title, authors, publisher, tags, coverPath, coverSource, extractedHash string
+	if err := db.QueryRow(`
+		SELECT title, authors, publisher, tags, cover_path, cover_source, extracted_from_hash
+		FROM book_metadata WHERE book_id = 10
+	`).Scan(&title, &authors, &publisher, &tags, &coverPath, &coverSource, &extractedHash); err != nil {
+		t.Fatalf("load merged metadata: %v", err)
+	}
+	if title != "User Title" || authors != `["User Author"]` || tags != `["Personal"]` {
+		t.Fatalf("locked metadata changed: title=%q authors=%s tags=%s", title, authors, tags)
+	}
+	if publisher != "Extracted Publisher" {
+		t.Fatalf("unlocked publisher = %q, want extracted value", publisher)
+	}
+	if coverPath != "/covers/custom.jpg" || coverSource != "custom" {
+		t.Fatalf("custom cover changed: path=%q source=%q", coverPath, coverSource)
+	}
+	if extractedHash != "source-hash" {
+		t.Fatalf("extracted hash = %q, want source-hash", extractedHash)
+	}
+
+	var revisions int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM book_metadata_revision WHERE book_id = 10`).Scan(&revisions); err != nil {
+		t.Fatalf("count revisions: %v", err)
+	}
+	if revisions != 1 {
+		t.Fatalf("revisions = %d, want 1", revisions)
+	}
+}
+
+func TestMissingMetadataRefreshLeavesIntentionallyClearedLockedTitleAlone(t *testing.T) {
+	db := setupScannerTestDB(t)
+	scanner := New(db.DB, t.TempDir(), filepath.Join(t.TempDir(), "covers"))
+	path := filepath.Join(t.TempDir(), "Filename Title.txt")
+	writeTestFile(t, path, []byte("content"))
+
+	mustScannerExec(t, db.DB, `
+		INSERT INTO book (id, library_id, added_at, last_scanned, owner_user_id)
+		VALUES (20, 1, 100, 100, 1)
+	`)
+	mustScannerExec(t, db.DB, `
+		INSERT INTO book_file (book_id, path, format, size, hash, hash_algorithm, last_modified, owner_user_id)
+		VALUES (20, ?, 'txt', 7, 'hash', 'sha256-full-v1', 100, 1)
+	`, path)
+	mustScannerExec(t, db.DB, `
+		INSERT INTO book_metadata (
+			book_id, title, authors, genres, tags, cover_path, locked_fields, owner_user_id
+		) VALUES (20, '', '[]', '[]', '[]', '/covers/existing.jpg', '["title"]', 1)
+	`)
+
+	refreshed, err := scanner.RefreshMissingMetadata(100)
+	if err != nil {
+		t.Fatalf("refresh missing metadata: %v", err)
+	}
+	if refreshed != 0 {
+		t.Fatalf("refreshed = %d, want 0 for protected empty title", refreshed)
+	}
+	var title string
+	if err := db.QueryRow(`SELECT title FROM book_metadata WHERE book_id = 20`).Scan(&title); err != nil {
+		t.Fatalf("load protected title: %v", err)
+	}
+	if title != "" {
+		t.Fatalf("protected cleared title = %q, want empty", title)
+	}
+}
+
+func TestLibraryMetadataProtectionPreservesExistingMetadataButAllowsInitialImport(t *testing.T) {
+	db := setupScannerTestDB(t)
+	scanner := New(db.DB, t.TempDir(), filepath.Join(t.TempDir(), "covers"))
+
+	mustScannerExec(t, db.DB, `UPDATE library SET metadata_protection_enabled = 1 WHERE id = 1`)
+	mustScannerExec(t, db.DB, `
+		INSERT INTO book (id, library_id, added_at, last_scanned, owner_user_id)
+		VALUES (30, 1, 100, 100, 1), (31, 1, 100, 100, 1)
+	`)
+	mustScannerExec(t, db.DB, `
+		INSERT INTO book_file (
+			book_id, path, format, size, hash, hash_algorithm, last_modified, owner_user_id
+		) VALUES
+			(30, '/books/existing.epub', 'epub', 10, 'new-hash', 'sha256-full-v1', 100, 1),
+			(31, '/books/new.epub', 'epub', 10, 'initial-hash', 'sha256-full-v1', 100, 1)
+	`)
+	mustScannerExec(t, db.DB, `
+		INSERT INTO book_metadata (
+			book_id, title, authors, publisher, genres, tags, locked_fields,
+			extracted_from_hash, owner_user_id
+		) VALUES (
+			30, 'Current Title', '[]', 'Current Publisher', '[]', '[]', '[]',
+			'original-hash', 1
+		)
+	`)
+
+	if err := scanner.saveMetadataWithSource(30, &metadata.BookMetadata{
+		Title:     "Replacement Title",
+		Publisher: "Replacement Publisher",
+	}, 1, "scanner"); err != nil {
+		t.Fatalf("refresh protected metadata: %v", err)
+	}
+	var title, publisher, extractedHash string
+	if err := db.QueryRow(`
+		SELECT title, publisher, extracted_from_hash
+		FROM book_metadata WHERE book_id = 30
+	`).Scan(&title, &publisher, &extractedHash); err != nil {
+		t.Fatalf("load protected metadata: %v", err)
+	}
+	if title != "Current Title" || publisher != "Current Publisher" || extractedHash != "original-hash" {
+		t.Fatalf(
+			"protected metadata title=%q publisher=%q hash=%q",
+			title,
+			publisher,
+			extractedHash,
+		)
+	}
+
+	if err := scanner.saveMetadataWithSource(31, &metadata.BookMetadata{
+		Title:     "Initial Title",
+		Publisher: "Initial Publisher",
+	}, 1, "scanner"); err != nil {
+		t.Fatalf("save initial protected-library metadata: %v", err)
+	}
+	if err := db.QueryRow(`
+		SELECT title, publisher, extracted_from_hash
+		FROM book_metadata WHERE book_id = 31
+	`).Scan(&title, &publisher, &extractedHash); err != nil {
+		t.Fatalf("load initial metadata: %v", err)
+	}
+	if title != "Initial Title" || publisher != "Initial Publisher" || extractedHash != "initial-hash" {
+		t.Fatalf(
+			"initial metadata title=%q publisher=%q hash=%q",
+			title,
+			publisher,
+			extractedHash,
+		)
+	}
 }
 
 func setupScannerTestDB(t *testing.T) *appdb.DB {

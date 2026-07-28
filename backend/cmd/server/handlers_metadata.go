@@ -21,6 +21,7 @@ import (
 	"cryptorum/internal/coverprefs"
 	"cryptorum/internal/covers"
 	"cryptorum/internal/metadata"
+	"cryptorum/internal/metaprotection"
 )
 
 // MetadataProvider represents a metadata provider
@@ -1032,8 +1033,9 @@ func ApplyMetadataHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		BookID   int64             `json:"book_id"`
-		Metadata MetadataCandidate `json:"metadata"`
+		BookID         int64             `json:"book_id"`
+		Metadata       MetadataCandidate `json:"metadata"`
+		OverrideLocked bool              `json:"override_locked,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1050,7 +1052,13 @@ func ApplyMetadataHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := applyMetadataCandidateToBook(req.BookID, req.Metadata, true); err != nil {
+	if err := applyMetadataCandidateToBookWithOptions(
+		req.BookID,
+		req.Metadata,
+		true,
+		req.OverrideLocked,
+		current.ID,
+	); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
 			errorResponse(w, http.StatusNotFound, "Book not found")
 			return
@@ -1683,17 +1691,35 @@ func extractWikidataIdentifiers(candidate *MetadataCandidate, claims map[string]
 }
 
 // downloadCover downloads a cover image for a book
-func downloadCover(bookID int64, coverURL string) {
+func downloadCover(bookID int64, coverURL string, overrideLocked bool, actorUserID int64) error {
+	preflight, exists, err := metaprotection.LoadSnapshot(appDB.DB, bookID)
+	if err != nil {
+		return err
+	}
+	if exists && !overrideLocked {
+		libraryProtected, err := metaprotection.LibraryProtectionEnabled(appDB.DB, bookID)
+		if err != nil {
+			return err
+		}
+		locked := metaprotection.ParseLocked(preflight.LockedFields)
+		if libraryProtected || locked[metaprotection.FieldCover] || preflight.CoverSource == "custom" {
+			return nil
+		}
+	}
+
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(coverURL)
 	if err != nil {
-		return
+		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("cover download failed with status %d", resp.StatusCode)
+	}
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
-		return
+		return err
 	}
 
 	settings := covers.LoadSettings(appDB.DB)
@@ -1702,25 +1728,63 @@ func downloadCover(bookID int64, coverURL string) {
 		processed = data
 	}
 
-	// Save cover
+	tx, err := appDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	current, exists, err := metaprotection.LoadSnapshot(tx, bookID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("book metadata not found")
+	}
+	if !overrideLocked {
+		libraryProtected, err := metaprotection.LibraryProtectionEnabled(tx, bookID)
+		if err != nil {
+			return err
+		}
+		locked := metaprotection.ParseLocked(current.LockedFields)
+		if libraryProtected || locked[metaprotection.FieldCover] || current.CoverSource == "custom" {
+			return nil
+		}
+	}
+
 	coverPath, err := covers.SaveCoverBytes(appConfig.GetCoversPath(), bookID, processed)
 	if err != nil {
-		return
+		return err
+	}
+	if err := metaprotection.RecordRevision(
+		tx,
+		current,
+		[]string{metaprotection.FieldCover},
+		"provider_apply",
+		actorUserID,
+	); err != nil {
+		return err
 	}
 
-	var previousPath string
-	_ = appDB.QueryRow("SELECT COALESCE(cover_path, '') FROM book_metadata WHERE book_id = ?", bookID).Scan(&previousPath)
-
-	// Update book_metadata with cover path
-	_, _ = appDB.Exec(`
+	now := time.Now().Unix()
+	lockedFields := metaprotection.MergeLocked(current.LockedFields, metaprotection.FieldCover)
+	_, err = tx.Exec(`
 		UPDATE book_metadata
-		SET cover_path = ?, cover_source = '', cover_updated_on = ?
+		SET cover_path = ?, cover_source = 'provider', cover_updated_on = ?,
+		    locked_fields = ?, metadata_updated_at = ?
 		WHERE book_id = ?
-	`, coverPath, time.Now().Unix(), bookID)
-
-	if previousPath != "" && previousPath != coverPath {
-		_ = os.Remove(previousPath)
+	`, coverPath, now, lockedFields, now, bookID)
+	if err != nil {
+		return err
 	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	if current.CoverPath != "" && current.CoverPath != coverPath {
+		_ = os.Remove(current.CoverPath)
+	}
+	return nil
 }
 
 // RegenerateBookCoverHandler re-extracts and regenerates a cover from the book's source file.
@@ -1797,17 +1861,42 @@ func RegenerateBookCoverHandler(w http.ResponseWriter, r *http.Request) {
 	_ = appDB.QueryRow(`SELECT COALESCE(cover_path, '') FROM book_metadata WHERE book_id = ?`, bookIDInt).Scan(&previousPath)
 
 	now := time.Now().Unix()
-	_, err = appDB.Exec(`
-		INSERT INTO book_metadata (book_id, cover_path, cover_source, cover_updated_on, authors, genres, locked_fields)
-		VALUES (?, ?, '', ?, '[]', '[]', '[]')
+	tx, err := appDB.Begin()
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to start cover update")
+		return
+	}
+	defer tx.Rollback()
+	currentMetadata, metadataExists, err := metaprotection.LoadSnapshot(tx, bookIDInt)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to load cover metadata")
+		return
+	}
+	if metadataExists {
+		if err := metaprotection.RecordRevision(tx, currentMetadata, []string{metaprotection.FieldCover}, "manual_cover_regeneration", current.ID); err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to record cover revision")
+			return
+		}
+	}
+	lockedFields := metaprotection.MergeLocked(currentMetadata.LockedFields, metaprotection.FieldCover)
+	_, err = tx.Exec(`
+		INSERT INTO book_metadata (book_id, cover_path, cover_source, cover_updated_on, authors, genres, locked_fields, metadata_updated_at, owner_user_id)
+		VALUES (?, ?, 'regenerated', ?, '[]', '[]', ?, ?, ?)
 		ON CONFLICT(book_id) DO UPDATE SET
 			cover_path = excluded.cover_path,
 			cover_source = excluded.cover_source,
-			cover_updated_on = excluded.cover_updated_on
-	`, bookIDInt, coverPath, now)
+			cover_updated_on = excluded.cover_updated_on,
+			locked_fields = excluded.locked_fields,
+			metadata_updated_at = excluded.metadata_updated_at,
+			owner_user_id = excluded.owner_user_id
+	`, bookIDInt, coverPath, now, lockedFields, now, current.ID)
 	if err != nil {
 		slog.Error("Failed to update regenerated cover path", "bookID", bookIDInt, "error", err)
 		errorResponse(w, http.StatusInternalServerError, "Failed to update cover metadata")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to commit cover update")
 		return
 	}
 
@@ -1890,19 +1979,47 @@ func UploadBookCoverHandler(w http.ResponseWriter, r *http.Request) {
 	_ = appDB.QueryRow(`SELECT COALESCE(cover_path, '') FROM book_metadata WHERE book_id = ?`, bookIDInt).Scan(&previousPath)
 
 	now := time.Now().Unix()
-	_, err = appDB.Exec(`
-		INSERT INTO book_metadata (book_id, cover_path, cover_source, cover_updated_on, authors, genres, locked_fields, owner_user_id)
-		VALUES (?, ?, 'custom', ?, '[]', '[]', '[]', ?)
+	tx, err := appDB.Begin()
+	if err != nil {
+		_ = os.Remove(coverPath)
+		errorResponse(w, http.StatusInternalServerError, "Failed to start custom cover update")
+		return
+	}
+	defer tx.Rollback()
+	currentMetadata, metadataExists, err := metaprotection.LoadSnapshot(tx, bookIDInt)
+	if err != nil {
+		_ = os.Remove(coverPath)
+		errorResponse(w, http.StatusInternalServerError, "Failed to load cover metadata")
+		return
+	}
+	if metadataExists {
+		if err := metaprotection.RecordRevision(tx, currentMetadata, []string{metaprotection.FieldCover}, "custom_cover", current.ID); err != nil {
+			_ = os.Remove(coverPath)
+			errorResponse(w, http.StatusInternalServerError, "Failed to record cover revision")
+			return
+		}
+	}
+	lockedFields := metaprotection.MergeLocked(currentMetadata.LockedFields, metaprotection.FieldCover)
+	_, err = tx.Exec(`
+		INSERT INTO book_metadata (book_id, cover_path, cover_source, cover_updated_on, authors, genres, locked_fields, metadata_updated_at, owner_user_id)
+		VALUES (?, ?, 'custom', ?, '[]', '[]', ?, ?, ?)
 		ON CONFLICT(book_id) DO UPDATE SET
 			cover_path = excluded.cover_path,
 			cover_source = excluded.cover_source,
 			cover_updated_on = excluded.cover_updated_on,
+			locked_fields = excluded.locked_fields,
+			metadata_updated_at = excluded.metadata_updated_at,
 			owner_user_id = excluded.owner_user_id
-	`, bookIDInt, coverPath, now, current.ID)
+	`, bookIDInt, coverPath, now, lockedFields, now, current.ID)
 	if err != nil {
 		_ = os.Remove(coverPath)
 		slog.Error("Failed to update custom cover metadata", "bookID", bookIDInt, "error", err)
 		errorResponse(w, http.StatusInternalServerError, "Failed to update cover metadata")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		_ = os.Remove(coverPath)
+		errorResponse(w, http.StatusInternalServerError, "Failed to commit custom cover update")
 		return
 	}
 
@@ -1967,25 +2084,50 @@ func ResetBookCoverHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().Unix()
+	tx, txErr := appDB.Begin()
+	if txErr != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to start cover reset")
+		return
+	}
+	defer tx.Rollback()
+	currentMetadata, metadataExists, txErr := metaprotection.LoadSnapshot(tx, bookIDInt)
+	if txErr != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to load cover metadata")
+		return
+	}
+	if metadataExists {
+		if txErr := metaprotection.RecordRevision(tx, currentMetadata, []string{metaprotection.FieldCover}, "reset_cover", current.ID); txErr != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to record cover revision")
+			return
+		}
+	}
+	lockedFields := metaprotection.RemoveLocked(currentMetadata.LockedFields, metaprotection.FieldCover)
 	if restoredPath != "" {
-		_, err = appDB.Exec(`
-			INSERT INTO book_metadata (book_id, cover_path, cover_source, cover_updated_on, authors, genres, locked_fields, owner_user_id)
-			VALUES (?, ?, '', ?, '[]', '[]', '[]', ?)
+		_, err = tx.Exec(`
+			INSERT INTO book_metadata (book_id, cover_path, cover_source, cover_updated_on, authors, genres, locked_fields, metadata_updated_at, owner_user_id)
+			VALUES (?, ?, '', ?, '[]', '[]', ?, ?, ?)
 			ON CONFLICT(book_id) DO UPDATE SET
 				cover_path = excluded.cover_path,
 				cover_source = excluded.cover_source,
 				cover_updated_on = excluded.cover_updated_on,
+				locked_fields = excluded.locked_fields,
+				metadata_updated_at = excluded.metadata_updated_at,
 				owner_user_id = excluded.owner_user_id
-		`, bookIDInt, restoredPath, now, current.ID)
+		`, bookIDInt, restoredPath, now, lockedFields, now, current.ID)
 	} else {
-		_, err = appDB.Exec(`
+		_, err = tx.Exec(`
 			UPDATE book_metadata
-			SET cover_path = '', cover_source = '', cover_updated_on = ?
+			SET cover_path = '', cover_source = '', cover_updated_on = ?,
+			    locked_fields = ?, metadata_updated_at = ?
 			WHERE book_id = ?
-		`, now, bookIDInt)
+		`, now, lockedFields, now, bookIDInt)
 	}
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to reset cover")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to commit cover reset")
 		return
 	}
 
@@ -2046,19 +2188,59 @@ func LockMetadataFieldHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	allowed, err := canAccessBook(current, req.BookID)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
+		return
+	}
+	if !allowed {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+	fields := metaprotection.NormalizeFields(req.Fields)
+	if len(fields) == 0 {
+		errorResponse(w, http.StatusBadRequest, "No valid metadata fields supplied")
+		return
+	}
 
-	fieldsJSON, _ := json.Marshal(req.Fields)
-
-	_, err := appDB.Exec(`
-		UPDATE book_metadata SET locked_fields = ? WHERE book_id = ?
-	`, string(fieldsJSON), req.BookID)
+	tx, err := appDB.Begin()
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to start metadata protection update")
+		return
+	}
+	defer tx.Rollback()
+	snapshot, exists, err := metaprotection.LoadSnapshot(tx, req.BookID)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to load book metadata")
+		return
+	}
+	if !exists {
+		if _, err = tx.Exec(`
+			INSERT INTO book_metadata (book_id, authors, genres, tags, locked_fields, owner_user_id)
+			VALUES (?, '[]', '[]', '[]', '[]', ?)
+		`, req.BookID, current.ID); err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to initialize book metadata")
+			return
+		}
+	}
+	lockedFields := metaprotection.MergeLocked(snapshot.LockedFields, fields...)
+	_, err = tx.Exec(`
+		UPDATE book_metadata SET locked_fields = ?, metadata_updated_at = ? WHERE book_id = ?
+	`, lockedFields, time.Now().Unix(), req.BookID)
 
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to lock fields")
 		return
 	}
+	if err := tx.Commit(); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to commit metadata protection update")
+		return
+	}
 
-	jsonResponse(w, http.StatusOK, map[string]string{"status": "locked"})
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"status":        "locked",
+		"locked_fields": metaprotection.NormalizeFields(parseMetadataJSONList(lockedFields)),
+	})
 }
 
 // UnlockMetadataFieldHandler unlocks a metadata field
@@ -2078,38 +2260,40 @@ func UnlockMetadataFieldHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-
-	// Get current locked fields
-	var lockedFieldsJSON string
-	err := appDB.QueryRow("SELECT locked_fields FROM book_metadata WHERE book_id = ?", req.BookID).Scan(&lockedFieldsJSON)
+	allowed, err := canAccessBook(current, req.BookID)
 	if err != nil {
-		errorResponse(w, http.StatusNotFound, "Book metadata not found")
+		errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
+		return
+	}
+	if !allowed {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+	fields := metaprotection.NormalizeFields(req.Fields)
+	if len(fields) == 0 {
+		errorResponse(w, http.StatusBadRequest, "No valid metadata fields supplied")
 		return
 	}
 
-	var locked []string
-	json.Unmarshal([]byte(lockedFieldsJSON), &locked)
-
-	// Remove specified fields from locked list
-	newLocked := []string{}
-	for _, f := range locked {
-		if !contains(req.Fields, f) {
-			newLocked = append(newLocked, f)
-		}
+	snapshot, exists, err := metaprotection.LoadSnapshot(appDB.DB, req.BookID)
+	if err != nil || !exists {
+		errorResponse(w, http.StatusNotFound, "Book metadata not found")
+		return
 	}
-
-	newLockedJSON, _ := json.Marshal(newLocked)
-
+	lockedFields := metaprotection.RemoveLocked(snapshot.LockedFields, fields...)
 	_, err = appDB.Exec(`
-		UPDATE book_metadata SET locked_fields = ? WHERE book_id = ?
-	`, string(newLockedJSON), req.BookID)
+		UPDATE book_metadata SET locked_fields = ?, metadata_updated_at = ? WHERE book_id = ?
+	`, lockedFields, time.Now().Unix(), req.BookID)
 
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to unlock fields")
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]string{"status": "unlocked"})
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"status":        "unlocked",
+		"locked_fields": metaprotection.NormalizeFields(parseMetadataJSONList(lockedFields)),
+	})
 }
 
 // TriggerScanHandler triggers a library scan

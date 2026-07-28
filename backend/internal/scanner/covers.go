@@ -10,6 +10,7 @@ import (
 	"cryptorum/internal/coverprefs"
 	"cryptorum/internal/covers"
 	"cryptorum/internal/metadata"
+	"cryptorum/internal/metaprotection"
 )
 
 type coverCandidate struct {
@@ -18,6 +19,9 @@ type coverCandidate struct {
 	filePath              string
 	existingCoverPath     string
 	coverSource           string
+	lockedFields          string
+	metadataExists        bool
+	libraryProtected      bool
 	comicSpreadFallback   string
 	librarySpreadFallback string
 }
@@ -112,6 +116,9 @@ func (s *Scanner) coverCandidates(libraryID int64, missingOnly bool) ([]coverCan
 	query := `
 		SELECT b.id, b.library_id, bf.path, COALESCE(bm.cover_path, ''),
 		       COALESCE(bm.cover_source, ''),
+		       COALESCE(bm.locked_fields, '[]'),
+		       CASE WHEN bm.book_id IS NULL THEN 0 ELSE 1 END,
+		       COALESCE(l.metadata_protection_enabled, 0),
 		       COALESCE(bm.comic_spread_fallback, 'inherit'),
 		       COALESCE(l.comic_spread_fallback, 'inherit')
 		FROM book b
@@ -141,13 +148,17 @@ func (s *Scanner) coverCandidates(libraryID int64, missingOnly bool) ([]coverCan
 			&candidate.filePath,
 			&candidate.existingCoverPath,
 			&candidate.coverSource,
+			&candidate.lockedFields,
+			&candidate.metadataExists,
+			&candidate.libraryProtected,
 			&candidate.comicSpreadFallback,
 			&candidate.librarySpreadFallback,
 		); err != nil {
 			continue
 		}
 
-		if candidate.coverSource == "custom" {
+		if (candidate.libraryProtected && candidate.metadataExists) || candidate.coverSource == "custom" ||
+			metaprotection.ParseLocked(candidate.lockedFields)[metaprotection.FieldCover] {
 			continue
 		}
 
@@ -171,15 +182,47 @@ func coverPathExists(path string) bool {
 
 func (s *Scanner) updateCoverRecord(bookID int64, oldCoverPath, newCoverPath string) error {
 	now := time.Now().Unix()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
-	if _, err := s.db.Exec(`
+	current, exists, err := metaprotection.LoadSnapshot(tx, bookID)
+	if err != nil {
+		return err
+	}
+	if exists {
+		libraryProtected, err := metaprotection.LibraryProtectionEnabled(tx, bookID)
+		if err != nil {
+			return err
+		}
+		if libraryProtected {
+			return nil
+		}
+		locked := metaprotection.ParseLocked(current.LockedFields)
+		if locked[metaprotection.FieldCover] || current.CoverSource == "custom" {
+			return nil
+		}
+		if current.CoverPath != newCoverPath || current.CoverSource != "" {
+			if err := metaprotection.RecordRevision(tx, current, []string{metaprotection.FieldCover}, "cover_regeneration", 0); err != nil {
+				return err
+			}
+		}
+	}
+
+	if _, err := tx.Exec(`
 		INSERT INTO book_metadata (book_id, cover_path, cover_source, cover_updated_on, authors, genres, locked_fields)
 		VALUES (?, ?, '', ?, '[]', '[]', '[]')
 		ON CONFLICT(book_id) DO UPDATE SET
 			cover_path = excluded.cover_path,
 			cover_source = excluded.cover_source,
-			cover_updated_on = excluded.cover_updated_on
+			cover_updated_on = excluded.cover_updated_on,
+			metadata_updated_at = excluded.cover_updated_on
 	`, bookID, newCoverPath, now); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 

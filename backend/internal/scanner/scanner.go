@@ -18,6 +18,7 @@ import (
 	"cryptorum/internal/coverprefs"
 	"cryptorum/internal/covers"
 	"cryptorum/internal/metadata"
+	"cryptorum/internal/metaprotection"
 )
 
 var ErrScanCancelled = errors.New("scan cancelled")
@@ -388,7 +389,27 @@ func (s *Scanner) RefreshMissingMetadata(limit int) (int, error) {
 		JOIN book_file bf ON b.id = bf.book_id
 		JOIN library l ON b.library_id = l.id
 		LEFT JOIN book_metadata bm ON b.id = bm.book_id
-		WHERE bm.book_id IS NULL OR bm.title IS NULL OR bm.title = '' OR LOWER(TRIM(bm.title)) = 'untitled' OR bm.cover_path IS NULL
+		WHERE bm.book_id IS NULL
+		   OR (
+		       COALESCE(l.metadata_protection_enabled, 0) = 0
+		       AND (
+		           (
+		               (bm.title IS NULL OR bm.title = '' OR LOWER(TRIM(bm.title)) = 'untitled')
+		               AND NOT EXISTS (
+		                   SELECT 1 FROM json_each(COALESCE(bm.locked_fields, '[]'))
+		                   WHERE value = 'title'
+		               )
+		           )
+		           OR (
+		               bm.cover_path IS NULL
+		               AND COALESCE(bm.cover_source, '') <> 'custom'
+		               AND NOT EXISTS (
+		                   SELECT 1 FROM json_each(COALESCE(bm.locked_fields, '[]'))
+		                   WHERE value = 'cover'
+		               )
+		           )
+		       )
+		   )
 		LIMIT ?
 	`, limit)
 	if err != nil {
@@ -419,7 +440,7 @@ func (s *Scanner) RefreshMissingMetadata(limit int) (int, error) {
 			slog.Debug("Using filename fallback for missing metadata refresh", "path", e.filePath, "error", err)
 		}
 		meta = metadataWithFilenameTitleFallback(meta, e.filePath)
-		if err := s.saveMetadata(e.bookID, meta, e.ownerID); err != nil {
+		if err := s.saveMetadataWithSource(e.bookID, meta, e.ownerID, "metadata_refresh"); err != nil {
 			slog.Error("Failed to save metadata", "bookID", e.bookID, "error", err)
 			continue
 		}
@@ -836,71 +857,192 @@ func (s *Scanner) saveFilenameFallbackTitle(bookID int64, path string, ownerUser
 	if title == "" {
 		return nil
 	}
-	return s.saveMetadata(bookID, &metadata.BookMetadata{
+	return s.saveMetadataWithSource(bookID, &metadata.BookMetadata{
 		Title:   title,
 		Authors: []string{},
 		Genres:  []string{},
 		Source:  "filename",
-	}, ownerUserID)
+	}, ownerUserID, "filename_fallback")
 }
 
 // saveMetadata upserts book metadata and saves the cover image to disk
 func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerUserID int64) error {
-	authorsJSON, _ := json.Marshal(meta.Authors)
-	emptyGenresJSON, _ := json.Marshal([]string{})
-	tagsJSON, _ := json.Marshal(meta.Genres)
-	var existingCoverPath string
-	_ = s.db.QueryRow("SELECT COALESCE(cover_path, '') FROM book_metadata WHERE book_id = ?", bookID).Scan(&existingCoverPath)
+	return s.saveMetadataWithSource(bookID, meta, ownerUserID, "scanner")
+}
 
-	// Save cover image
-	coverPath := ""
-	coverUpdatedOn := int64(0)
-	if len(meta.CoverData) > 0 {
+func (s *Scanner) saveMetadataWithSource(bookID int64, meta *metadata.BookMetadata, ownerUserID int64, source string) error {
+	if meta == nil {
+		return nil
+	}
+
+	authorsJSON, _ := json.Marshal(meta.Authors)
+	tagsJSON, _ := json.Marshal(meta.Genres)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	current, exists, err := metaprotection.LoadSnapshot(tx, bookID)
+	if err != nil {
+		return err
+	}
+	previous := current
+	locked := metaprotection.ParseLocked(current.LockedFields)
+	libraryProtected := false
+	if exists {
+		libraryProtected, err = metaprotection.LibraryProtectionEnabled(tx, bookID)
+		if err != nil {
+			return err
+		}
+		if libraryProtected {
+			for _, field := range metaprotection.AllFields {
+				locked[field] = true
+			}
+		}
+	}
+	changed := []string{}
+
+	applyString := func(field, incoming string, target *string) {
+		if incoming == "" || locked[field] || *target == incoming {
+			return
+		}
+		*target = incoming
+		changed = append(changed, field)
+	}
+	applyFloat := func(field string, incoming float64, target *float64) {
+		if incoming == 0 || locked[field] || *target == incoming {
+			return
+		}
+		*target = incoming
+		changed = append(changed, field)
+	}
+	applyInt := func(field string, incoming int, target *int64) {
+		if incoming == 0 || locked[field] || *target == int64(incoming) {
+			return
+		}
+		*target = int64(incoming)
+		changed = append(changed, field)
+	}
+
+	applyString(metaprotection.FieldTitle, strings.TrimSpace(meta.Title), &current.Title)
+	if len(meta.Authors) > 0 {
+		applyString(metaprotection.FieldAuthors, string(authorsJSON), &current.Authors)
+	}
+	applyString(metaprotection.FieldSeries, strings.TrimSpace(meta.Series), &current.Series)
+	if meta.SeriesNumber != 0 && !locked[metaprotection.FieldSeriesNumber] &&
+		(current.SeriesNumber != meta.SeriesNumber || current.SeriesNumberDisplay != meta.SeriesNumberDisplay) {
+		current.SeriesNumber = meta.SeriesNumber
+		current.SeriesNumberDisplay = meta.SeriesNumberDisplay
+		changed = append(changed, metaprotection.FieldSeriesNumber)
+	}
+	applyString(metaprotection.FieldPublisher, strings.TrimSpace(meta.Publisher), &current.Publisher)
+	applyString(metaprotection.FieldPubDate, strings.TrimSpace(meta.PubDate), &current.PubDate)
+	applyString(metaprotection.FieldDescription, strings.TrimSpace(meta.Description), &current.Description)
+	applyFloat(metaprotection.FieldRating, meta.Rating, &current.Rating)
+	if len(meta.Genres) > 0 {
+		applyString(metaprotection.FieldTags, string(tagsJSON), &current.Tags)
+	}
+	applyString(metaprotection.FieldISBN, strings.TrimSpace(meta.ISBN), &current.ISBN)
+	applyString(metaprotection.FieldASIN, strings.TrimSpace(meta.ASIN), &current.ASIN)
+	applyString(metaprotection.FieldLanguage, strings.TrimSpace(meta.Language), &current.Language)
+	applyInt(metaprotection.FieldPageCount, meta.PageCount, &current.PageCount)
+
+	newCoverPath := ""
+	if len(meta.CoverData) > 0 && !locked[metaprotection.FieldCover] && current.CoverSource != "custom" {
 		settings := covers.LoadSettings(s.db)
-		processed, err := covers.ProcessCover(meta.CoverData, settings)
-		if err == nil && len(processed) > 0 {
+		processed, processErr := covers.ProcessCover(meta.CoverData, settings)
+		if processErr == nil && len(processed) > 0 {
 			if savedPath, saveErr := covers.SaveCoverBytes(s.coversPath, bookID, processed); saveErr == nil {
-				coverPath = savedPath
-				coverUpdatedOn = time.Now().Unix()
+				newCoverPath = savedPath
+				if current.CoverPath != savedPath || current.CoverSource != "" {
+					current.CoverPath = savedPath
+					current.CoverSource = ""
+					current.CoverUpdatedOn = time.Now().Unix()
+					changed = append(changed, metaprotection.FieldCover)
+				}
 			}
 		}
 	}
 
-	_, err := s.db.Exec(`
+	var extractedFromHash string
+	_ = tx.QueryRow(`
+		SELECT COALESCE(hash, '')
+		FROM book_file
+		WHERE book_id = ?
+		ORDER BY CASE WHEN missing_at IS NULL THEN 0 ELSE 1 END, id
+		LIMIT 1
+	`, bookID).Scan(&extractedFromHash)
+	now := time.Now().Unix()
+	if !exists {
+		current.BookID = bookID
+		current.Genres = "[]"
+		current.LockedFields = "[]"
+		current.OwnerUserID = ownerUserID
+	}
+	if !exists || !libraryProtected {
+		current.ExtractedFromHash = extractedFromHash
+	}
+	current.OwnerUserID = ownerUserID
+	if len(changed) > 0 || !exists {
+		current.MetadataUpdatedAt = now
+	}
+
+	if exists && len(changed) > 0 {
+		if err := metaprotection.RecordRevision(tx, previous, changed, source, 0); err != nil {
+			if newCoverPath != "" && newCoverPath != previous.CoverPath {
+				_ = os.Remove(newCoverPath)
+			}
+			return err
+		}
+	}
+
+	_, err = tx.Exec(`
 		INSERT INTO book_metadata
 		    (book_id, title, authors, series, series_number, series_number_display, publisher, pub_date,
-		     description, rating, genres, tags, isbn, asin, language, page_count, cover_path, cover_updated_on, owner_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		     description, rating, genres, tags, isbn, asin, language, page_count, cover_path, cover_source,
+		     cover_updated_on, locked_fields, extracted_from_hash, metadata_updated_at, owner_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(book_id) DO UPDATE SET
-		    title         = COALESCE(NULLIF(excluded.title, ''), title),
-		    authors       = COALESCE(NULLIF(excluded.authors, '[]'), authors),
-		    series        = COALESCE(NULLIF(excluded.series, ''), series),
-		    series_number = COALESCE(NULLIF(excluded.series_number, 0), series_number),
-		    series_number_display = COALESCE(NULLIF(excluded.series_number_display, ''), series_number_display),
-		    publisher     = COALESCE(NULLIF(excluded.publisher, ''), publisher),
-		    pub_date      = COALESCE(NULLIF(excluded.pub_date, ''), pub_date),
-		    description   = COALESCE(NULLIF(excluded.description, ''), description),
-		    rating        = COALESCE(NULLIF(excluded.rating, 0), rating),
-		    tags          = COALESCE(NULLIF(excluded.tags, '[]'), tags),
-		    isbn          = COALESCE(NULLIF(excluded.isbn, ''), isbn),
-		    asin          = COALESCE(NULLIF(excluded.asin, ''), asin),
-		    language      = COALESCE(NULLIF(excluded.language, ''), language),
-		    page_count    = COALESCE(NULLIF(excluded.page_count, 0), page_count),
-		    cover_path    = COALESCE(NULLIF(excluded.cover_path, ''), cover_path),
-		    cover_updated_on = CASE
-		        WHEN excluded.cover_path != '' THEN excluded.cover_updated_on
-		        ELSE cover_updated_on
-		    END
-	`, bookID, meta.Title, string(authorsJSON), meta.Series, meta.SeriesNumber, meta.SeriesNumberDisplay,
-		meta.Publisher, meta.PubDate, meta.Description, meta.Rating,
-		string(emptyGenresJSON), string(tagsJSON), meta.ISBN, meta.ASIN, meta.Language, meta.PageCount, coverPath, coverUpdatedOn, ownerUserID)
-
+		    title = excluded.title,
+		    authors = excluded.authors,
+		    series = excluded.series,
+		    series_number = excluded.series_number,
+		    series_number_display = excluded.series_number_display,
+		    publisher = excluded.publisher,
+		    pub_date = excluded.pub_date,
+		    description = excluded.description,
+		    rating = excluded.rating,
+		    genres = excluded.genres,
+		    tags = excluded.tags,
+		    isbn = excluded.isbn,
+		    asin = excluded.asin,
+		    language = excluded.language,
+		    page_count = excluded.page_count,
+		    cover_path = excluded.cover_path,
+		    cover_source = excluded.cover_source,
+		    cover_updated_on = excluded.cover_updated_on,
+		    locked_fields = excluded.locked_fields,
+		    extracted_from_hash = excluded.extracted_from_hash,
+		    metadata_updated_at = excluded.metadata_updated_at,
+		    owner_user_id = excluded.owner_user_id
+	`, bookID, current.Title, current.Authors, current.Series, current.SeriesNumber, current.SeriesNumberDisplay,
+		current.Publisher, current.PubDate, current.Description, current.Rating, current.Genres, current.Tags,
+		current.ISBN, current.ASIN, current.Language, current.PageCount, current.CoverPath, current.CoverSource,
+		current.CoverUpdatedOn, current.LockedFields, current.ExtractedFromHash, current.MetadataUpdatedAt, current.OwnerUserID)
 	if err != nil {
+		if newCoverPath != "" && newCoverPath != previous.CoverPath {
+			_ = os.Remove(newCoverPath)
+		}
 		return err
 	}
 
-	if coverPath != "" && existingCoverPath != "" && existingCoverPath != coverPath {
-		_ = os.Remove(existingCoverPath)
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	if newCoverPath != "" && previous.CoverPath != "" && previous.CoverPath != newCoverPath {
+		_ = os.Remove(previous.CoverPath)
 	}
 
 	s.syncFTSFromDB(bookID)
@@ -909,25 +1051,49 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 }
 
 func (s *Scanner) repairWeakExtractedMetadata(bookID int64, path string, ownerUserID int64) error {
-	var title, authorsRaw, publisher, pubDate, coverPath string
+	var title, authorsRaw, publisher, pubDate, coverPath, coverSource, lockedFieldsRaw string
 	var pageCount int
 	var libraryID int64
 	err := s.db.QueryRow(`
 		SELECT COALESCE(title, ''), COALESCE(authors, '[]'), COALESCE(publisher, ''),
 		       COALESCE(pub_date, ''), COALESCE(page_count, 0), COALESCE(cover_path, ''),
-		       b.library_id
+		       COALESCE(cover_source, ''), COALESCE(locked_fields, '[]'), b.library_id
 		FROM book b
 		LEFT JOIN book_metadata bm ON b.id = bm.book_id
 		WHERE b.id = ?
-	`, bookID).Scan(&title, &authorsRaw, &publisher, &pubDate, &pageCount, &coverPath, &libraryID)
+	`, bookID).Scan(
+		&title,
+		&authorsRaw,
+		&publisher,
+		&pubDate,
+		&pageCount,
+		&coverPath,
+		&coverSource,
+		&lockedFieldsRaw,
+		&libraryID,
+	)
 	if err != nil {
 		return err
 	}
 
+	libraryProtected, err := metaprotection.LibraryProtectionEnabled(s.db, bookID)
+	if err != nil {
+		return err
+	}
+	if libraryProtected {
+		return nil
+	}
+
+	locked := metaprotection.ParseLocked(lockedFieldsRaw)
 	generated := metadata.ExtractFilename(path)
 	oldFilenameShape := strings.EqualFold(strings.TrimSpace(title), strings.TrimSpace(generated.Title)) &&
-		sameStringList(authorsRaw, generated.Authors)
-	missingUsefulFields := publisher == "" || pubDate == "" || pageCount == 0 || coverPath == ""
+		sameStringList(authorsRaw, generated.Authors) &&
+		(!locked[metaprotection.FieldTitle] || !locked[metaprotection.FieldAuthors])
+	missingUsefulFields :=
+		(publisher == "" && !locked[metaprotection.FieldPublisher]) ||
+			(pubDate == "" && !locked[metaprotection.FieldPubDate]) ||
+			(pageCount == 0 && !locked[metaprotection.FieldPageCount]) ||
+			(coverPath == "" && coverSource != "custom" && !locked[metaprotection.FieldCover])
 	if !oldFilenameShape && !missingUsefulFields {
 		return nil
 	}
@@ -937,21 +1103,8 @@ func (s *Scanner) repairWeakExtractedMetadata(bookID int64, path string, ownerUs
 		return err
 	}
 
-	if err := s.saveMetadata(bookID, extracted, ownerUserID); err != nil {
+	if err := s.saveMetadataWithSource(bookID, extracted, ownerUserID, "scan_repair"); err != nil {
 		return err
-	}
-
-	if oldFilenameShape && strings.TrimSpace(extracted.Title) != "" && len(extracted.Authors) > 0 {
-		authorsJSON, _ := json.Marshal(extracted.Authors)
-		_, err = s.db.Exec(`
-			UPDATE book_metadata
-			SET title = ?, authors = ?
-			WHERE book_id = ?
-		`, extracted.Title, string(authorsJSON), bookID)
-		if err != nil {
-			return err
-		}
-		s.syncFTS(bookID, extracted.Title, extracted.Authors, extracted.Description, extracted.Series)
 	}
 
 	return nil

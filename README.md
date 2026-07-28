@@ -63,7 +63,7 @@ server:
   data_path: /data
 
 auth:
-  mode: password            # Use "none" to disable authentication
+  mode: password            # Required: "password" or "none"
   username: username
   password_hash: "$2a$10$..."  # bcrypt hash of your password
   session_duration: 720h
@@ -92,10 +92,11 @@ metadata:
 Generate a bcrypt hash for your password:
 
 ```bash
-# Using Go
-go run golang.org/x/crypto/bcrypt your-password
-
-# Or use an online bcrypt generator and copy the hash
+cd backend
+read -rsp "Password: " CRYPTORUM_PASSWORD
+printf '\n'
+printf '%s' "$CRYPTORUM_PASSWORD" | go run ./cmd/hash-password
+unset CRYPTORUM_PASSWORD
 ```
 
 ### Docker Deployment
@@ -139,11 +140,16 @@ speed reader settings also include a "keep screen on" option for long mobile rea
 
 ## Authentication
 
-By default, authentication is enabled. Set `auth.mode: none` in config.yaml to disable.
+Cryptorum is explicitly single-user. Authentication protects that one library owner account; it does not provide additional accounts, roles, or per-user libraries.
 
-**Default credentials** (change these!):
-- Username: `username`
-- Password: `password`
+Set `auth.mode` explicitly:
+
+- `password` requires `username` and `password_hash` and uses revocable, server-side sessions.
+- `none` disables the login screen. Use it only when access is already restricted by your network or another trusted authentication layer.
+
+Cryptorum does not ship default credentials. Generate a password hash during setup and keep `config.yaml` out of source control.
+
+Changing the configured username or password hash revokes existing sessions. When upgrading a database that previously contained additional accounts, Cryptorum preserves those rows and their data for safety, revokes their sessions, and prevents new accounts from being created. The single owner account can access every library.
 
 ## Development
 

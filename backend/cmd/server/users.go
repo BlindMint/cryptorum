@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	PermissionManageUsers     = "manage_users"
 	PermissionManageLibraries = "manage_libraries"
 	PermissionManageMetadata  = "manage_metadata"
 	PermissionViewAdmin       = "view_admin"
@@ -24,7 +23,6 @@ const (
 )
 
 var allDefaultPermissions = []string{
-	PermissionManageUsers,
 	PermissionManageLibraries,
 	PermissionManageMetadata,
 	PermissionViewAdmin,
@@ -55,7 +53,26 @@ func ensureBootstrapUser() (*AppUser, error) {
 	passwordHash := strings.TrimSpace(appConfig.Auth.PasswordHash)
 	now := time.Now().Unix()
 
-	_, err := appDB.Exec(`
+	var previousUsername, previousPasswordHash string
+	hadExistingUser := true
+	err := appDB.QueryRow(`
+		SELECT username, COALESCE(password_hash, '')
+		FROM app_user
+		WHERE id = 1
+	`).Scan(&previousUsername, &previousPasswordHash)
+	if err == sql.ErrNoRows {
+		hadExistingUser = false
+	} else if err != nil {
+		return nil, err
+	}
+
+	tx, err := appDB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
 		INSERT INTO app_user (
 			id, username, password_hash, is_admin, is_bootstrap_admin,
 			permissions_json, created_at, updated_at
@@ -71,7 +88,21 @@ func ensureBootstrapUser() (*AppUser, error) {
 		return nil, err
 	}
 
-	_, _ = appDB.Exec(`UPDATE app_user SET is_admin = 1, is_bootstrap_admin = 1 WHERE id = 1`)
+	credentialsChanged := hadExistingUser &&
+		(previousUsername != username || (passwordHash != "" && previousPasswordHash != passwordHash))
+	if credentialsChanged {
+		if _, err := tx.Exec(`
+			UPDATE auth_session
+			SET revoked_at = ?
+			WHERE user_id = 1 AND revoked_at IS NULL
+		`, now); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
 	return loadUserByID(1)
 }
 
@@ -95,104 +126,17 @@ func loadUserByID(userID int64) (*AppUser, error) {
 	return &user, nil
 }
 
-func loadUserByUsername(username string) (*AppUser, error) {
-	var user AppUser
-	var permissionsJSON sql.NullString
-	err := appDB.QueryRow(`
-		SELECT id, username, COALESCE(password_hash, ''), is_admin, is_bootstrap_admin,
-		       COALESCE(permissions_json, '[]'), created_at, updated_at
-		FROM app_user
-		WHERE username = ?
-	`, username).Scan(
-		&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.IsBootstrapAdmin,
-		&permissionsJSON, &user.CreatedAt, &user.UpdatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	_ = json.Unmarshal([]byte(permissionsJSON.String), &user.Permissions)
-	return &user, nil
-}
-
-func listUsers() ([]AppUser, error) {
-	rows, err := appDB.Query(`
-		SELECT id, username, COALESCE(password_hash, ''), is_admin, is_bootstrap_admin,
-		       COALESCE(permissions_json, '[]'), created_at, updated_at
-		FROM app_user
-		ORDER BY id
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	users := []AppUser{}
-	for rows.Next() {
-		var user AppUser
-		var permissionsJSON sql.NullString
-		if err := rows.Scan(
-			&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.IsBootstrapAdmin,
-			&permissionsJSON, &user.CreatedAt, &user.UpdatedAt,
-		); err != nil {
-			continue
-		}
-		_ = json.Unmarshal([]byte(permissionsJSON.String), &user.Permissions)
-		users = append(users, user)
-	}
-	return users, nil
-}
-
 func mustJSON(value any) string {
 	data, _ := json.Marshal(value)
 	return string(data)
 }
 
-func userPermissionSet(user *AppUser) map[string]bool {
-	set := make(map[string]bool)
-	if user == nil {
-		return set
-	}
-	for _, perm := range user.Permissions {
-		set[perm] = true
-	}
-	return set
-}
-
-func userHasPermission(user *AppUser, permission string) bool {
-	if user == nil {
-		return false
-	}
-	if user.IsAdmin || user.IsBootstrapAdmin {
-		return true
-	}
-	return userPermissionSet(user)[permission]
+func userHasPermission(user *AppUser, _ string) bool {
+	return user != nil && user.ID == 1
 }
 
 func requirePermission(user *AppUser, permission string) bool {
 	return userHasPermission(user, permission)
-}
-
-func userPermissionsOrDefault(user *AppUser) []string {
-	if user == nil {
-		return nil
-	}
-	if user.IsAdmin || user.IsBootstrapAdmin {
-		return append([]string{}, allDefaultPermissions...)
-	}
-	if len(user.Permissions) == 0 {
-		return []string{}
-	}
-	return append([]string{}, user.Permissions...)
-}
-
-func updateUserPermissions(userID int64, isAdmin bool, permissions []string) error {
-	_, err := appDB.Exec(`
-		UPDATE app_user
-		SET is_admin = ?, permissions_json = ?, updated_at = ?
-		WHERE id = ? AND is_bootstrap_admin = 0
-	`, boolToInt(isAdmin), mustJSON(permissions), time.Now().Unix(), userID)
-	return err
 }
 
 func boolToInt(value bool) int {
@@ -212,10 +156,10 @@ func loadCurrentUser(r *http.Request) (*AppUser, error) {
 		return loadUserByID(1)
 	}
 	session := getSessionFromContext(r.Context())
-	if session == nil {
+	if session == nil || session.UserID != 1 {
 		return nil, fmt.Errorf("no session")
 	}
-	return loadUserByID(session.UserID)
+	return loadUserByID(1)
 }
 
 func currentUserFromContext(ctx context.Context) *AppUser {
@@ -231,7 +175,7 @@ func currentUserID(ctx context.Context) int64 {
 }
 
 func userCanAccessAllData(user *AppUser) bool {
-	return user != nil && (user.IsAdmin || user.IsBootstrapAdmin)
+	return user != nil && user.ID == 1
 }
 
 func userIDForScopedRows(user *AppUser) int64 {
@@ -245,11 +189,14 @@ func userOwnershipClause(user *AppUser, alias string) (string, []interface{}) {
 	if userCanAccessAllData(user) {
 		return "1 = 1", nil
 	}
+	if user == nil {
+		return "1 = 0", nil
+	}
 	return fmt.Sprintf("%s.owner_user_id = ?", alias), []interface{}{user.ID}
 }
 
 func userOwnsLibrary(user *AppUser, libraryOwnerID int64) bool {
-	return userCanAccessAllData(user) || user.ID == libraryOwnerID
+	return userCanAccessAllData(user) || (user != nil && user.ID == libraryOwnerID)
 }
 
 func mustInt64(value string) int64 {

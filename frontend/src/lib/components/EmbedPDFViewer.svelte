@@ -65,6 +65,8 @@
 
 	const documentId = EMBEDPDF_DOCUMENT_ID;
 	const maxRestoreAttempts = 48;
+	const MIN_PDF_ZOOM = 0.25;
+	const MAX_PDF_ZOOM = 5;
 	const scrollActivity = createEmbedPdfScrollActivityController((delta, scrollTop) => {
 		onScrollActivity?.(delta, scrollTop);
 	});
@@ -496,6 +498,10 @@
 				scroll: {
 					defaultBufferSize: 10,
 					defaultPageGap: 8
+				},
+				zoom: {
+					minZoom: MIN_PDF_ZOOM,
+					maxZoom: MAX_PDF_ZOOM
 				},
 				render: {
 					withAnnotations: false,

@@ -4,6 +4,7 @@
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { appActivity, filterPanelWidth, gridScale, showFormatOnCover, showProgressChipOnCover, getFormatColor } from '$lib/stores';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
+	import { createDebouncedSearchInput } from '$lib/utils/debounced-search-input';
 	import { getCoverThumbUrl, getLibraryCoverThumbSize } from '$lib/utils/covers';
 	import { bookHasCoverProgress } from '$lib/utils/cover-progress';
 	import { getBookReaderHref } from '$lib/utils/book-formats';
@@ -159,6 +160,7 @@
 	let currentOffset = $state(0);
 	const BATCH_SIZE = 80;
 	const SCOPED_SEARCH_DEBOUNCE_MS = 650;
+	const SCOPED_SEARCH_COMPOSITION_FALLBACK_MS = 1000;
 	const BACKGROUND_REFRESH_ACTIVE_INTERVAL_MS = 3000;
 	const BACKGROUND_REFRESH_IDLE_INTERVAL_MS = 30000;
 	const MAX_REFRESH_LIMIT = 200;
@@ -178,11 +180,14 @@
 	const LATIN_CONFUSABLE_SORT_PATTERN = /[ΑАΒВΕЕΖΗНΙІΚКΜМΝΟОΡРΤТΥУΧХϹСαаβвεеηнιіκкμмοоρрτтυуχхϲс]/g;
 	let backgroundRefreshing = false;
 	let backgroundRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-	let searchUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 	let appliedLibrarySearch = $state($page.url.searchParams.get('q') || '');
 	let pendingLibrarySearch: string | null = null;
-	let searchInputComposing = false;
 	let activeBulkSelectionScope = '';
+	const scopedSearchInput = createDebouncedSearchInput({
+		debounceMs: SCOPED_SEARCH_DEBOUNCE_MS,
+		compositionFallbackMs: SCOPED_SEARCH_COMPOSITION_FALLBACK_MS,
+		onCommit: (value) => commitScopedSearch(value)
+	});
 
 	function getQueryValues(params: URLSearchParams, key: string, splitComma: boolean = false): string[] {
 		const values = params.getAll(key);
@@ -648,7 +653,7 @@
 				window.clearTimeout(backgroundRefreshTimer);
 			}
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
-			if (searchUpdateTimer) clearTimeout(searchUpdateTimer);
+			scopedSearchInput.cancel();
 			if (observer) observer.disconnect();
 		};
 	});
@@ -865,10 +870,9 @@
 		navigateWithFilters(url, true, false);
 	}
 
-	function commitScopedSearch() {
-		if (searchUpdateTimer) clearTimeout(searchUpdateTimer);
-		searchUpdateTimer = null;
-		const query = librarySearch.trim();
+	function commitScopedSearch(value: string = librarySearch) {
+		librarySearch = value;
+		const query = value.trim();
 		if (query === appliedLibrarySearch) return;
 
 		pendingLibrarySearch = query;
@@ -881,33 +885,28 @@
 		navigateWithFilters(url, true, false);
 	}
 
-	function updateScopedSearch(value: string) {
+	function updateScopedSearch(value: string, isComposing = false) {
 		librarySearch = value;
-		if (searchUpdateTimer) clearTimeout(searchUpdateTimer);
-		if (searchInputComposing) return;
-		searchUpdateTimer = setTimeout(commitScopedSearch, SCOPED_SEARCH_DEBOUNCE_MS);
+		scopedSearchInput.input(value, isComposing);
 	}
 
 	function handleScopedSearchKeydown(event: KeyboardEvent) {
-		if (event.key !== 'Enter' || event.isComposing) return;
+		if (event.key !== 'Enter') return;
 		event.preventDefault();
-		commitScopedSearch();
+		scopedSearchInput.submit((event.currentTarget as HTMLInputElement).value);
 	}
 
 	function handleScopedSearchCompositionStart() {
-		searchInputComposing = true;
-		if (searchUpdateTimer) clearTimeout(searchUpdateTimer);
-		searchUpdateTimer = null;
+		scopedSearchInput.compositionStart();
 	}
 
 	function handleScopedSearchCompositionEnd(event: CompositionEvent & { currentTarget: HTMLInputElement }) {
-		searchInputComposing = false;
-		updateScopedSearch(event.currentTarget.value);
+		librarySearch = event.currentTarget.value;
+		scopedSearchInput.compositionEnd(event.currentTarget.value);
 	}
 
 	function clearScopedSearch() {
-		if (searchUpdateTimer) clearTimeout(searchUpdateTimer);
-		searchUpdateTimer = null;
+		scopedSearchInput.cancel();
 		librarySearch = '';
 		if (!appliedLibrarySearch) return;
 		pendingLibrarySearch = '';
@@ -1526,14 +1525,24 @@
 					{/if}
 				</div>
 
-					<div class="relative col-start-1 row-start-1 min-w-0">
+					<form
+						class="relative col-start-1 row-start-1 min-w-0"
+						onsubmit={(event) => {
+							event.preventDefault();
+							scopedSearchInput.submit(librarySearch);
+						}}
+					>
 					<svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"></path>
 					</svg>
 					<input
 						type="search"
 						value={librarySearch}
-						oninput={(event) => updateScopedSearch(event.currentTarget.value)}
+						oninput={(event) =>
+							updateScopedSearch(
+								event.currentTarget.value,
+								(event as unknown as InputEvent).isComposing
+							)}
 						onkeydown={handleScopedSearchKeydown}
 						oncompositionstart={handleScopedSearchCompositionStart}
 						oncompositionend={handleScopedSearchCompositionEnd}
@@ -1554,7 +1563,7 @@
 							</svg>
 						</button>
 					{/if}
-				</div>
+				</form>
 
 					<div class="relative col-start-3 row-start-1">
 					{#if showSortMenu}

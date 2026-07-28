@@ -133,3 +133,152 @@ func TestMigration22PreservesExactLegacyReadingPosition(t *testing.T) {
 		t.Fatalf("positions after unread = %d, want 0", remaining)
 	}
 }
+
+func TestMigration23AddsMetadataProtectionState(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "cryptorum.db")
+	conn, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer conn.Close()
+
+	goose.SetBaseFS(embedMigrations)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("set dialect: %v", err)
+	}
+	if err := goose.UpTo(conn, "migrations", 22); err != nil {
+		t.Fatalf("migrate to 22: %v", err)
+	}
+	if err := goose.Up(conn, "migrations"); err != nil {
+		t.Fatalf("migrate to latest: %v", err)
+	}
+
+	var revisionTable string
+	if err := conn.QueryRow(`
+		SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'book_metadata_revision'
+	`).Scan(&revisionTable); err != nil {
+		t.Fatalf("metadata revision table missing: %v", err)
+	}
+	if revisionTable != "book_metadata_revision" {
+		t.Fatalf("revision table = %q", revisionTable)
+	}
+
+	columns := map[string]bool{}
+	rows, err := conn.Query(`PRAGMA table_info(book_metadata)`)
+	if err != nil {
+		t.Fatalf("inspect book_metadata columns: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatalf("scan book_metadata column: %v", err)
+		}
+		columns[name] = true
+	}
+	if !columns["extracted_from_hash"] || !columns["metadata_updated_at"] {
+		t.Fatalf("metadata protection columns = %#v", columns)
+	}
+}
+
+func TestMigration24AddsLibraryMetadataProtectionPolicy(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "cryptorum.db")
+	conn, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer conn.Close()
+
+	goose.SetBaseFS(embedMigrations)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("set dialect: %v", err)
+	}
+	if err := goose.UpTo(conn, "migrations", 23); err != nil {
+		t.Fatalf("migrate to 23: %v", err)
+	}
+	if err := goose.Up(conn, "migrations"); err != nil {
+		t.Fatalf("migrate to latest: %v", err)
+	}
+
+	var defaultValue int
+	if _, err := conn.Exec(`INSERT INTO library (id, name) VALUES (1, 'Main')`); err != nil {
+		t.Fatalf("insert library: %v", err)
+	}
+	if err := conn.QueryRow(`
+		SELECT metadata_protection_enabled FROM library WHERE id = 1
+	`).Scan(&defaultValue); err != nil {
+		t.Fatalf("load metadata protection policy: %v", err)
+	}
+	if defaultValue != 0 {
+		t.Fatalf("metadata protection default = %d, want 0", defaultValue)
+	}
+}
+
+func TestMigration25EnforcesSingleUserWithoutDeletingLegacyData(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "cryptorum.db")
+	conn, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer conn.Close()
+
+	goose.SetBaseFS(embedMigrations)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("set dialect: %v", err)
+	}
+	if err := goose.UpTo(conn, "migrations", 24); err != nil {
+		t.Fatalf("migrate to 24: %v", err)
+	}
+
+	now := int64(1_700_000_000)
+	if _, err := conn.Exec(`
+		INSERT INTO app_user (
+			id, username, password_hash, is_admin, is_bootstrap_admin,
+			permissions_json, created_at, updated_at
+		) VALUES
+			(1, 'owner', 'hash', 1, 1, '[]', ?, ?),
+			(2, 'legacy', 'hash', 0, 0, '[]', ?, ?)
+	`, now, now, now, now); err != nil {
+		t.Fatalf("insert legacy users: %v", err)
+	}
+	if _, err := conn.Exec(`
+		INSERT INTO auth_session (token_hash, user_id, created_at, expires_at, last_seen_at)
+		VALUES ('legacy-token', 2, ?, ?, ?)
+	`, now, now+3600, now); err != nil {
+		t.Fatalf("insert legacy session: %v", err)
+	}
+
+	if err := goose.Up(conn, "migrations"); err != nil {
+		t.Fatalf("migrate to latest: %v", err)
+	}
+
+	var legacyUsers int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM app_user WHERE id = 2`).Scan(&legacyUsers); err != nil {
+		t.Fatalf("count legacy users: %v", err)
+	}
+	if legacyUsers != 1 {
+		t.Fatalf("legacy users = %d, want preserved row", legacyUsers)
+	}
+
+	var revokedAt sql.NullInt64
+	if err := conn.QueryRow(`
+		SELECT revoked_at FROM auth_session WHERE user_id = 2
+	`).Scan(&revokedAt); err != nil {
+		t.Fatalf("load legacy session: %v", err)
+	}
+	if !revokedAt.Valid {
+		t.Fatal("legacy secondary-user session was not revoked")
+	}
+
+	_, err = conn.Exec(`
+		INSERT INTO app_user (
+			username, password_hash, permissions_json, created_at, updated_at
+		) VALUES ('new-user', 'hash', '[]', ?, ?)
+	`, now, now)
+	if err == nil {
+		t.Fatal("expected additional app user insert to fail")
+	}
+}

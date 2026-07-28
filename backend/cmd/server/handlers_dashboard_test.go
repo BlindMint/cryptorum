@@ -103,7 +103,7 @@ func TestDashboardSummaryAdminSeesAllLibraries(t *testing.T) {
 	}
 }
 
-func TestDiscoverBooksScopesAndExcludesHiddenLibraries(t *testing.T) {
+func TestDiscoverBooksSingleUserSeesAllNonHiddenLibraries(t *testing.T) {
 	setupDashboardHandlerTestDB(t)
 
 	rec := httptest.NewRecorder()
@@ -116,11 +116,15 @@ func TestDiscoverBooksScopesAndExcludesHiddenLibraries(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatalf("decode discovery response: %v", err)
 	}
-	if len(response.Books) != 1 {
-		t.Fatalf("expected one discoverable book, got %+v", response.Books)
+	if len(response.Books) != 2 {
+		t.Fatalf("expected two discoverable books, got %+v", response.Books)
 	}
-	if response.Books[0].ID != 1 {
-		t.Fatalf("expected visible owner book, got %+v", response.Books[0])
+	bookIDs := make(map[int64]bool, len(response.Books))
+	for _, book := range response.Books {
+		bookIDs[book.ID] = true
+	}
+	if !bookIDs[1] || !bookIDs[2] {
+		t.Fatalf("expected books from all non-hidden libraries, got %+v", response.Books)
 	}
 }
 

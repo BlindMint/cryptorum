@@ -5,7 +5,7 @@
 	import { appActivity } from '$lib/stores';
 	import type { BackgroundImageDisplay } from '$lib/stores/theme';
 import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
-import AdminPanel from './AdminPanel.svelte';
+import SystemPanel from './SystemPanel.svelte';
 import MetadataManagerContent from '$lib/components/MetadataManagerContent.svelte';
 import JobsPanel from './JobsPanel.svelte';
 import LibraryModal from '$lib/components/LibraryModal.svelte';
@@ -34,9 +34,12 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	let loading = $state(true);
 	let scanning = $state(false);
 	let deletingLibraryId = $state<number | null>(null);
+	let globalMetadataProtectionSaving = $state(false);
+	let globalMetadataProtectionMessage = $state('');
+	let globalMetadataProtectionCheckbox: HTMLInputElement | null = $state(null);
 	let scanPollTimer: number | null = null;
 	let activeLibraryScanJobs = $state<any[]>([]);
-	let activeTab = $state<'general' | 'metadata' | 'reader' | 'appearance' | 'jobs' | 'admin'>('general');
+	let activeTab = $state<'general' | 'metadata' | 'reader' | 'appearance' | 'jobs' | 'system'>('general');
 	let settingsTabContainer: HTMLDivElement | null = $state(null);
 	let settingsTabIndicatorStyle = $state('opacity: 0; transform: translateX(0); width: 0;');
 	let settingsSaved = $state(false);
@@ -70,6 +73,15 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		!!settings.libraries?.some((library: any) => library.is_importing)
 	);
 	let scanActive = $derived(scanning || anyLibraryScanning || activeLibraryScanJobs.length > 0);
+	let protectedLibraryCount = $derived(
+		settings.libraries?.filter((library: any) => library.metadata_protection_enabled).length || 0
+	);
+	let allLibrariesProtected = $derived(
+		(settings.libraries?.length || 0) > 0 && protectedLibraryCount === settings.libraries.length
+	);
+	let libraryProtectionIsMixed = $derived(
+		protectedLibraryCount > 0 && protectedLibraryCount < (settings.libraries?.length || 0)
+	);
 
 	let themeState = $state<{ primary: string; surface: string; appearance: { glowEnabled: boolean; glowAutoMode: boolean; glowColor: string; glowIntensity: number; bgImageEnabled: boolean; bgImageTransparency: number; bgImageDisplay: BackgroundImageDisplay; backgroundImages: string[]; selectedBgImageIndex: number; customThemes: any[]; selectedCustomThemeId: string | null } }>({ primary: DEFAULT_THEME_PRIMARY, surface: DEFAULT_THEME_SURFACE, appearance: { glowEnabled: true, glowAutoMode: true, glowColor: '#f97316', glowIntensity: 10, bgImageEnabled: false, bgImageTransparency: 50, bgImageDisplay: 'fill', backgroundImages: [], selectedBgImageIndex: 0, customThemes: [], selectedCustomThemeId: null } });
 	const bgImageDisplayOptions: Array<{ id: BackgroundImageDisplay; label: string; description: string }> = [
@@ -344,6 +356,60 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 			} else if (confirm('Library folders changed. Scan this library now?')) {
 				await scanLibrary(scanTarget);
 			}
+		}
+	}
+
+	function handleLibraryMetadataProtectionChanged(library: any, enabled: boolean) {
+		settings = {
+			...settings,
+			libraries: (settings.libraries || []).map((item: any) =>
+				item.id === library.id ? { ...item, metadata_protection_enabled: enabled } : item
+			)
+		};
+		if (editingLibrary?.id === library.id) {
+			editingLibrary = { ...editingLibrary, metadata_protection_enabled: enabled };
+		}
+	}
+
+	async function updateAllLibraryMetadataProtection(event: Event) {
+		const checkbox = event.currentTarget as HTMLInputElement;
+		const enabled = checkbox.checked;
+		if (!enabled && !confirm('Allow automatic metadata updates in every library? Fields changed by users will remain individually protected.')) {
+			checkbox.checked = allLibrariesProtected;
+			checkbox.indeterminate = libraryProtectionIsMixed;
+			return;
+		}
+
+		const previousLibraries = settings.libraries || [];
+		settings = {
+			...settings,
+			libraries: previousLibraries.map((library: any) => ({
+				...library,
+				metadata_protection_enabled: enabled
+			}))
+		};
+		globalMetadataProtectionSaving = true;
+		globalMetadataProtectionMessage = '';
+		try {
+			const response = await fetch('/api/libraries/metadata-protection', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ enabled })
+			});
+			if (!response.ok) {
+				globalMetadataProtectionMessage = await response.text();
+				settings = { ...settings, libraries: previousLibraries };
+				return;
+			}
+			globalMetadataProtectionMessage = enabled
+				? 'Existing metadata is protected in every library.'
+				: 'Library-wide protection is off; user-edited fields remain protected.';
+		} catch (error) {
+			console.error('Failed to update metadata protection for all libraries:', error);
+			globalMetadataProtectionMessage = 'Unable to update metadata protection.';
+			settings = { ...settings, libraries: previousLibraries };
+		} finally {
+			globalMetadataProtectionSaving = false;
 		}
 	}
 
@@ -753,7 +819,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		}
 	}
 
-	function setActiveTab(tab: 'general' | 'metadata' | 'reader' | 'appearance' | 'jobs' | 'admin') {
+	function setActiveTab(tab: 'general' | 'metadata' | 'reader' | 'appearance' | 'jobs' | 'system') {
 		activeTab = tab;
 		if (typeof window === 'undefined') return;
 		const url = new URL(window.location.href);
@@ -782,6 +848,12 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		activeTab;
 		void updateSettingsTabIndicator();
 	});
+
+	$effect(() => {
+		if (globalMetadataProtectionCheckbox) {
+			globalMetadataProtectionCheckbox.indeterminate = libraryProtectionIsMixed;
+		}
+	});
 	
 	onMount(async () => {
 		settingsMainEl = document.querySelector('main');
@@ -791,11 +863,11 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		}
 		if (typeof window !== 'undefined') {
 			const tab = new URLSearchParams(window.location.search).get('tab');
-			if (tab === 'users') {
-				activeTab = 'admin';
+			if (tab === 'users' || tab === 'admin') {
+				activeTab = 'system';
 			} else if (tab === 'activity' || tab === 'jobs') {
 				activeTab = 'jobs';
-			} else if (tab === 'general' || tab === 'metadata' || tab === 'reader' || tab === 'appearance' || tab === 'admin') {
+			} else if (tab === 'general' || tab === 'metadata' || tab === 'reader' || tab === 'appearance' || tab === 'system') {
 				activeTab = tab;
 			}
 		}
@@ -874,13 +946,13 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		>
 			Activity
 		</button>
-  		<button
-  			onclick={() => setActiveTab('admin')}
-			data-tab-active={activeTab === 'admin'}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'admin' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
-  		>
-  			Admin
-  		</button>
+		<button
+			onclick={() => setActiveTab('system')}
+			data-tab-active={activeTab === 'system'}
+			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'system' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+		>
+			System
+		</button>
   	</div>
 
 	{#if loading}
@@ -2015,6 +2087,31 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					</div>
 				</div>
 				<div class="p-6">
+					<label class="mb-5 flex items-start justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4 transition-colors hover:border-[var(--color-primary-500)]/60">
+						<span>
+							<span class="block text-sm font-semibold text-[var(--color-surface-text)]">Protect existing metadata in all libraries</span>
+							<span class="mt-1 block max-w-3xl text-xs leading-5 text-[var(--color-surface-text-muted)]">
+								Prevent scans, refreshes, provider lookups, and cover regeneration from replacing current values. New books still receive their initial metadata, and fields directly edited by users remain protected when this is off.
+							</span>
+							{#if settings.libraries?.length}
+								<span class="mt-2 block text-xs font-medium text-[var(--color-primary-400)]">
+									{protectedLibraryCount} of {settings.libraries.length} libraries protected
+								</span>
+							{/if}
+						</span>
+						<input
+							bind:this={globalMetadataProtectionCheckbox}
+							type="checkbox"
+							checked={allLibrariesProtected}
+							disabled={globalMetadataProtectionSaving || !settings.libraries?.length}
+							onchange={updateAllLibraryMetadataProtection}
+							aria-label="Protect existing metadata in all libraries"
+							class="mt-0.5 h-5 w-5 shrink-0 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)] disabled:opacity-50"
+						/>
+					</label>
+					{#if globalMetadataProtectionMessage}
+						<p class="mb-5 text-xs text-[var(--color-surface-text-muted)]">{globalMetadataProtectionMessage}</p>
+					{/if}
 					{#if settings.libraries && settings.libraries.length > 0}
 						<div class="space-y-4">
 							{#each settings.libraries as lib}
@@ -2322,8 +2419,8 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		<MetadataManagerContent showHeader={false} />
 	{:else if activeTab === 'jobs'}
 		<JobsPanel />
-	{:else if activeTab === 'admin'}
-		<AdminPanel />
+	{:else if activeTab === 'system'}
+		<SystemPanel />
 	{/if}
 </div>
 
@@ -2576,6 +2673,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	onSaved={handleLibrarySaved}
 	onScan={(library) => scanLibrary(library)}
 	onRegenerateCovers={(library, mode) => regenerateLibraryCovers(library, mode)}
+	onMetadataProtectionChanged={handleLibraryMetadataProtectionChanged}
 />
 
 <!-- Directory Selection Modal -->

@@ -124,7 +124,7 @@
 		<div class="flex items-start justify-between gap-4 border-b border-[var(--color-surface-border)] px-5 py-4">
 			<div>
 				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Edit Metadata in Bulk</h2>
-				<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">{selectionCount} selected books</p>
+				<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">{selectionCount} selected books. Changed and cleared fields will be protected from automatic refreshes.</p>
 			</div>
 			<button type="button" onclick={onClose} class="rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" aria-label="Close">
 				<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
