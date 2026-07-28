@@ -13,6 +13,8 @@
 		series: FilterOption[];
 		tags: FilterOption[];
 		formats: FilterOption[];
+		publishers: FilterOption[];
+		languages: FilterOption[];
 		filterMode: FilterMode;
 		valueFilterMode: FilterMode;
 		hasActiveFilters: boolean;
@@ -24,11 +26,15 @@
 		onToggleSeries: (value: string) => void;
 		onToggleTag: (value: string) => void;
 		onToggleFormat: (value: string) => void;
+		onTogglePublisher: (value: string) => void;
+		onToggleLanguage: (value: string) => void;
 		onToggleStatus: (value: string) => void;
 		isAuthorSelected: (value: string) => boolean;
 		isSeriesSelected: (value: string) => boolean;
 		isTagSelected: (value: string) => boolean;
 		isFormatSelected: (value: string) => boolean;
+		isPublisherSelected: (value: string) => boolean;
+		isLanguageSelected: (value: string) => boolean;
 		isStatusSelected: (value: string) => boolean;
 		open?: boolean;
 		showBackdrop?: boolean;
@@ -39,6 +45,8 @@
 		series,
 		tags,
 		formats,
+		publishers,
+		languages,
 		filterMode,
 		valueFilterMode,
 		hasActiveFilters,
@@ -50,11 +58,15 @@
 		onToggleSeries,
 		onToggleTag,
 		onToggleFormat,
+		onTogglePublisher,
+		onToggleLanguage,
 		onToggleStatus,
 		isAuthorSelected,
 		isSeriesSelected,
 		isTagSelected,
 		isFormatSelected,
+		isPublisherSelected,
+		isLanguageSelected,
 		isStatusSelected,
 		open = true,
 		showBackdrop = false
@@ -77,12 +89,14 @@
 	let seriesOpen = $state(true);
 	let tagsOpen = $state(true);
 	let formatsOpen = $state(true);
-	let statusOpen = $state(true);
+	let publishersOpen = $state(false);
+	let languagesOpen = $state(false);
 	let authorSearch = $state('');
 	let seriesSearch = $state('');
 	let tagSearch = $state('');
 	let formatSearch = $state('');
-	let statusSearch = $state('');
+	let publisherSearch = $state('');
+	let languageSearch = $state('');
 	let isResizing = $state(false);
 	let activeResizePointerId: number | null = null;
 	let tooltip = $state<{ text: string; top: number; right: number } | null>(null);
@@ -92,7 +106,8 @@
 	let visibleSeries = $derived(visibleFilterOptions(series, seriesSearch, filterOptionSort));
 	let visibleTags = $derived(visibleFilterOptions(tags, tagSearch, filterOptionSort));
 	let visibleFormats = $derived(visibleFilterOptions(formats, formatSearch, filterOptionSort));
-	let visibleStatuses = $derived(visibleStatusOptions(statusSearch, filterOptionSort));
+	let visiblePublishers = $derived(visibleFilterOptions(publishers, publisherSearch, filterOptionSort));
+	let visibleLanguages = $derived(visibleFilterOptions(languages, languageSearch, filterOptionSort));
 
 	function getModeIndex(mode: FilterMode): number {
 		return FILTER_MODES.indexOf(mode);
@@ -111,17 +126,21 @@
 		return sortedFilterOptions(filtered, sort);
 	}
 
-	function visibleStatusOptions(query: string, sort: FilterOptionSort): StatusFilterOption[] {
-		const trimmed = query.trim();
-		const filtered = trimmed
-			? STATUS_FILTER_OPTIONS.filter((option) => lenientSearchMatch(trimmed, option.label))
-			: STATUS_FILTER_OPTIONS;
-		if (sort === 'count') return filtered;
-		return [...filtered].sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }));
-	}
-
 	function filterOptionValue(option: FilterOption): string {
 		return option.value || option.name;
+	}
+
+	function statusChipClass(value: string, selected: boolean): string {
+		if (!selected) {
+			return 'border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-surface-text-muted)] hover:border-[var(--color-primary-500)]/60 hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]';
+		}
+		if (value === 'reading') {
+			return 'border-blue-500/60 bg-blue-500/20 text-blue-200 hover:bg-blue-500/30';
+		}
+		if (value === 'finished') {
+			return 'border-emerald-500/60 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30';
+		}
+		return 'border-[var(--color-primary-500)]/60 bg-[var(--color-primary-500)]/20 text-[var(--color-surface-text)] hover:bg-[var(--color-primary-500)]/30';
 	}
 
 	function filterRowClass(selected: boolean, extra = ''): string {
@@ -348,6 +367,28 @@
 	</div>
 
 	<div class="space-y-2 p-4">
+		<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-3" aria-labelledby="reading-status-filter-label">
+			<div id="reading-status-filter-label" class="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Reading Status</div>
+			<div class="flex flex-wrap gap-2">
+				{#each STATUS_FILTER_OPTIONS as statusOption}
+					{@const selected = isStatusSelected(statusOption.value)}
+					<button
+						type="button"
+						onclick={() => onToggleStatus(statusOption.value)}
+						aria-pressed={selected}
+						class="inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-overlay)] {statusChipClass(statusOption.value, selected)}"
+					>
+						{#if selected}
+							<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+							</svg>
+						{/if}
+						{statusOption.label}
+					</button>
+				{/each}
+			</div>
+		</section>
+
 		<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
 			<button onclick={() => authorsOpen = !authorsOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-700)]">
 				<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Author</span>
@@ -530,26 +571,29 @@
 		</div>
 
 		<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-			<button onclick={() => statusOpen = !statusOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-700)]">
-				<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Reading Status</span>
-				<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {statusOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-				</svg>
-			</button>
-			{#if statusOpen}
-				<div class="border-b border-[var(--color-surface-border)] p-2">
-					<input type="search" bind:value={statusSearch} placeholder="Search statuses" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
+			<button onclick={() => publishersOpen = !publishersOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-overlay)]">
+				<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Publisher</span>
+				<div class="flex items-center space-x-2">
+					<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{publishers.length}</span>
+					<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {publishersOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+					</svg>
 				</div>
-				<div class="py-1">
-					{#each visibleStatuses as statusOption}
-						{@const selected = isStatusSelected(statusOption.value)}
+			</button>
+			{#if publishersOpen}
+				<div class="border-b border-[var(--color-surface-border)] p-2">
+					<input type="search" bind:value={publisherSearch} placeholder="Search publishers" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
+				</div>
+				<div class="max-h-48 overflow-y-auto">
+					{#each visiblePublishers as publisher}
+						{@const selected = isPublisherSelected(publisher.name)}
 						<button
-							onclick={() => onToggleStatus(statusOption.value)}
-							onmouseenter={(event) => showTooltip(event, statusOption.label)}
-							onfocus={(event) => showTooltip(event, statusOption.label, 0)}
+							onclick={() => onTogglePublisher(publisher.name)}
+							onmouseenter={(event) => showTooltip(event, publisher.name)}
+							onfocus={(event) => showTooltip(event, publisher.name, 0)}
 							onmouseleave={hideTooltip}
 							onblur={hideTooltip}
-							class={filterRowClass(selected, 'grid-cols-[1rem_minmax(0,1fr)]')}
+							class={filterRowClass(selected, 'grid-cols-[1rem_minmax(0,1fr)_auto]')}
 						>
 							<span class="flex h-4 w-4 items-center justify-center">
 								{#if selected}
@@ -558,11 +602,59 @@
 									</svg>
 								{/if}
 							</span>
-							<span class="min-w-0 truncate">{statusOption.label}</span>
+							<span class="min-w-0 truncate">{publisher.name}</span>
+							<span class={countClass(selected)}>{publisher.book_count}</span>
 						</button>
 					{/each}
-					{#if visibleStatuses.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching statuses</p>
+					{#if publishers.length === 0}
+						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No publishers found</p>
+					{:else if visiblePublishers.length === 0}
+						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching publishers</p>
+					{/if}
+				</div>
+			{/if}
+		</div>
+
+		<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
+			<button onclick={() => languagesOpen = !languagesOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-overlay)]">
+				<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Language</span>
+				<div class="flex items-center space-x-2">
+					<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{languages.length}</span>
+					<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {languagesOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+					</svg>
+				</div>
+			</button>
+			{#if languagesOpen}
+				<div class="border-b border-[var(--color-surface-border)] p-2">
+					<input type="search" bind:value={languageSearch} placeholder="Search languages" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
+				</div>
+				<div class="max-h-48 overflow-y-auto">
+					{#each visibleLanguages as language}
+						{@const selected = isLanguageSelected(language.name)}
+						<button
+							onclick={() => onToggleLanguage(language.name)}
+							onmouseenter={(event) => showTooltip(event, language.name)}
+							onfocus={(event) => showTooltip(event, language.name, 0)}
+							onmouseleave={hideTooltip}
+							onblur={hideTooltip}
+							class={filterRowClass(selected, 'grid-cols-[1rem_minmax(0,1fr)_auto]')}
+						>
+							<span class="flex h-4 w-4 items-center justify-center">
+								{#if selected}
+									<svg class="h-4 w-4 text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+									</svg>
+								{/if}
+							</span>
+							<span class="min-w-0 truncate">{language.name}</span>
+							<span class={countClass(selected)}>{language.book_count}</span>
+						</button>
+					{/each}
+					{#if languages.length === 0}
+						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No languages found</p>
+					{:else if visibleLanguages.length === 0}
+						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching languages</p>
 					{/if}
 				</div>
 			{/if}

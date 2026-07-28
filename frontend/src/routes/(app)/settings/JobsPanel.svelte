@@ -65,6 +65,7 @@
 	let events = $state<AdminNotification[]>([]);
 	let unreadCount = $state(0);
 	let loading = $state(false);
+	let refreshing = $state(false);
 	let error = $state('');
 	let jobStatus = $state('');
 	let eventType = $state('');
@@ -184,6 +185,7 @@
 
 	async function loadActivity(silent = false) {
 		if (!silent) {
+			refreshing = true;
 			loading = activeJobs.length === 0 && events.length === 0;
 		}
 		error = '';
@@ -206,6 +208,7 @@
 			error = 'Unable to load activity.';
 		} finally {
 			loading = false;
+			if (!silent) refreshing = false;
 		}
 	}
 
@@ -284,20 +287,7 @@
 	});
 </script>
 
-<div class="space-y-6">
-	<div class="flex flex-wrap items-end justify-between gap-3">
-		<div>
-			<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Activity</h2>
-			<p class="text-sm text-[var(--color-surface-text-muted)]">Background operations, notifications, and app events</p>
-		</div>
-		<button
-			onclick={() => loadActivity()}
-			class="px-4 py-2 rounded-lg border border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] transition-colors"
-		>
-			Refresh
-		</button>
-	</div>
-
+<div class="flex min-h-full flex-1 flex-col gap-6">
 	{#if activeJobs.length > 0}
 		<section class="rounded-lg border border-[var(--color-primary-500)]/30 bg-[var(--color-surface-overlay)] overflow-hidden">
 			<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-5 py-3">
@@ -334,7 +324,7 @@
 		</section>
 	{/if}
 
-	<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] overflow-hidden">
+	<section class="flex min-h-[24rem] flex-1 flex-col rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
 		<div class="space-y-4 border-b border-[var(--color-surface-border)] px-6 py-4">
 			<div class="flex flex-wrap items-start justify-between gap-4">
 				<div>
@@ -355,7 +345,19 @@
 							</button>
 						{/each}
 					</div>
-					<button onclick={() => activityExpanded = !activityExpanded} class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:border-[var(--color-primary-500)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] transition-colors">
+					<button
+						type="button"
+						onclick={() => loadActivity()}
+						disabled={refreshing}
+						class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--color-surface-border)] text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)] disabled:cursor-wait disabled:opacity-60"
+						title="Refresh activity"
+						aria-label="Refresh activity"
+					>
+						<svg class="h-4 w-4 {refreshing ? 'animate-spin' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+						</svg>
+					</button>
+					<button onclick={() => activityExpanded = !activityExpanded} class="hidden rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)] md:inline-flex">
 						{sectionButtonLabel(activityExpanded)}
 					</button>
 				</div>
@@ -476,13 +478,13 @@
 			{/if}
 		</div>
 
-		<div class={(activityExpanded ? 'max-h-[calc(100vh-18rem)] min-h-[32rem]' : 'max-h-[calc(100vh-22rem)] min-h-[28rem]') + ' overflow-auto p-6 space-y-3'}>
+		<div class={(activityExpanded ? 'min-h-[24rem]' : 'min-h-[24rem] md:min-h-0 md:flex-1 md:overflow-auto') + ' flex flex-col p-6 space-y-3'}>
 			{#if loading}
-				<div class="text-sm text-[var(--color-surface-text-muted)]">Loading activity...</div>
+				<div class="flex min-h-[16rem] flex-1 items-center justify-center text-sm text-[var(--color-surface-text-muted)]">Loading activity...</div>
 			{:else if error}
 				<div class="text-sm text-red-300">{error}</div>
 			{:else if getActivityItems().length === 0}
-				<div class="text-sm text-[var(--color-surface-text-muted)]">No matching activity.</div>
+				<div class="flex min-h-[16rem] flex-1 items-center justify-center text-sm text-[var(--color-surface-text-muted)]">No matching activity.</div>
 			{:else}
 				{#each getActivityItems() as item (`${item.source}-${item.id}`)}
 					{#if item.source === 'job' && item.job}

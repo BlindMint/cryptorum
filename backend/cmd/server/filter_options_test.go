@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"testing"
 
 	"cryptorum/internal/db"
@@ -199,6 +200,85 @@ func TestBookFiltersCanRequireAllValuesWithinCategory(t *testing.T) {
 	books := fetchBooksForTest(t, "/api/books?q=offensive&author=Will%20Crudge&author=Other%20Author&value_filter_mode=AND")
 	if len(books) != 0 {
 		t.Fatalf("books = %#v, want none", books)
+	}
+}
+
+func TestReadingStatusAlwaysUsesORWithinItsCategory(t *testing.T) {
+	setupFilterOptionsTestDB(t)
+
+	books := fetchBooksForTest(t, "/api/books?library_id=1&status=unread&status=reading&value_filter_mode=AND")
+	titles := bookTitles(books)
+	want := []string{"Offensive", "Other Offensive"}
+	if !sameStringSet(titles, want) {
+		t.Fatalf("titles = %#v, want status union %#v", titles, want)
+	}
+
+	query, args := buildBulkFilterQuery(&AppUser{ID: 1, IsAdmin: true}, bulkFilterRequest{
+		LibraryID:       "1",
+		Status:          filterList{"unread", "reading"},
+		ValueFilterMode: "AND",
+	})
+	rows, err := appDB.Query(query, args...)
+	if err != nil {
+		t.Fatalf("query bulk status filter: %v", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan id: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
+	slices.Sort(ids)
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 2 {
+		t.Fatalf("bulk filter ids = %#v, want [1 2]", ids)
+	}
+}
+
+func TestPublisherAndLanguageFiltersSupportMultipleValuesAndBulkActions(t *testing.T) {
+	setupFilterOptionsTestDB(t)
+	mustExec(t, `UPDATE book_metadata SET publisher = 'Alpha House', language = 'en' WHERE book_id = 1`)
+	mustExec(t, `UPDATE book_metadata SET publisher = 'Beta Press', language = 'fr' WHERE book_id = 2`)
+	mustExec(t, `UPDATE book_metadata SET publisher = 'Gamma Books', language = 'de' WHERE book_id = 3`)
+
+	books := fetchBooksForTest(t, "/api/books?library_id=1&publisher=Alpha%20House&publisher=Beta%20Press&language=en&language=fr")
+	titles := bookTitles(books)
+	want := []string{"Offensive", "Other Offensive"}
+	if !sameStringSet(titles, want) {
+		t.Fatalf("titles = %#v, want publisher/language unions %#v", titles, want)
+	}
+
+	query, args := buildBulkFilterQuery(&AppUser{ID: 1, IsAdmin: true}, bulkFilterRequest{
+		LibraryID: "1",
+		Publisher: filterList{"Alpha House", "Beta Press"},
+		Language:  filterList{"en", "fr"},
+	})
+	rows, err := appDB.Query(query, args...)
+	if err != nil {
+		t.Fatalf("query bulk publisher/language filter: %v", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan id: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
+	slices.Sort(ids)
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 2 {
+		t.Fatalf("bulk filter ids = %#v, want [1 2]", ids)
 	}
 }
 

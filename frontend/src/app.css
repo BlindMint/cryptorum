@@ -92,6 +92,25 @@ body::before {
 	opacity: 0.5;
 }
 
+.toolbar-action {
+	border-color: var(--color-surface-border);
+	background: var(--color-surface-overlay);
+	color: var(--color-surface-text);
+}
+
+.toolbar-action:hover,
+.toolbar-action:focus-visible,
+.toolbar-action[aria-expanded='true'] {
+	border-color: color-mix(in srgb, var(--color-primary-500) 55%, var(--color-surface-border));
+	background: color-mix(in srgb, var(--color-primary-500) 12%, var(--color-surface-overlay));
+	color: var(--color-primary-400);
+}
+
+.toolbar-action:focus-visible {
+	outline: 2px solid var(--color-primary-500);
+	outline-offset: 2px;
+}
+
 .catalog-page-shell {
 	padding: 0.75rem 0.75rem 5rem;
 }

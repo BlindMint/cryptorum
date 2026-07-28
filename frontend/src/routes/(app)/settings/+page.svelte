@@ -6,7 +6,6 @@
 	import type { BackgroundImageDisplay } from '$lib/stores/theme';
 import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 import SystemPanel from './SystemPanel.svelte';
-import MetadataManagerContent from '$lib/components/MetadataManagerContent.svelte';
 import JobsPanel from './JobsPanel.svelte';
 import LibraryModal from '$lib/components/LibraryModal.svelte';
 import { confirmBulkAction } from '$lib/utils/bulk-confirm';
@@ -39,7 +38,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	let globalMetadataProtectionCheckbox: HTMLInputElement | null = $state(null);
 	let scanPollTimer: number | null = null;
 	let activeLibraryScanJobs = $state<any[]>([]);
-	let activeTab = $state<'general' | 'metadata' | 'reader' | 'appearance' | 'jobs' | 'system'>('general');
+	let activeTab = $state<'general' | 'reader' | 'appearance' | 'jobs' | 'system'>('general');
 	let settingsTabContainer: HTMLDivElement | null = $state(null);
 	let settingsTabIndicatorStyle = $state('opacity: 0; transform: translateX(0); width: 0;');
 	let settingsSaved = $state(false);
@@ -819,7 +818,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		}
 	}
 
-	function setActiveTab(tab: 'general' | 'metadata' | 'reader' | 'appearance' | 'jobs' | 'system') {
+	function setActiveTab(tab: 'general' | 'reader' | 'appearance' | 'jobs' | 'system') {
 		activeTab = tab;
 		if (typeof window === 'undefined') return;
 		const url = new URL(window.location.href);
@@ -867,7 +866,10 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				activeTab = 'system';
 			} else if (tab === 'activity' || tab === 'jobs') {
 				activeTab = 'jobs';
-			} else if (tab === 'general' || tab === 'metadata' || tab === 'reader' || tab === 'appearance' || tab === 'system') {
+			} else if (tab === 'metadata') {
+				window.location.replace('/library');
+				return;
+			} else if (tab === 'general' || tab === 'reader' || tab === 'appearance' || tab === 'system') {
 				activeTab = tab;
 			}
 		}
@@ -900,7 +902,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	<link rel="stylesheet" href="/fonts/spectral.css" />
 </svelte:head>
 
-<div class="min-h-full space-y-6 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+<div class="flex min-h-full flex-col gap-6 pb-[calc(1rem+env(safe-area-inset-bottom))]">
  	<div class="flex items-center justify-between">
  		<div>
  			<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">Settings</h1>
@@ -932,13 +934,6 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
   		>
   			Reader
   		</button>
-  		<button
-  			onclick={() => setActiveTab('metadata')}
-			data-tab-active={activeTab === 'metadata'}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'metadata' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
-  		>
-  			Metadata
-  		</button>
 		<button
 			onclick={() => setActiveTab('jobs')}
 			data-tab-active={activeTab === 'jobs'}
@@ -955,8 +950,9 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		</button>
   	</div>
 
+	<div class="flex min-h-[24rem] flex-1 flex-col">
 	{#if loading}
-		<div class="flex justify-center py-12">
+		<div class="flex flex-1 items-center justify-center">
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary-500)]"></div>
 		</div>
 	{:else if activeTab === 'appearance'}
@@ -2415,13 +2411,12 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				</div>
 			</div>
 		</div>
-	{:else if activeTab === 'metadata'}
-		<MetadataManagerContent showHeader={false} />
 	{:else if activeTab === 'jobs'}
 		<JobsPanel />
 	{:else if activeTab === 'system'}
 		<SystemPanel />
 	{/if}
+	</div>
 </div>
 
 <!-- Remove Background Confirmation Modal -->
