@@ -200,7 +200,7 @@
 				</button>
 			</div>
 		</div>
-		<div class="grid gap-4 border-b border-[var(--color-surface-border)] p-6 lg:grid-cols-4">
+		<div class="grid gap-4 border-b border-[var(--color-surface-border)] p-4 lg:grid-cols-4">
 			<label class="space-y-2 lg:col-span-2">
 				<span class="text-sm font-medium text-[var(--color-surface-text)]">Backup Cron</span>
 				<input
@@ -243,7 +243,7 @@
 				{savingBackupSettings ? 'Saving...' : 'Save Backup Settings'}
 			</button>
 		</div>
-		<div class={sectionBodyClass(backupsExpanded) + ' flex flex-col p-6 space-y-3'}>
+		<div class={sectionBodyClass(backupsExpanded) + ' flex flex-col p-4 space-y-3'}>
 			{#if backupsLoading}
 				<div class="flex min-h-[12rem] flex-1 items-center justify-center text-sm text-[var(--color-surface-text-muted)]">Loading backups...</div>
 			{:else if backupError}

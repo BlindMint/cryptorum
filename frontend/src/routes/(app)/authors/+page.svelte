@@ -85,21 +85,21 @@
 			<p class="text-[var(--color-surface-text-muted)]">No authors found</p>
 		</div>
 	{:else}
-		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
+		<div class="grid grid-cols-1 gap-2.5 md:grid-cols-2 2xl:grid-cols-3">
 			{#each getVisibleAuthors() as author}
 				<a
 					href="/library?author={encodeURIComponent(author.name)}"
-					class="flex items-center overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-colors hover:border-[var(--color-primary-500)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+					class="flex items-center overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2.5 transition-colors hover:border-[var(--color-primary-500)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 				>
-					<div class="flex min-w-0 w-full items-center gap-3">
-						<div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)]">
-							<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<div class="flex min-w-0 w-full items-center gap-2.5">
+						<div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)]">
+							<svg class="h-[1.125rem] w-[1.125rem]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
 							</svg>
 						</div>
 						<div class="min-w-0 flex-1">
-							<h3 class="line-clamp-2 break-words text-base font-semibold leading-snug text-[var(--color-surface-text)]">{author.name}</h3>
-							<p class="text-sm text-[var(--color-surface-text-muted)]">{author.book_count} books</p>
+							<h3 class="line-clamp-2 break-words text-sm font-semibold leading-snug text-[var(--color-surface-text)]">{author.name}</h3>
+							<p class="text-xs text-[var(--color-surface-text-muted)]">{author.book_count} books</p>
 						</div>
 					</div>
 				</a>

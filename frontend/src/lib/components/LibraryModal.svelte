@@ -290,9 +290,9 @@
 		></button>
 
 		<div class="relative z-10 flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
-			<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-6 py-4">
+			<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-4 py-3">
 				<div>
-					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">{isEditing ? 'Edit Library' : 'Add Library'}</h3>
+					<h3 class="text-base font-semibold text-[var(--color-surface-text)]">{isEditing ? 'Edit Library' : 'Add Library'}</h3>
 					<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">
 						{isEditing ? 'Update library folders, covers, and display settings.' : 'Create a library from one or more book folders.'}
 					</p>
@@ -310,10 +310,10 @@
 				</button>
 			</div>
 
-			<div class="min-h-0 flex-1 space-y-6 overflow-y-auto p-6">
+			<div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
 				<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 					<div>
-						<label for="library-modal-name" class="mb-2 block text-sm font-medium text-[var(--color-surface-text)]">
+						<label for="library-modal-name" class="mb-1.5 block text-xs font-medium text-[var(--color-surface-text)]">
 							Library Name
 						</label>
 						<input
@@ -326,7 +326,7 @@
 					</div>
 
 					<div>
-						<div class="mb-2 block text-sm font-medium text-[var(--color-surface-text)]">Icon</div>
+						<div class="mb-1.5 block text-xs font-medium text-[var(--color-surface-text)]">Icon</div>
 						<div class="flex gap-2">
 							<button
 								type="button"
@@ -363,7 +363,7 @@
 				<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
 					<label for="library-exclude-suggestions" class="flex items-start justify-between gap-4">
 						<span class="min-w-0">
-							<span class="block text-sm font-medium text-[var(--color-surface-text)]">Exclude from discovery and recommendations</span>
+							<span class="block text-xs font-medium text-[var(--color-surface-text)]">Exclude from discovery and recommendations</span>
 							<span class="mt-1 block text-xs leading-5 text-[var(--color-surface-text-muted)]">
 								Keep this library searchable and readable, but hide its books from dashboard discovery and similar book suggestions.
 							</span>
@@ -378,7 +378,7 @@
 				</div>
 
 				<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
-					<h4 class="text-sm font-semibold text-[var(--color-surface-text)]">Cover</h4>
+					<h4 class="text-xs font-semibold text-[var(--color-surface-text)]">Cover</h4>
 					<div class="mt-3 space-y-3">
 						<label for="library-comic-spread-fallback" class="block text-sm font-medium text-[var(--color-surface-text-muted)]">
 							Wide Comic Fallback Cover
@@ -416,7 +416,7 @@
 
 				<div>
 					<div class="mb-2 flex items-center justify-between gap-3">
-						<div class="block text-sm font-medium text-[var(--color-surface-text)]">Book Folders</div>
+						<div class="block text-xs font-medium text-[var(--color-surface-text)]">Book Folders</div>
 						<button
 							type="button"
 							onclick={openDirectoryModal}
@@ -464,7 +464,7 @@
 					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
 						<div class="flex flex-wrap items-center justify-between gap-3">
 							<div>
-								<h4 class="text-sm font-semibold text-[var(--color-surface-text)]">Library Actions</h4>
+								<h4 class="text-xs font-semibold text-[var(--color-surface-text)]">Library Actions</h4>
 								<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Queue maintenance work for this library.</p>
 							</div>
 							<button
@@ -491,7 +491,7 @@
 							class:cursor-wait={isSavingMetadataProtection}
 						>
 							<span>
-								<span class="block text-sm font-medium text-[var(--color-surface-text)]">Protect existing metadata</span>
+								<span class="block text-xs font-medium text-[var(--color-surface-text)]">Protect existing metadata</span>
 								<span class="mt-1 block text-xs leading-5 text-[var(--color-surface-text-muted)]">
 									Preserve current values during scans, refreshes, provider lookups, and cover regeneration. New books still receive their initial metadata.
 								</span>
@@ -515,7 +515,7 @@
 				{/if}
 			</div>
 
-			<div class="flex justify-end gap-3 border-t border-[var(--color-surface-border)] px-6 py-4">
+			<div class="flex justify-end gap-3 border-t border-[var(--color-surface-border)] px-4 py-3">
 				<button
 					type="button"
 					onclick={closeModal}
@@ -550,8 +550,8 @@
 					onclick={closeDirectoryModal}
 				></button>
 				<div class="relative z-10 flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
-					<div class="flex-shrink-0 border-b border-[var(--color-surface-border)] px-6 py-4">
-						<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Select Directory</h3>
+					<div class="flex-shrink-0 border-b border-[var(--color-surface-border)] px-4 py-3">
+						<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Select Directory</h3>
 						<p class="mt-1 truncate font-mono text-sm text-[var(--color-surface-text-muted)]">{currentDirectory}</p>
 					</div>
 					<div class="flex-1 overflow-y-auto p-4">
@@ -593,7 +593,7 @@
 							</div>
 						{/if}
 					</div>
-					<div class="flex justify-end gap-3 border-t border-[var(--color-surface-border)] px-6 py-4">
+					<div class="flex justify-end gap-3 border-t border-[var(--color-surface-border)] px-4 py-3">
 						<button
 							type="button"
 							onclick={closeDirectoryModal}

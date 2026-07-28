@@ -287,7 +287,7 @@
 	});
 </script>
 
-<div class="flex min-h-full flex-1 flex-col gap-6">
+<div class="flex min-h-full flex-1 flex-col gap-4">
 	{#if activeJobs.length > 0}
 		<section class="rounded-lg border border-[var(--color-primary-500)]/30 bg-[var(--color-surface-overlay)] overflow-hidden">
 			<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-5 py-3">
@@ -478,7 +478,7 @@
 			{/if}
 		</div>
 
-		<div class={(activityExpanded ? 'min-h-[24rem]' : 'min-h-[24rem] md:min-h-0 md:flex-1 md:overflow-auto') + ' flex flex-col p-6 space-y-3'}>
+		<div class={(activityExpanded ? 'min-h-[24rem]' : 'min-h-[24rem] md:min-h-0 md:flex-1 md:overflow-auto') + ' flex flex-col p-4 space-y-3'}>
 			{#if loading}
 				<div class="flex min-h-[16rem] flex-1 items-center justify-center text-sm text-[var(--color-surface-text-muted)]">Loading activity...</div>
 			{:else if error}
@@ -569,7 +569,7 @@
 		<div class="relative z-10 flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
 			<div class="flex items-start justify-between gap-4 border-b border-[var(--color-surface-border)] px-6 py-4">
 				<div class="min-w-0">
-					<h3 class="truncate text-lg font-semibold text-[var(--color-surface-text)]">{detailJob.title}</h3>
+					<h3 class="truncate text-base font-semibold text-[var(--color-surface-text)]">{detailJob.title}</h3>
 					<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">
 						{detailJob.status} · {detailJob.completed_items}/{detailJob.total_items} {detailJob.job_type === 'library_scan' ? 'scanned' : 'completed'} · {detailJob.failed_items} failed
 					</p>
@@ -580,7 +580,7 @@
 					</svg>
 				</button>
 			</div>
-			<div class="min-h-0 flex-1 overflow-y-auto p-6">
+			<div class="min-h-0 flex-1 overflow-y-auto p-4">
 				{#if detailLoading}
 					<div class="text-sm text-[var(--color-surface-text-muted)]">Loading details...</div>
 				{:else if getJobItems(detailJob).length === 0}

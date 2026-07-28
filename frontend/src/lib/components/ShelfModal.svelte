@@ -302,9 +302,9 @@
 		></button>
 
 		<div class="relative z-10 flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
-			<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-6 py-4">
+			<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-4 py-3">
 				<div>
-					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">{isEditing ? 'Edit Shelf' : isMagicShelf ? 'Create Magic Shelf' : 'Create Shelf'}</h3>
+					<h3 class="text-base font-semibold text-[var(--color-surface-text)]">{isEditing ? 'Edit Shelf' : isMagicShelf ? 'Create Magic Shelf' : 'Create Shelf'}</h3>
 					<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">
 						{isMagicShelf ? 'Automatically organize books based on rules.' : 'Manually organize books into a collection.'}
 					</p>
@@ -322,7 +322,7 @@
 				</button>
 			</div>
 
-			<div class="min-h-0 flex-1 space-y-6 overflow-y-auto p-6">
+			<div class="min-h-0 flex-1 space-y-6 overflow-y-auto p-4">
 				{#if !isEditing && allowMagicToggle}
 					<div class="inline-flex rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
 						<button
@@ -530,7 +530,7 @@
 				{/if}
 			</div>
 
-			<div class="flex justify-end gap-3 border-t border-[var(--color-surface-border)] px-6 py-4">
+			<div class="flex justify-end gap-3 border-t border-[var(--color-surface-border)] px-4 py-3">
 				<button
 					type="button"
 					onclick={closeModal}
