@@ -489,9 +489,9 @@
 <div class="fixed inset-0 z-[125] flex items-center justify-center p-4">
 	<button type="button" class="absolute inset-0 bg-black/70" aria-label="Close metadata review" onclick={onClose}></button>
 	<div class="relative flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
-		<header class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-6 py-4">
+		<header class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-4 py-3">
 			<div>
-				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Bulk Metadata Lookup</h2>
+				<h2 class="text-base font-semibold text-[var(--color-surface-text)]">Bulk Metadata Lookup</h2>
 				<p class="text-sm text-[var(--color-surface-text-muted)]">
 					{lookupTitle()}
 				</p>
@@ -741,7 +741,7 @@
 			<button type="button" class="absolute inset-0 bg-black/70" aria-label="Cancel lookup confirmation" onclick={() => showLookupConfirm = false}></button>
 			<div class="relative w-full max-w-lg rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
 				<div class="border-b border-[var(--color-surface-border)] px-5 py-4">
-					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Start metadata lookup?</h3>
+					<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Start metadata lookup?</h3>
 					<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">
 						This will search metadata providers for {bookIds.length} selected book{bookIds.length === 1 ? '' : 's'}.
 					</p>

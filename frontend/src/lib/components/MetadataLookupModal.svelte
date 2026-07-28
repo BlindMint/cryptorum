@@ -597,9 +597,9 @@
 		onclick={closeLookup}
 	></button>
 	<div class="relative z-10 flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
-		<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-6 py-4">
+		<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-4 py-3">
 			<div>
-				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">{title}</h2>
+				<h2 class="text-base font-semibold text-[var(--color-surface-text)]">{title}</h2>
 				<p class="text-sm text-[var(--color-surface-text-muted)]">
 					Review selected books one at a time, search providers, then apply the best match.
 				</p>
@@ -955,7 +955,7 @@
 				onclick={() => { pendingApply = null; overwriteProtectedFields = false; }}
 			></button>
 			<div class="relative w-full max-w-lg rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 shadow-2xl">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Apply metadata result?</h3>
+				<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Apply metadata result?</h3>
 				<p class="mt-2 text-sm text-[var(--color-surface-text-muted)]">
 					The result will update unprotected metadata for this book{pendingApply.mode === 'all' ? ' selection' : ''}. Protected user changes are preserved by default.
 					{#if hasUnsavedChanges}

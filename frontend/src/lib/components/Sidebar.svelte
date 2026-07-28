@@ -35,7 +35,7 @@
 	let activeLibraryScanJobs = $state<any[]>([]);
 	let isLoading = $state(false);
 	let refreshTimer: number | null = null;
-	let sidebarWidth = $state(256);
+	let sidebarWidth = $state(232);
 	let isResizing = $state(false);
 	let activeResizePointerId: number | null = null;
 	let activeLibraryMenu = $state<Library | null>(null);
@@ -54,7 +54,7 @@
 	// Library modal state
 	let showLibraryModal = $state(false);
 	let editingLibrary = $state<Library | null>(null);
-	const SIDEBAR_MIN_WIDTH = 240;
+	const SIDEBAR_MIN_WIDTH = 200;
 	const SIDEBAR_MAX_WIDTH = 400;
 	const SIDEBAR_STORAGE_KEY = 'sidebarWidth';
 	const LIBRARY_NAME_CACHE_KEY = 'cryptorumLibraryNames';
@@ -509,24 +509,24 @@
 <aside
 	id="app-sidebar"
 	class="
-		fixed lg:static top-[4.75rem] lg:top-0 bottom-0 left-0 z-40
-		w-[min(22rem,calc(100vw-0.75rem))] bg-[var(--color-surface-overlay)] shadow-[1px_0_0_rgba(255,255,255,0.03)]
+		fixed lg:static top-[var(--app-topbar-height)] lg:top-0 bottom-0 left-0 z-40
+		w-[min(20rem,calc(100vw-0.75rem))] bg-[var(--color-surface-overlay)] shadow-[1px_0_0_rgba(255,255,255,0.03)]
 		transform overflow-hidden
 		lg:translate-x-0
-		{$desktopSidebarCollapsed ? 'lg:w-0 lg:min-w-0 lg:shadow-none' : 'lg:w-[var(--sidebar-width)] lg:min-w-[240px]'}
+		{$desktopSidebarCollapsed ? 'lg:w-0 lg:min-w-0 lg:shadow-none' : 'lg:w-[var(--sidebar-width)] lg:min-w-[200px]'}
 		{$mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
-		flex flex-col h-[calc(100dvh-4.75rem)] lg:h-full min-h-0
+		flex flex-col h-[calc(100dvh-var(--app-topbar-height))] lg:h-full min-h-0
 	"
 	style={`--sidebar-width: ${sidebarWidth}px;`}
 >
-	<div class={`flex h-full min-w-[240px] flex-col min-h-0 ${$desktopSidebarCollapsed ? 'lg:pointer-events-none lg:opacity-0' : 'lg:opacity-100'}`}>
-	<div class="flex-shrink-0 p-4 pb-3 space-y-1">
+	<div class={`flex h-full min-w-[200px] flex-col min-h-0 ${$desktopSidebarCollapsed ? 'lg:pointer-events-none lg:opacity-0' : 'lg:opacity-100'}`}>
+	<div class="flex-shrink-0 space-y-0.5 p-2 pb-1.5 text-[13px]">
 		<a
 			href="/"
 			onclick={closeMobileNavigation}
-			class="flex items-center space-x-3 px-3 py-2 rounded-lg transition-all duration-200 {isActive('/') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
+			class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-all duration-200 {isActive('/') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
 		>
-			<svg class="w-5 h-5 transition-transform duration-200 {isActive('/') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<svg class="h-4 w-4 shrink-0 transition-transform duration-200 {isActive('/') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
 			</svg>
 			<span>Dashboard</span>
@@ -535,9 +535,9 @@
 		<a
 			href="/library"
 			onclick={closeMobileNavigation}
-			class="flex items-center space-x-3 px-3 py-2 rounded-lg transition-all duration-200 {isActive('/library') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
+			class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-all duration-200 {isActive('/library') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
 		>
-			<svg class="w-5 h-5 transition-transform duration-200 {isActive('/library') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<svg class="h-4 w-4 shrink-0 transition-transform duration-200 {isActive('/library') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
 			</svg>
 			<span>All Books</span>
@@ -546,9 +546,9 @@
 		<a
 			href="/authors"
 			onclick={closeMobileNavigation}
-			class="flex items-center space-x-3 px-3 py-2 rounded-lg transition-all duration-200 {isActive('/authors') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
+			class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-all duration-200 {isActive('/authors') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
 		>
-			<svg class="w-5 h-5 transition-transform duration-200 {isActive('/authors') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<svg class="h-4 w-4 shrink-0 transition-transform duration-200 {isActive('/authors') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
 			</svg>
 			<span>Authors</span>
@@ -557,38 +557,38 @@
 		<a
 			href="/series"
 			onclick={closeMobileNavigation}
-			class="flex items-center space-x-3 px-3 py-2 rounded-lg transition-all duration-200 {isActive('/series') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
+			class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-all duration-200 {isActive('/series') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
 		>
-			<svg class="w-5 h-5 transition-transform duration-200 {isActive('/series') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<svg class="h-4 w-4 shrink-0 transition-transform duration-200 {isActive('/series') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
 			</svg>
 			<span>Series</span>
 		</a>
 	</div>
 
-	<div class="h-px bg-[var(--color-surface-border)] mx-4"></div>
+	<div class="mx-2 h-px bg-[var(--color-surface-border)]"></div>
 
-	<nav class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-4 custom-scrollbar">
+	<nav class="custom-scrollbar min-h-0 flex-1 space-y-2 overflow-x-hidden overflow-y-auto p-2 text-[13px]">
 		<div>
-			<div class="flex items-center justify-between px-3 py-2">
+			<div class="flex items-center justify-between px-2 py-1">
 				<a
 					href="/libraries"
 					onclick={closeMobileNavigation}
-					class="flex items-center space-x-2 rounded-md text-xs font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
+					class="flex items-center gap-1.5 rounded-md text-[10px] font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
 					aria-label="View libraries"
 				>
-					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z"></path>
 					</svg>
 					<span>Libraries</span>
 				</a>
-				<div class="flex items-center gap-1">
+				<div class="flex items-center gap-0.5">
 					<div class="relative">
-						<div class="inline-flex h-7 overflow-hidden rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-700)]">
+						<div class="inline-flex h-6 overflow-hidden rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-700)]">
 							<button
 								type="button"
 								onclick={(event) => { event.stopPropagation(); showLibrarySortMenu = !showLibrarySortMenu; }}
-								class="min-w-0 px-2 text-xs font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-600)] focus:outline-none focus:ring-1 focus:ring-inset focus:ring-[var(--color-primary-500)]"
+								class="min-w-0 px-1.5 text-[11px] font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-600)] focus:outline-none focus:ring-1 focus:ring-inset focus:ring-[var(--color-primary-500)]"
 								aria-haspopup="menu"
 								aria-expanded={showLibrarySortMenu}
 								aria-label="Sort libraries by {librarySortLabel()}"
@@ -599,32 +599,32 @@
 							<button
 								type="button"
 								onclick={(event) => { event.stopPropagation(); toggleLibrarySortDirection(); }}
-								class="flex w-7 items-center justify-center border-l border-[var(--color-surface-border)] text-[var(--color-primary-400)] transition-colors hover:bg-[var(--color-surface-600)] focus:outline-none focus:ring-1 focus:ring-inset focus:ring-[var(--color-primary-500)]"
+								class="flex w-6 items-center justify-center border-l border-[var(--color-surface-border)] text-[var(--color-primary-400)] transition-colors hover:bg-[var(--color-surface-600)] focus:outline-none focus:ring-1 focus:ring-inset focus:ring-[var(--color-primary-500)]"
 								title={librarySortDir === 'asc' ? 'Sort ascending' : 'Sort descending'}
 								aria-label={librarySortDir === 'asc' ? 'Sort libraries ascending' : 'Sort libraries descending'}
 							>
-								<span class="text-sm leading-none">{librarySortDir === 'asc' ? '↑' : '↓'}</span>
+								<span class="text-xs leading-none">{librarySortDir === 'asc' ? '↑' : '↓'}</span>
 							</button>
 						</div>
 						{#if showLibrarySortMenu}
-							<div class="absolute right-0 top-full z-[85] mt-1 w-28 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-1 shadow-xl" role="menu">
+							<div class="absolute right-0 top-full z-[85] mt-1 w-28 overflow-hidden rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-0.5 shadow-xl" role="menu">
 								<button
 									type="button"
-									class="block w-full px-3 py-2 text-left text-xs text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)] {librarySortMode === 'name' ? 'text-[var(--color-primary-300)]' : ''}"
+									class="block w-full px-2.5 py-1.5 text-left text-[11px] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)] {librarySortMode === 'name' ? 'text-[var(--color-primary-300)]' : ''}"
 									onclick={(event) => { event.stopPropagation(); showLibrarySortMenu = false; applyLibrarySort('name'); }}
 								>
 									Name
 								</button>
 								<button
 									type="button"
-									class="block w-full px-3 py-2 text-left text-xs text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)] {librarySortMode === 'count' ? 'text-[var(--color-primary-300)]' : ''}"
+									class="block w-full px-2.5 py-1.5 text-left text-[11px] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)] {librarySortMode === 'count' ? 'text-[var(--color-primary-300)]' : ''}"
 									onclick={(event) => { event.stopPropagation(); showLibrarySortMenu = false; applyLibrarySort('count'); }}
 								>
 									Count
 								</button>
 								<button
 									type="button"
-									class="block w-full px-3 py-2 text-left text-xs text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)] {librarySortMode === 'length' ? 'text-[var(--color-primary-300)]' : ''}"
+									class="block w-full px-2.5 py-1.5 text-left text-[11px] text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)] {librarySortMode === 'length' ? 'text-[var(--color-primary-300)]' : ''}"
 									onclick={(event) => { event.stopPropagation(); showLibrarySortMenu = false; applyLibrarySort('length'); }}
 								>
 									Length
@@ -634,10 +634,10 @@
 					</div>
 					<button
 						onclick={openLibraryModal}
-						class="p-1 rounded text-[var(--color-surface-text-muted)] hover:text-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)] transition-colors"
+						class="rounded p-0.5 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-500)]"
 						title="Add Library"
 					>
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
 						</svg>
 					</button>
@@ -653,22 +653,22 @@
 					ondragend={clearLibraryDragState}
 					ondragover={(event) => handleLibraryDragOver(event, library)}
 					ondrop={(event) => handleLibraryDrop(event, library)}
-					class="group/library-row relative flex items-center rounded-lg transition-all duration-200 {draggedLibraryId === library.id ? 'opacity-50' : ''} {isActive('/library?library=' + library.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
+					class="group/library-row relative flex items-center rounded-md transition-all duration-200 {draggedLibraryId === library.id ? 'opacity-50' : ''} {isActive('/library?library=' + library.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
 				>
 					{#if libraryDropTargetId === library.id && draggedLibraryId !== library.id}
-						<div class="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded-full bg-[var(--color-primary-400)] shadow-[0_0_10px_var(--color-primary-500)] {libraryDropPosition === 'before' ? '-top-1' : '-bottom-1'}"></div>
+						<div class="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded-full bg-[var(--color-primary-400)] shadow-[0_0_10px_var(--color-primary-500)] {libraryDropPosition === 'before' ? '-top-0.5' : '-bottom-0.5'}"></div>
 					{/if}
 					<a
 						href="/library?library={library.id}"
 						onclick={closeMobileNavigation}
-						class="flex min-w-0 flex-1 items-center space-x-3 px-3 py-2"
+						class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1"
 					>
 							{#if isLibraryScanActive(library)}
-								<svg class="animate-scan-spin w-5 h-5 text-[var(--color-primary-500)] flex-shrink-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<svg class="animate-scan-spin h-4 w-4 flex-shrink-0 text-[var(--color-primary-500)] transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
 								</svg>
 							{:else}
-								<div class="sidebar-icon-svg h-5 w-5 flex-shrink-0 text-[var(--color-primary-500)] transition-transform duration-200 group-hover/library-row:hidden">
+								<div class="sidebar-icon-svg h-4 w-4 flex-shrink-0 text-[var(--color-primary-500)] transition-transform duration-200 group-hover/library-row:hidden">
 									{#if parsedLibraryIcon?.svg}
 										{@html parsedLibraryIcon.svg}
 									{:else}
@@ -677,7 +677,7 @@
 										</svg>
 									{/if}
 								</div>
-								<svg class="hidden h-5 w-5 flex-shrink-0 cursor-grab text-[var(--color-surface-text-muted)] group-hover/library-row:block" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<svg class="hidden h-4 w-4 flex-shrink-0 cursor-grab text-[var(--color-surface-text-muted)] group-hover/library-row:block" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 									<circle cx="9" cy="7" r="1.5"></circle>
 									<circle cx="15" cy="7" r="1.5"></circle>
 									<circle cx="9" cy="12" r="1.5"></circle>
@@ -686,11 +686,11 @@
 									<circle cx="15" cy="17" r="1.5"></circle>
 								</svg>
 							{/if}
-							<span class="truncate flex-1 min-w-0">{library.name}</span>
+							<span class="min-w-0 flex-1 truncate">{library.name}</span>
 					</a>
 					<button
 						type="button"
-						class="group/count relative mr-2 inline-flex h-7 min-w-8 flex-shrink-0 items-center justify-center rounded-md bg-[var(--color-surface-700)] px-2 text-xs font-medium text-[var(--color-surface-500)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
+						class="group/count relative mr-1 inline-flex h-5 min-w-6 flex-shrink-0 items-center justify-center rounded px-1.5 text-[11px] font-medium text-[var(--color-surface-500)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] bg-[var(--color-surface-700)]"
 						aria-haspopup="menu"
 						aria-expanded={activeLibraryMenu?.id === library.id}
 						aria-label="Open actions for {library.name}"
@@ -698,7 +698,7 @@
 						onclick={(event) => openLibraryMenu(event, library)}
 					>
 						<span class="transition-opacity group-hover/count:opacity-0 group-focus/count:opacity-0 {activeLibraryMenu?.id === library.id ? 'opacity-0' : ''}">{library.book_count}</span>
-						<svg class="absolute h-4 w-4 opacity-0 transition-opacity group-hover/count:opacity-100 group-focus/count:opacity-100 {activeLibraryMenu?.id === library.id ? 'opacity-100' : ''}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+						<svg class="absolute h-3.5 w-3.5 opacity-0 transition-opacity group-hover/count:opacity-100 group-focus/count:opacity-100 {activeLibraryMenu?.id === library.id ? 'opacity-100' : ''}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
 							<circle cx="12" cy="5" r="2"></circle>
 							<circle cx="12" cy="12" r="2"></circle>
 							<circle cx="12" cy="19" r="2"></circle>
@@ -709,14 +709,14 @@
 		</div>
 
 		<div>
-			<div class="flex items-center justify-between px-3 py-2">
+			<div class="flex items-center justify-between px-2 py-1">
 				<a
 					href="/shelves"
 					onclick={closeMobileNavigation}
-					class="flex items-center space-x-2 rounded-md text-xs font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
+					class="flex items-center gap-1.5 rounded-md text-[10px] font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
 					aria-label="View shelves"
 				>
-					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
 					</svg>
 					<span>Shelves</span>
@@ -724,10 +724,10 @@
 				<button
 					type="button"
 					onclick={() => { openShelfModal(); closeMobileNavigation(); }}
-					class="p-1 rounded text-[var(--color-surface-text-muted)] hover:text-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)] transition-colors"
+					class="rounded p-0.5 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-500)]"
 					title="Create Shelf"
 				>
-					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
 					</svg>
 				</button>
@@ -742,17 +742,17 @@
 					ondragend={clearShelfDragState}
 					ondragover={(event) => handleShelfDragOver(event, shelf)}
 					ondrop={(event) => handleShelfDrop(event, shelf)}
-					class="group/shelf-row relative flex items-center rounded-lg transition-all duration-200 {draggedShelfId === shelf.id ? 'opacity-50' : ''} {isActive('/shelves/' + shelf.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-1 hover:shadow-sm'}"
+					class="group/shelf-row relative flex items-center rounded-md transition-all duration-200 {draggedShelfId === shelf.id ? 'opacity-50' : ''} {isActive('/shelves/' + shelf.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
 				>
 					{#if shelfDropTargetId === shelf.id && draggedShelfId !== shelf.id}
-						<div class="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded-full bg-[var(--color-primary-400)] shadow-[0_0_10px_var(--color-primary-500)] {shelfDropPosition === 'before' ? '-top-1' : '-bottom-1'}"></div>
+						<div class="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded-full bg-[var(--color-primary-400)] shadow-[0_0_10px_var(--color-primary-500)] {shelfDropPosition === 'before' ? '-top-0.5' : '-bottom-0.5'}"></div>
 					{/if}
 					<a
 						href="/shelves/{shelf.id}"
-						class="flex min-w-0 flex-1 items-center space-x-3 px-3 py-2"
+						class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1"
 						onclick={closeMobileNavigation}
 					>
-						<div class="sidebar-icon-svg h-5 w-5 flex-shrink-0 text-[var(--color-primary-400)] transition-transform duration-200 group-hover/shelf-row:hidden">
+						<div class="sidebar-icon-svg h-4 w-4 flex-shrink-0 text-[var(--color-primary-400)] transition-transform duration-200 group-hover/shelf-row:hidden">
 							{#if parsedShelfIcon?.svg}
 								{@html parsedShelfIcon.svg}
 							{:else}
@@ -761,7 +761,7 @@
 								</svg>
 							{/if}
 						</div>
-						<svg class="hidden h-5 w-5 flex-shrink-0 cursor-grab text-[var(--color-surface-text-muted)] group-hover/shelf-row:block" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<svg class="hidden h-4 w-4 flex-shrink-0 cursor-grab text-[var(--color-surface-text-muted)] group-hover/shelf-row:block" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 							<circle cx="9" cy="7" r="1.5"></circle>
 							<circle cx="15" cy="7" r="1.5"></circle>
 							<circle cx="9" cy="12" r="1.5"></circle>
@@ -769,20 +769,20 @@
 							<circle cx="9" cy="17" r="1.5"></circle>
 							<circle cx="15" cy="17" r="1.5"></circle>
 						</svg>
-						<span class="truncate flex-1 min-w-0">{shelf.name}</span>
+						<span class="min-w-0 flex-1 truncate">{shelf.name}</span>
 						{#if shelf.is_magic === 1}
 							<span
-								class="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-purple-300"
+								class="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center text-purple-300"
 								title="Magic shelf"
 								aria-label="Magic shelf"
 							>
-								<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
 								</svg>
 							</span>
 						{/if}
 					</a>
-					<span class="mr-2 inline-flex h-7 min-w-8 flex-shrink-0 items-center justify-center rounded-md bg-[var(--color-surface-700)] px-2 text-xs font-medium text-[var(--color-surface-500)]">
+					<span class="mr-1 inline-flex h-5 min-w-6 flex-shrink-0 items-center justify-center rounded bg-[var(--color-surface-700)] px-1.5 text-[11px] font-medium text-[var(--color-surface-500)]">
 						{shelf.book_count}
 					</span>
 				</div>
@@ -791,15 +791,15 @@
 	</nav>
 
 	{#if !authDisabled}
-		<footer class="flex-shrink-0 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] border-t border-[var(--color-surface-border)] space-y-1 bg-[var(--color-surface-overlay)]">
+		<footer class="flex-shrink-0 space-y-0.5 border-t border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] text-[13px]">
 			<button
 				onclick={async () => {
 					await fetch('/api/auth/logout', { method: 'POST' });
 					window.location.href = '/login';
 				}}
-				class="w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-[var(--color-surface-text)] hover:bg-red-500/20 hover:text-red-400 transition-colors"
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[var(--color-surface-text)] transition-colors hover:bg-red-500/20 hover:text-red-400"
 			>
-				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 013-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
 				</svg>
 				<span>Logout</span>
@@ -832,7 +832,7 @@
 	>
 		<a
 			href="/library?library={activeLibraryMenu.id}"
-			class="block px-3 py-2 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+			class="block px-2.5 py-1.5 text-[13px] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
 			role="menuitem"
 			onclick={() => { closeLibraryMenu(); $mobileMenuOpen = false; }}
 		>
@@ -840,7 +840,7 @@
 		</a>
 		<button
 			type="button"
-			class="block w-full px-3 py-2 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+			class="block w-full px-2.5 py-1.5 text-left text-[13px] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
 			role="menuitem"
 			onclick={() => openEditLibrary(activeLibraryMenu)}
 		>
@@ -848,7 +848,7 @@
 		</button>
 		<button
 			type="button"
-			class="block w-full px-3 py-2 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] disabled:cursor-not-allowed disabled:opacity-60"
+			class="block w-full px-2.5 py-1.5 text-left text-[13px] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] disabled:cursor-not-allowed disabled:opacity-60"
 			role="menuitem"
 			disabled={isLibraryScanActive(activeLibraryMenu)}
 			onclick={() => scanLibrary(activeLibraryMenu)}
@@ -857,7 +857,7 @@
 		</button>
 		<button
 			type="button"
-			class="block w-full px-3 py-2 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+			class="block w-full px-2.5 py-1.5 text-left text-[13px] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
 			role="menuitem"
 			onclick={() => regenerateLibraryCovers(activeLibraryMenu, 'all')}
 		>
@@ -865,7 +865,7 @@
 		</button>
 		<button
 			type="button"
-			class="block w-full px-3 py-2 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+			class="block w-full px-2.5 py-1.5 text-left text-[13px] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
 			role="menuitem"
 			onclick={() => regenerateLibraryCovers(activeLibraryMenu, 'missing')}
 		>
@@ -873,7 +873,7 @@
 		</button>
 		<a
 			href="/settings?tab=general"
-			class="block px-3 py-2 text-sm text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)]"
+			class="block px-2.5 py-1.5 text-[13px] text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)]"
 			role="menuitem"
 			onclick={closeLibraryMenu}
 		>

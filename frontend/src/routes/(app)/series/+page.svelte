@@ -85,21 +85,21 @@
 			<p class="text-[var(--color-surface-text-muted)]">No series found</p>
 		</div>
 	{:else}
-		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
+		<div class="grid grid-cols-1 gap-2.5 md:grid-cols-2 2xl:grid-cols-3">
 			{#each getVisibleSeries() as serie}
 				<a
 					href="/library?series={encodeURIComponent(serie.name)}&sort=series&sort_dir=asc"
-					class="flex items-center overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-colors hover:border-[var(--color-primary-500)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+					class="flex items-center overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2.5 transition-colors hover:border-[var(--color-primary-500)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 				>
-					<div class="flex min-w-0 w-full items-center gap-3">
-						<div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)]">
-							<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<div class="flex min-w-0 w-full items-center gap-2.5">
+						<div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)]">
+							<svg class="h-[1.125rem] w-[1.125rem]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
 							</svg>
 						</div>
 						<div class="min-w-0 flex-1">
-							<h3 class="line-clamp-2 break-words text-base font-semibold leading-snug text-[var(--color-surface-text)]">{serie.name}</h3>
-							<p class="text-sm text-[var(--color-surface-text-muted)]">{serie.book_count} books</p>
+							<h3 class="line-clamp-2 break-words text-sm font-semibold leading-snug text-[var(--color-surface-text)]">{serie.name}</h3>
+							<p class="text-xs text-[var(--color-surface-text-muted)]">{serie.book_count} books</p>
 						</div>
 					</div>
 				</a>

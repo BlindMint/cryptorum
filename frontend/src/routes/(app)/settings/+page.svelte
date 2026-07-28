@@ -902,10 +902,10 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	<link rel="stylesheet" href="/fonts/spectral.css" />
 </svelte:head>
 
-<div class="flex min-h-full flex-col gap-6 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+<div class="flex min-h-full flex-col gap-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
  	<div class="flex items-center justify-between">
  		<div>
- 			<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">Settings</h1>
+ 			<h1 class="text-xl font-bold text-[var(--color-surface-text)]">Settings</h1>
  			<p class="text-[var(--color-surface-text-muted)] mt-1">Manage your library and application settings</p>
  		</div>
  	</div>
@@ -916,35 +916,35 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
   		<button
   			onclick={() => setActiveTab('general')}
 			data-tab-active={activeTab === 'general'}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'general' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+  			class="settings-tab-button px-3 py-1.5 text-sm font-medium transition-colors {activeTab === 'general' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
   		>
   			General
   		</button>
   		<button
   			onclick={() => setActiveTab('appearance')}
 			data-tab-active={activeTab === 'appearance'}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'appearance' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+  			class="settings-tab-button px-3 py-1.5 text-sm font-medium transition-colors {activeTab === 'appearance' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
   		>
   			Appearance
   		</button>
   		<button
   			onclick={() => setActiveTab('reader')}
 			data-tab-active={activeTab === 'reader'}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'reader' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+  			class="settings-tab-button px-3 py-1.5 text-sm font-medium transition-colors {activeTab === 'reader' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
   		>
   			Reader
   		</button>
 		<button
 			onclick={() => setActiveTab('jobs')}
 			data-tab-active={activeTab === 'jobs'}
-			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'jobs' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+			class="settings-tab-button px-3 py-1.5 text-sm font-medium transition-colors {activeTab === 'jobs' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 		>
 			Activity
 		</button>
 		<button
 			onclick={() => setActiveTab('system')}
 			data-tab-active={activeTab === 'system'}
-			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'system' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+			class="settings-tab-button px-3 py-1.5 text-sm font-medium transition-colors {activeTab === 'system' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 		>
 			System
 		</button>
@@ -958,13 +958,13 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	{:else if activeTab === 'appearance'}
 		<div class="space-y-6">
 			<!-- Colors Section -->
-			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-6">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)] mb-4">Colors</h3>
+			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-4">
+				<h3 class="text-base font-semibold text-[var(--color-surface-text)] mb-3">Colors</h3>
 				
 				<!-- Primary Color -->
 				<div class="mb-6">
 					<div class="mb-3 flex items-center justify-between">
-						<div class="text-sm font-medium text-[var(--color-surface-text-muted)]">Primary Color</div>
+						<div class="text-xs font-medium text-[var(--color-surface-text-muted)]">Primary Color</div>
 						<button
 							type="button"
 							onclick={resetPrimaryToDefault}
@@ -1002,7 +1002,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				<!-- Surface Color -->
 				<div>
 					<div class="mb-3 flex items-center justify-between">
-						<div class="text-sm font-medium text-[var(--color-surface-text-muted)]">Surface Color</div>
+						<div class="text-xs font-medium text-[var(--color-surface-text-muted)]">Surface Color</div>
 						<button
 							type="button"
 							onclick={resetSurfaceToDefault}
@@ -1038,9 +1038,9 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 			</div>
 
 			<!-- Glow Section -->
-			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-6">
+			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-4">
 				<div class="flex items-center justify-between mb-4">
-					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Top Glow</h3>
+					<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Top Glow</h3>
 					<div class="flex items-center space-x-3">
 						<span class="text-sm text-[var(--color-surface-text-muted)]">{themeState.appearance.glowEnabled ? 'On' : 'Off'}</span>
 						<button
@@ -1066,13 +1066,13 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						onchange={(e) => updateGlowAutoMode(e.currentTarget.checked)}
 						class="rounded bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 					>
-					<label for="glowAutoMode" class="text-sm font-medium text-[var(--color-surface-text)]">Automatic</label>
+					<label for="glowAutoMode" class="text-xs font-medium text-[var(--color-surface-text)]">Automatic</label>
 					<span class="text-xs text-[var(--color-surface-text-muted)]">(Match primary color)</span>
 				</div>
 
 				<!-- Glow Color (disabled when auto) -->
 				<div class="mb-4">
-					<div class="text-sm font-medium text-[var(--color-surface-text-muted)] mb-2">Custom Glow Color</div>
+					<div class="text-xs font-medium text-[var(--color-surface-text-muted)] mb-2">Custom Glow Color</div>
 					<div class="flex items-center space-x-3">
 						<input
 							type="color"
@@ -1095,7 +1095,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				<!-- Glow Intensity -->
 				<div class="{themeState.appearance.glowEnabled ? '' : 'opacity-50 pointer-events-none'}">
 					<div class="flex items-center justify-between mb-2">
-						<div class="text-sm font-medium text-[var(--color-surface-text-muted)]">Intensity</div>
+						<div class="text-xs font-medium text-[var(--color-surface-text-muted)]">Intensity</div>
 						<div class="text-sm text-[var(--color-surface-text)]">{themeState.appearance.glowIntensity}%</div>
 					</div>
 					<input
@@ -1110,9 +1110,9 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 			</div>
 
 			<!-- Background Images Section -->
-			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-6">
+			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-4">
 				<div class="flex items-center justify-between mb-4">
-					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Background Image</h3>
+					<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Background Image</h3>
 					<div class="flex items-center space-x-3">
 						<span class="text-sm text-[var(--color-surface-text-muted)]">{themeState.appearance.bgImageEnabled ? 'On' : 'Off'}</span>
 						<button
@@ -1130,7 +1130,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				</div>
 
 				<div class="mb-4 {themeState.appearance.bgImageEnabled ? '' : 'opacity-50 pointer-events-none'}">
-					<div class="text-sm font-medium text-[var(--color-surface-text-muted)] mb-2">Display</div>
+					<div class="text-xs font-medium text-[var(--color-surface-text-muted)] mb-2">Display</div>
 					<div class="grid grid-cols-2 gap-2 sm:grid-cols-5">
 						{#each bgImageDisplayOptions as option}
 							<button
@@ -1149,7 +1149,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				<!-- Transparency Slider -->
 				<div class="mb-4 {themeState.appearance.bgImageEnabled ? '' : 'opacity-50 pointer-events-none'}">
 					<div class="flex items-center justify-between mb-2">
-						<div class="text-sm font-medium text-[var(--color-surface-text-muted)]">Transparency</div>
+						<div class="text-xs font-medium text-[var(--color-surface-text-muted)]">Transparency</div>
 						<div class="text-sm text-[var(--color-surface-text)]">{themeState.appearance.bgImageTransparency}%</div>
 					</div>
 					<input
@@ -1228,11 +1228,11 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	{:else if activeTab === 'reader'}
 		<div class="space-y-6">
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
-					<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Screen Wake</h2>
+				<div class="px-4 py-3 border-b border-[var(--color-surface-border)]">
+					<h2 class="text-base font-semibold text-[var(--color-surface-text)]">Screen Wake</h2>
 					<p class="text-sm text-[var(--color-surface-text-muted)]">Control when Cryptorum prevents the display from sleeping.</p>
 				</div>
-				<div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+				<div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
 					<label for="keep-screen-reading" class="flex items-start gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
 						<input
 							id="keep-screen-reading"
@@ -1242,7 +1242,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							class="mt-1 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 						>
 						<span>
-							<span class="block text-sm font-medium text-[var(--color-surface-text)]">Keep screen on while reading</span>
+							<span class="block text-xs font-medium text-[var(--color-surface-text)]">Keep screen on while reading</span>
 							<span class="mt-1 block text-xs leading-5 text-[var(--color-surface-text-muted)]">Applies to EPUB, PDF, comics, audio, and speed reader.</span>
 						</span>
 					</label>
@@ -1255,7 +1255,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							class="mt-1 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 						>
 						<span>
-							<span class="block text-sm font-medium text-[var(--color-surface-text)]">Keep screen on while app is open</span>
+							<span class="block text-xs font-medium text-[var(--color-surface-text)]">Keep screen on while app is open</span>
 							<span class="mt-1 block text-xs leading-5 text-[var(--color-surface-text-muted)]">Applies across library, settings, search, book details, and readers.</span>
 						</span>
 					</label>
@@ -1264,22 +1264,22 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 			<!-- EPUB Reader Settings -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-4 py-3 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
 						</svg>
 					</div>
 					<div>
-						<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">eBook Reader</h2>
+						<h2 class="text-base font-semibold text-[var(--color-surface-text)]">eBook Reader</h2>
 						<p class="text-sm text-[var(--color-surface-text-muted)]">Settings for EPUB, FB2, MOBI, AZW3 formats</p>
 					</div>
 				</div>
 				
-				<div class="p-6 space-y-6">
+				<div class="p-4 space-y-4">
 					<!-- Appearance -->
 					<div>
-						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4 flex items-center">
+						<h3 class="text-xs font-semibold text-[var(--color-surface-text)] mb-4 flex items-center">
 							<svg class="w-4 h-4 mr-2 text-[var(--color-surface-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path>
 							</svg>
@@ -1288,7 +1288,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 							<!-- Theme -->
 							<div>
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Theme</div>
+						<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Theme</div>
 								<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
 									{#each epubThemes as theme}
 										<button
@@ -1352,7 +1352,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 					<!-- Typography -->
 					<div>
-						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4 flex items-center">
+						<h3 class="text-xs font-semibold text-[var(--color-surface-text)] mb-4 flex items-center">
 							<svg class="w-4 h-4 mr-2 text-[var(--color-surface-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
 							</svg>
@@ -1361,7 +1361,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						<div class="reader-control-grid grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4">
 							<!-- Font Family -->
 							<div class="col-span-2 lg:col-span-1">
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Font Family</div>
+						<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Font Family</div>
 								<div class="flex flex-wrap gap-2">
 									{#each fontFamilies as font}
 										<button
@@ -1386,7 +1386,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 							<!-- Font Weight -->
 							<div class="col-span-2 lg:col-span-1">
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Font Thickness</div>
+								<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Font Thickness</div>
 								<div class="flex flex-wrap gap-2">
 									{#each fontWeightOptions as option}
 										<button
@@ -1402,7 +1402,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 							<!-- Font Size -->
 							<div>
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Font Size</div>
+						<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Font Size</div>
 								<div class="flex items-center space-x-2">
 									<button
 										onclick={() => updateEpubSetting('fontSize', Math.max(10, localReaderSettings.epub.fontSize - 1))}
@@ -1418,7 +1418,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 							<!-- Line Height -->
 							<div>
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Line Height</div>
+						<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Line Height</div>
 								<div class="flex items-center space-x-2">
 									<button
 										onclick={() => updateEpubSetting('lineHeight', Math.max(1.0, localReaderSettings.epub.lineHeight - 0.1))}
@@ -1434,7 +1434,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 							<!-- Text Justification -->
 							<div>
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Text Alignment</div>
+						<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Text Alignment</div>
 								<div class="flex space-x-1">
 									<button
 										onclick={() => updateEpubSetting('justify', false)}
@@ -1460,14 +1460,14 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 									onchange={(e) => updateEpubSetting('hyphenate', e.currentTarget.checked)}
 									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 								>
-								<label for="hyphenate" class="text-sm font-medium text-[var(--color-surface-text)]">Enable Hyphenation</label>
+								<label for="hyphenate" class="text-xs font-medium text-[var(--color-surface-text)]">Enable Hyphenation</label>
 							</div>
 						</div>
 					</div>
 
 					<!-- Layout -->
 					<div>
-						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4 flex items-center">
+						<h3 class="text-xs font-semibold text-[var(--color-surface-text)] mb-4 flex items-center">
 							<svg class="w-4 h-4 mr-2 text-[var(--color-surface-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"></path>
 							</svg>
@@ -1476,7 +1476,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 							<!-- Flow -->
 							<div>
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Flow</div>
+						<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Flow</div>
 								<div class="flex space-x-1">
 									<button
 										onclick={() => updateEpubSetting('flow', 'paginated')}
@@ -1502,12 +1502,12 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 									onchange={(e) => localReaderSettings = { ...localReaderSettings, showCurrentSection: e.currentTarget.checked }}
 									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 								>
-								<label for="show-current-section" class="text-sm font-medium text-[var(--color-surface-text)]">Show Current Section</label>
+								<label for="show-current-section" class="text-xs font-medium text-[var(--color-surface-text)]">Show Current Section</label>
 							</div>
 
 							<!-- Column Gap -->
 							<div>
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Column Gap: {localReaderSettings.epub.gap}%</div>
+						<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Column Gap: {localReaderSettings.epub.gap}%</div>
 								<input
 									type="range"
 									min="0"
@@ -1520,7 +1520,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 							<!-- Max Width -->
 							<div>
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Max Width: {localReaderSettings.epub.maxInlineSize}px</div>
+						<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Max Width: {localReaderSettings.epub.maxInlineSize}px</div>
 								<input
 									type="range"
 									min="400"
@@ -1534,7 +1534,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 							<!-- Max Height -->
 							<div>
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Max Height: {localReaderSettings.epub.maxBlockSize}px</div>
+						<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Max Height: {localReaderSettings.epub.maxBlockSize}px</div>
 								<input
 									type="range"
 									min="400"
@@ -1558,29 +1558,29 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					onchange={(e) => updateEpubSetting('autoHideControls', e.currentTarget.checked)}
 					class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 				>
-				<label for="epub-auto-hide-controls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
+				<label for="epub-auto-hide-controls" class="text-xs font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
 			</div>
 
 			<!-- PDF Reader Settings -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-4 py-3 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
 						</svg>
 					</div>
 					<div>
-						<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">PDF Reader</h2>
+						<h2 class="text-base font-semibold text-[var(--color-surface-text)]">PDF Reader</h2>
 						<p class="text-sm text-[var(--color-surface-text-muted)]">Settings for PDF documents</p>
 					</div>
 				</div>
 				
-				<div class="p-6 space-y-6">
+				<div class="p-4 space-y-4">
 					<div>
-						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Display</h3>
+						<h3 class="text-xs font-semibold text-[var(--color-surface-text)] mb-4">Display</h3>
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Theme</div>
+								<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Theme</div>
 								<select
 									value={localReaderSettings.pdf.viewMode}
 									onchange={(e) => updatePdfSetting('viewMode', e.currentTarget.value)}
@@ -1600,7 +1600,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 									onchange={(e) => updatePdfSetting('autoHideControls', e.currentTarget.checked)}
 									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 								>
-								<label for="pdfAutoHideControls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
+								<label for="pdfAutoHideControls" class="text-xs font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
 							</div>
 
 							<div class="flex items-center space-x-3">
@@ -1611,7 +1611,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 									onchange={(e) => updatePdfSetting('useStandardFullscreen', e.currentTarget.checked)}
 									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 								>
-								<label for="pdfStandardFullscreen" class="text-sm font-medium text-[var(--color-surface-text)]">Use Standard Fullscreen</label>
+								<label for="pdfStandardFullscreen" class="text-xs font-medium text-[var(--color-surface-text)]">Use Standard Fullscreen</label>
 							</div>
 						</div>
 					</div>
@@ -1620,26 +1620,26 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 			<!-- Comic Reader Settings -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-4 py-3 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
 						</svg>
 					</div>
 					<div>
-						<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Comic Book Reader</h2>
+						<h2 class="text-base font-semibold text-[var(--color-surface-text)]">Comic Book Reader</h2>
 						<p class="text-sm text-[var(--color-surface-text-muted)]">Settings for CBZ, CBR, CB7, CBT archives</p>
 					</div>
 				</div>
 				
-				<div class="p-6 space-y-6">
+				<div class="p-4 space-y-4">
 					<!-- Display Settings -->
 					<div>
-						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Display</h3>
+						<h3 class="text-xs font-semibold text-[var(--color-surface-text)] mb-4">Display</h3>
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 							<!-- Page Spread -->
 							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Spread</div>
+								<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Page Spread</div>
 								<select 
 									value={localReaderSettings.cbx.pageSpread} 
 									onchange={(e) => updateCbxSetting('pageSpread', e.currentTarget.value)}
@@ -1654,7 +1654,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 							<!-- Fit Mode -->
 							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Fit Mode</div>
+								<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Fit Mode</div>
 								<select 
 									value={localReaderSettings.cbx.fitMode} 
 									onchange={(e) => updateCbxSetting('fitMode', e.currentTarget.value)}
@@ -1668,7 +1668,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 							<!-- Scroll Mode -->
 							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Scroll Mode</div>
+								<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Scroll Mode</div>
 								<select 
 									value={localReaderSettings.cbx.scrollMode} 
 									onchange={(e) => updateCbxSetting('scrollMode', e.currentTarget.value)}
@@ -1682,7 +1682,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 							<!-- Reading Direction -->
 							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Reading Direction</div>
+								<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Reading Direction</div>
 								<select 
 									value={localReaderSettings.cbx.readingDirection} 
 									onchange={(e) => updateCbxSetting('readingDirection', e.currentTarget.value)}
@@ -1696,7 +1696,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 							<!-- Background Color -->
 							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Background Color</div>
+								<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Background Color</div>
 								<div class="flex items-center space-x-2">
 									<input
 										type="color"
@@ -1712,7 +1712,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 					<!-- Comic-Specific -->
 					<div>
-						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Comic-Specific</h3>
+						<h3 class="text-xs font-semibold text-[var(--color-surface-text)] mb-4">Comic-Specific</h3>
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 							<!-- Manga Mode -->
 							<div class="flex items-center space-x-3">
@@ -1723,7 +1723,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 									onchange={(e) => updateCbxSetting('mangaMode', e.currentTarget.checked)}
 									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 								>
-								<label for="mangaMode" class="text-sm font-medium text-[var(--color-surface-text)]">Manga Mode (RTL)</label>
+								<label for="mangaMode" class="text-xs font-medium text-[var(--color-surface-text)]">Manga Mode (RTL)</label>
 							</div>
 
 							<!-- Panel View -->
@@ -1735,12 +1735,12 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 									onchange={(e) => updateCbxSetting('panelViewEnabled', e.currentTarget.checked)}
 									class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 								>
-								<label for="panelView" class="text-sm font-medium text-[var(--color-surface-text)]">Guided Panel Zoom</label>
+								<label for="panelView" class="text-xs font-medium text-[var(--color-surface-text)]">Guided Panel Zoom</label>
 							</div>
 
 							<!-- Spread Handling -->
 							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Spread Handling</div>
+								<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Spread Handling</div>
 								<select 
 									value={localReaderSettings.cbx.spreadHandling} 
 									onchange={(e) => updateCbxSetting('spreadHandling', e.currentTarget.value)}
@@ -1755,7 +1755,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 							<!-- Vibrance -->
 							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Vibrance: {localReaderSettings.cbx.vibrance}%</div>
+								<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Vibrance: {localReaderSettings.cbx.vibrance}%</div>
 								<input
 									type="range"
 									min="0"
@@ -1768,7 +1768,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 							<!-- Saturation -->
 							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Saturation: {localReaderSettings.cbx.saturation}%</div>
+								<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Saturation: {localReaderSettings.cbx.saturation}%</div>
 								<input
 									type="range"
 									min="0"
@@ -1784,7 +1784,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					{#if localReaderSettings.cbx.scrollMode === 'long-strip' || localReaderSettings.cbx.scrollMode === 'infinite'}
 						<!-- Strip Max Width -->
 						<div class="max-w-xs">
-							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">
+							<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">
 								Strip Max Width: {localReaderSettings.cbx.stripMaxWidthPercent}%
 							</div>
 							<input
@@ -1810,30 +1810,30 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							onchange={(e) => updateCbxSetting('autoHideControls', e.currentTarget.checked)}
 							class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 						>
-						<label for="cbx-auto-hide-controls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
+						<label for="cbx-auto-hide-controls" class="text-xs font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
 					</div>
 				</div>
 			</div>
 
 			<!-- Speed Reader Settings -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-4 py-3 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
 						</svg>
 					</div>
 					<div>
-						<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Speed Reader</h2>
+						<h2 class="text-base font-semibold text-[var(--color-surface-text)]">Speed Reader</h2>
 						<p class="text-sm text-[var(--color-surface-text-muted)]">RSVP speed reading settings</p>
 					</div>
 				</div>
 				
-				<div class="p-6 space-y-6">
+				<div class="p-4 space-y-4">
 					<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 						<!-- WPM -->
 						<div>
-							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Words Per Minute</div>
+							<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Words Per Minute</div>
 							<div class="flex items-center space-x-2">
 								<button
 									onclick={() => updateSpeedReaderSetting('wpm', Math.max(100, localReaderSettings.speedReader.wpm - 25))}
@@ -1849,7 +1849,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 						<!-- Word Size -->
 						<div>
-							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Word Size</div>
+							<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Word Size</div>
 							<div class="flex items-center space-x-2">
 								<button
 									onclick={() => updateSpeedReaderSetting('wordSize', Math.max(24, localReaderSettings.speedReader.wordSize - 4))}
@@ -1865,7 +1865,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 						<!-- Font Thickness -->
 						<div>
-							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Font Thickness</div>
+							<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Font Thickness</div>
 							<select
 								value={localReaderSettings.speedReader.fontWeight}
 								onchange={(e) => updateSpeedReaderSetting('fontWeight', parseInt(e.currentTarget.value))}
@@ -1879,7 +1879,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 						<!-- Focal Point -->
 						<div>
-							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Focal Point</div>
+							<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Focal Point</div>
 							<div class="flex items-center space-x-2">
 								<button
 									onclick={() => updateSpeedReaderSetting('focalPoint', Math.max(0.2, localReaderSettings.speedReader.focalPoint - 0.02))}
@@ -1895,7 +1895,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 						<!-- Focus Indicator -->
 						<div>
-							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Focus Indicator</div>
+							<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Focus Indicator</div>
 							<select 
 								value={localReaderSettings.speedReader.focusIndicator} 
 								onchange={(e) => updateSpeedReaderSetting('focusIndicator', e.currentTarget.value)}
@@ -1909,7 +1909,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 						<!-- Sentence Pause -->
 						<div>
-							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Sentence Pause</div>
+							<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Sentence Pause</div>
 							<div class="flex items-center space-x-2">
 								<button
 									onclick={() => updateSpeedReaderSetting('sentencePause', Math.max(100, localReaderSettings.speedReader.sentencePause - 50))}
@@ -1927,7 +1927,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<!-- Accent Color -->
 						<div>
-							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Accent Color</div>
+							<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Accent Color</div>
 							<div class="flex items-center space-x-3">
 								<input
 									type="color"
@@ -1948,7 +1948,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								onchange={(e) => updateSpeedReaderSetting('accentEnabled', e.currentTarget.checked)}
 								class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 							>
-							<label for="accent-enabled" class="text-sm font-medium text-[var(--color-surface-text)]">Enable accent character</label>
+							<label for="accent-enabled" class="text-xs font-medium text-[var(--color-surface-text)]">Enable accent character</label>
 						</div>
 
 						<!-- Horizontal Bars -->
@@ -1960,7 +1960,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								onchange={(e) => updateSpeedReaderSetting('horizontalBars', e.currentTarget.checked)}
 								class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 							>
-							<label for="horizontal-bars" class="text-sm font-medium text-[var(--color-surface-text)]">Show horizontal focus lines</label>
+							<label for="horizontal-bars" class="text-xs font-medium text-[var(--color-surface-text)]">Show horizontal focus lines</label>
 						</div>
 					</div>
 				</div>
@@ -1968,23 +1968,23 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 			<!-- Audio Reader Settings -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-4 py-3 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
 						</svg>
 					</div>
 					<div>
-						<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Audio Book Reader</h2>
+						<h2 class="text-base font-semibold text-[var(--color-surface-text)]">Audio Book Reader</h2>
 						<p class="text-sm text-[var(--color-surface-text-muted)]">Settings for audio books</p>
 					</div>
 				</div>
 				
-				<div class="p-6">
+				<div class="p-4">
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<!-- Playback Speed -->
 						<div>
-							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Default Playback Speed</div>
+							<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Default Playback Speed</div>
 							<select 
 								value={localReaderSettings.audio.playbackSpeed} 
 								onchange={(e) => updateAudioSetting('playbackSpeed', parseFloat(e.currentTarget.value))}
@@ -2009,7 +2009,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								onchange={(e) => updateAudioSetting('autoAdvance', e.currentTarget.checked)}
 								class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 							>
-							<label for="auto-advance" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-advance to next chapter</label>
+							<label for="auto-advance" class="text-xs font-medium text-[var(--color-surface-text)]">Auto-advance to next chapter</label>
 						</div>
 
 						<div class="flex items-center space-x-3">
@@ -2020,7 +2020,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								onchange={(e) => updateAudioSetting('autoHideControls', e.currentTarget.checked)}
 								class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
 							>
-							<label for="audio-auto-hide-controls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
+							<label for="audio-auto-hide-controls" class="text-xs font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
 						</div>
 					</div>
 				</div>
@@ -2056,14 +2056,14 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							</svg>
 						</div>
 						<div>
-							<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Libraries</h2>
+							<h2 class="text-base font-semibold text-[var(--color-surface-text)]">Libraries</h2>
 							<p class="text-sm text-[var(--color-surface-text-muted)]">Configure your book libraries</p>
 						</div>
 					</div>
 					<div class="flex w-full items-center gap-2 sm:w-auto">
 						<button
 							onclick={triggerScan}
-							class="inline-flex h-10 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)] disabled:cursor-not-allowed disabled:opacity-70 sm:flex-none"
+							class="inline-flex h-10 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-xs font-medium text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)] disabled:cursor-not-allowed disabled:opacity-70 sm:flex-none"
 							title={scanActive ? 'View activity' : 'Scan all libraries'}
 						>
 							<svg class="h-4 w-4 {scanActive ? 'animate-scan-spin text-[var(--color-primary-400)]' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2082,10 +2082,10 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</button>
 					</div>
 				</div>
-				<div class="p-6">
+				<div class="p-4">
 					<label class="mb-5 flex items-start justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4 transition-colors hover:border-[var(--color-primary-500)]/60">
 						<span>
-							<span class="block text-sm font-semibold text-[var(--color-surface-text)]">Protect existing metadata in all libraries</span>
+							<span class="block text-xs font-semibold text-[var(--color-surface-text)]">Protect existing metadata in all libraries</span>
 							<span class="mt-1 block max-w-3xl text-xs leading-5 text-[var(--color-surface-text-muted)]">
 								Prevent scans, refreshes, provider lookups, and cover regeneration from replacing current values. New books still receive their initial metadata, and fields directly edited by users remain protected when this is off.
 							</span>
@@ -2194,14 +2194,14 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 			<!-- BookDrop -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-4 py-3 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
 						</svg>
 					</div>
 					<div class="flex-1">
-						<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">BookDrop</h2>
+						<h2 class="text-base font-semibold text-[var(--color-surface-text)]">BookDrop</h2>
 						<p class="text-sm text-[var(--color-surface-text-muted)]">Auto-import folder for dropped books</p>
 					</div>
 					<button
@@ -2214,7 +2214,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</svg>
 					</button>
 				</div>
-				<div class="p-6">
+				<div class="p-4">
 					{#if settings.bookdrop}
 						<div class="flex items-center justify-between">
 							<div class="flex items-center space-x-3 text-[var(--color-surface-text)]">
@@ -2245,7 +2245,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							</svg>
 						</div>
 						<div>
-							<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Book Covers</h2>
+							<h2 class="text-base font-semibold text-[var(--color-surface-text)]">Book Covers</h2>
 							<p class="text-sm text-[var(--color-surface-text-muted)]">Regenerate and fit stored book covers</p>
 						</div>
 					</div>
@@ -2266,11 +2266,11 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							</button>
 					</div>
 				</div>
-				<div class="p-6 space-y-6">
+				<div class="p-4 space-y-4">
 					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
 						<div class="flex items-center justify-between gap-4">
 							<div>
-								<div class="text-sm font-medium text-[var(--color-surface-text)]">Preserve Full Cover Art</div>
+								<div class="text-xs font-medium text-[var(--color-surface-text)]">Preserve Full Cover Art</div>
 								<div class="text-xs text-[var(--color-surface-text-muted)]">Fit the entire cover into a filled frame without trimming.</div>
 							</div>
 							<input
@@ -2282,7 +2282,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</div>
 						<div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
 							<div>
-								<label for="comic-spread-fallback-global" class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Wide Comic Fallback Cover</label>
+								<label for="comic-spread-fallback-global" class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Wide Comic Fallback Cover</label>
 								<select
 									id="comic-spread-fallback-global"
 									value={bookCoverSettings.comic_spread_fallback}
@@ -2299,7 +2299,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							<div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
 								<div class="flex items-center justify-between rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
 									<div>
-										<div class="text-sm font-medium text-[var(--color-surface-text)]">Vertical Cover Cropping</div>
+										<div class="text-xs font-medium text-[var(--color-surface-text)]">Vertical Cover Cropping</div>
 										<div class="text-xs text-[var(--color-surface-text-muted)]">Crop very tall covers from the top</div>
 									</div>
 									<input
@@ -2311,7 +2311,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								</div>
 								<div class="flex items-center justify-between rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
 									<div>
-										<div class="text-sm font-medium text-[var(--color-surface-text)]">Horizontal Cover Cropping</div>
+										<div class="text-xs font-medium text-[var(--color-surface-text)]">Horizontal Cover Cropping</div>
 										<div class="text-xs text-[var(--color-surface-text-muted)]">Crop very wide covers from the left</div>
 									</div>
 									<input
@@ -2324,7 +2324,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							</div>
 							<div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
 								<div>
-									<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Aspect Ratio Threshold</div>
+									<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Aspect Ratio Threshold</div>
 									<div class="flex items-center gap-3">
 										<input
 											type="range"
@@ -2348,7 +2348,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								</div>
 								<div class="flex items-center justify-between rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
 									<div>
-										<div class="text-sm font-medium text-[var(--color-surface-text)]">Smart Cropping</div>
+										<div class="text-xs font-medium text-[var(--color-surface-text)]">Smart Cropping</div>
 										<div class="text-xs text-[var(--color-surface-text-muted)]">Skip uniform margins when cropping</div>
 									</div>
 									<input
@@ -2382,18 +2382,18 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 			<!-- About -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-4 py-3 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
 						</svg>
 					</div>
 					<div>
-						<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">About Cryptorum</h2>
+						<h2 class="text-base font-semibold text-[var(--color-surface-text)]">About Cryptorum</h2>
 						<p class="text-sm text-[var(--color-surface-text-muted)]">Version and system information</p>
 					</div>
 				</div>
-				<div class="p-6">
+				<div class="p-4">
 					<p class="text-[var(--color-surface-text)] mb-4">
 						Cryptorum is a personal digital library application designed for single-user self-hosting.
 					</p>
@@ -2423,8 +2423,8 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 {#if showRemoveBgModal}
 		<div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4" role="dialog" aria-modal="true" tabindex="-1">
 		<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-sm shadow-2xl">
-			<div class="p-6">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)] mb-2">Remove Background</h3>
+			<div class="p-4">
+				<h3 class="text-base font-semibold text-[var(--color-surface-text)] mb-2">Remove Background</h3>
 				<p class="text-[var(--color-surface-text-muted)] mb-6">Are you sure you want to remove this background image?</p>
 				<div class="flex justify-end space-x-3">
 					<button
@@ -2495,13 +2495,13 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 			onclick={() => showBookdropModal = false}
 		></button>
 		<div class="relative z-10 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-2xl overflow-hidden shadow-2xl">
-			<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add Bookdrop Location</h3>
+			<div class="px-4 py-3 border-b border-[var(--color-surface-border)]">
+				<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Add Bookdrop Location</h3>
 				<p class="text-sm text-[var(--color-surface-text-muted)] mt-1">Choose the folder where dropped books should be watched for import.</p>
 			</div>
-			<div class="p-6 space-y-4">
+			<div class="p-4 space-y-3">
 				<div>
-					<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Path</div>
+					<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Path</div>
 					<div class="flex items-center gap-2">
 						<input
 							type="text"
@@ -2551,14 +2551,14 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 			onclick={() => showCustomThemeEditor = false}
 		></button>
 		<div class="relative z-10 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-xl overflow-hidden shadow-2xl">
-			<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">
+			<div class="px-4 py-3 border-b border-[var(--color-surface-border)]">
+				<h3 class="text-base font-semibold text-[var(--color-surface-text)]">
 					{editingCustomTheme ? 'Edit Custom Theme' : 'Add Custom Theme'}
 				</h3>
 			</div>
-			<div class="p-6 space-y-4">
+			<div class="p-4 space-y-3">
 				<div>
-					<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Theme Name</div>
+					<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Theme Name</div>
 					<input
 						type="text"
 						bind:value={customThemeName}
@@ -2568,7 +2568,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				</div>
 				<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 					<div>
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Text Color</div>
+						<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Text Color</div>
 						<div class="flex items-start gap-3">
 							<label class="relative flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--color-surface-border)] shadow-inner" style="background-color: {resolvePreviewColor(customThemeFg, '#ffffff')};">
 								<span class="absolute inset-0 ring-1 ring-inset ring-black/10"></span>
@@ -2599,7 +2599,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</div>
 					</div>
 					<div>
-						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Background Color</div>
+						<div class="block text-xs font-medium text-[var(--color-surface-text)] mb-2">Background Color</div>
 						<div class="flex items-start gap-3">
 							<label class="relative flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--color-surface-border)] shadow-inner" style="background-color: {resolvePreviewColor(customThemeBg, '#111111')};">
 								<span class="absolute inset-0 ring-1 ring-inset ring-black/10"></span>
@@ -2675,8 +2675,8 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 {#if showDirectoryModal}
 	<div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
 		<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden">
-			<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex-shrink-0">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">
+			<div class="px-4 py-3 border-b border-[var(--color-surface-border)] flex-shrink-0">
+				<h3 class="text-base font-semibold text-[var(--color-surface-text)]">
 					Select Directory
 				</h3>
 				<p class="text-sm text-[var(--color-surface-text-muted)] mt-1">
