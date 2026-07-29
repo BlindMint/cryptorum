@@ -123,7 +123,7 @@
 	<div class="flex max-h-[90dvh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
 		<div class="flex items-start justify-between gap-4 border-b border-[var(--color-surface-border)] px-5 py-4">
 			<div>
-				<h2 class="text-base font-semibold text-[var(--color-surface-text)]">Edit Metadata in Bulk</h2>
+				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Edit Metadata in Bulk</h2>
 				<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">{selectionCount} selected books. Changed and cleared fields will be protected from automatic refreshes.</p>
 			</div>
 			<button type="button" onclick={onClose} class="rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" aria-label="Close">

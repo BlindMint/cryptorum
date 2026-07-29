@@ -179,7 +179,7 @@
 				<Sidebar {authDisabled} />
 			{/if}
 				<div class="flex-1 min-w-0 flex flex-col overflow-hidden">
-					<main class="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden {isReaderPage ? '[scrollbar-gutter:auto]' : '[scrollbar-gutter:stable]'} {isReaderPage || isCatalogPage ? '!p-0' : 'p-4'}">
+					<main class="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden {isReaderPage ? '[scrollbar-gutter:auto]' : '[scrollbar-gutter:stable]'} {isReaderPage || isCatalogPage ? '!p-0' : 'p-5'}">
 						{@render children()}
 					</main>
 				</div>

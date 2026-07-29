@@ -28,16 +28,16 @@
 	type="button"
 	onclick={toggleFullscreen}
 	disabled={unavailable}
-	class="shrink-0 rounded-md p-1.5 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)] disabled:cursor-not-allowed disabled:opacity-40"
+	class="shrink-0 rounded-md p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)] disabled:cursor-not-allowed disabled:opacity-40"
 	aria-label={fullscreen ? 'Exit true fullscreen' : 'Enter true fullscreen'}
 	title={fullscreen ? 'Exit true fullscreen' : 'Enter true fullscreen'}
 >
 	{#if fullscreen}
-		<svg class="h-[1.125rem] w-[1.125rem]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+		<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6"></path>
 		</svg>
 	{:else}
-		<svg class="h-[1.125rem] w-[1.125rem]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+		<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path>
 		</svg>
 	{/if}

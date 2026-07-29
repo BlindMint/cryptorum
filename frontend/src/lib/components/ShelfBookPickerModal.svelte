@@ -376,9 +376,9 @@
 		></button>
 
 		<div class="relative z-10 flex max-h-[96vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl" style="height: min(96vh, 1040px);">
-			<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-4 py-3">
+			<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-5 py-3.5">
 				<div>
-					<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Add Books to {shelf.name}</h3>
+					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add Books to {shelf.name}</h3>
 					<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">
 						{selectedBooks.size > 0 ? `${selectedBooks.size} selected` : totalBooks > 0 ? `${totalBooks} books available` : 'Search and select books'}
 					</p>
@@ -502,7 +502,7 @@
 				</div>
 			</div>
 
-			<div class="relative min-h-0 flex-1 overflow-y-auto p-4" aria-busy={loading}>
+			<div class="relative min-h-0 flex-1 overflow-y-auto p-5" aria-busy={loading}>
 				{#if loading && books.length === 0}
 					<div class="flex justify-center py-12">
 						<div class="h-10 w-10 animate-spin rounded-full border-b-2 border-[var(--color-primary-500)]"></div>
@@ -585,11 +585,11 @@
 				{/if}
 
 				{#if errorMessage}
-					<div class="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{errorMessage}</div>
+					<div class="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-5 py-3.5 text-sm text-red-300">{errorMessage}</div>
 				{/if}
 			</div>
 
-			<div class="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-surface-border)] px-4 py-3">
+			<div class="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-surface-border)] px-5 py-3.5">
 				<div class="flex items-center gap-2">
 					<button
 						type="button"
