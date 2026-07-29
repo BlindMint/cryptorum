@@ -597,9 +597,9 @@
 		onclick={closeLookup}
 	></button>
 	<div class="relative z-10 flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
-		<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-4 py-3">
+		<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-5 py-3.5">
 			<div>
-				<h2 class="text-base font-semibold text-[var(--color-surface-text)]">{title}</h2>
+				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">{title}</h2>
 				<p class="text-sm text-[var(--color-surface-text-muted)]">
 					Review selected books one at a time, search providers, then apply the best match.
 				</p>
@@ -639,8 +639,8 @@
 			<div class="flex h-[calc(92vh-88px)] flex-col gap-4 overflow-hidden p-4 lg:p-6">
 				<div class="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)]">
 					<div class="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
-						<div class="border-b border-[var(--color-surface-border)] px-4 py-3">
-							<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Search Fields</h3>
+						<div class="border-b border-[var(--color-surface-border)] px-5 py-3.5">
+							<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Search Fields</h3>
 							<p class="text-sm text-[var(--color-surface-text-muted)]">Loading book details and providers...</p>
 						</div>
 						<div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-4" aria-busy="true">
@@ -664,16 +664,16 @@
 					</div>
 
 					<div class="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
-						<div class="border-b border-[var(--color-surface-border)] px-4 py-3">
+						<div class="border-b border-[var(--color-surface-border)] px-5 py-3.5">
 							<div class="flex items-center justify-between gap-3">
 								<div>
-									<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Results</h3>
+									<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Results</h3>
 									<p class="text-sm text-[var(--color-surface-text-muted)]">Search results will appear here.</p>
 								</div>
 								<div class="h-4 w-16 animate-pulse rounded bg-[var(--color-surface-700)]/70"></div>
 							</div>
 						</div>
-						<div class="min-h-0 flex-1 overflow-y-auto p-4">
+						<div class="min-h-0 flex-1 overflow-y-auto p-5">
 							<div class="flex h-full min-h-56 items-center justify-center rounded-2xl border border-dashed border-[var(--color-surface-border)] text-center">
 								<div>
 									<div class="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-[var(--color-surface-border)] border-t-[var(--color-primary-500)]"></div>
@@ -689,7 +689,7 @@
 			{@const targetIndex = activeTargetIndex()}
 			<div class="flex h-[calc(92vh-88px)] flex-col gap-4 overflow-hidden p-4 lg:p-6">
 				{#if targets.length > 1}
-					<div class="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
+					<div class="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-5 py-3.5">
 						<button
 							type="button"
 							class="rounded-md border border-[var(--color-surface-border)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-overlay)] disabled:opacity-40"
@@ -719,8 +719,8 @@
 				{#if target}
 					<div class="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)]">
 						<div class="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
-							<div class="border-b border-[var(--color-surface-border)] px-4 py-3">
-								<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Search Fields</h3>
+							<div class="border-b border-[var(--color-surface-border)] px-5 py-3.5">
+								<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Search Fields</h3>
 								<p class="text-sm text-[var(--color-surface-text-muted)]">Refine the query for this book.</p>
 							</div>
 								<div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-4">
@@ -826,10 +826,10 @@
 						</div>
 
 						<div class="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
-							<div class="border-b border-[var(--color-surface-border)] px-4 py-3">
+							<div class="border-b border-[var(--color-surface-border)] px-5 py-3.5">
 								<div class="flex items-center justify-between gap-3">
 									<div>
-										<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Results</h3>
+										<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Results</h3>
 										<p class="text-sm text-[var(--color-surface-text-muted)]">
 											{target.results.length} result{target.results.length === 1 ? '' : 's'} for {resultSummaryForTarget(target)}
 										</p>
@@ -853,7 +853,7 @@
 								</div>
 							</div>
 
-							<div class="min-h-0 flex-1 overflow-y-auto p-4">
+							<div class="min-h-0 flex-1 overflow-y-auto p-5">
 								{#if target.results.length === 0}
 									<div class="flex min-h-56 flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--color-surface-border)] px-4 py-6 text-center text-sm text-[var(--color-surface-text-muted)]">
 										<p>{target.diagnostics.length > 0 ? 'No metadata matches were found.' : 'No results yet. Search this book to begin.'}</p>
@@ -894,7 +894,7 @@
 												<div class="min-w-0 flex-1">
 													<div class="flex items-start justify-between gap-3">
 														<div class="min-w-0">
-															<h4 class="truncate text-base font-semibold text-[var(--color-surface-text)]">{result.title || 'Untitled'}</h4>
+															<h4 class="truncate text-lg font-semibold text-[var(--color-surface-text)]">{result.title || 'Untitled'}</h4>
 															<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">
 																{#if result.authors?.length}
 																	{result.authors.join(', ')}
@@ -955,7 +955,7 @@
 				onclick={() => { pendingApply = null; overwriteProtectedFields = false; }}
 			></button>
 			<div class="relative w-full max-w-lg rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 shadow-2xl">
-				<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Apply metadata result?</h3>
+				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Apply metadata result?</h3>
 				<p class="mt-2 text-sm text-[var(--color-surface-text-muted)]">
 					The result will update unprotected metadata for this book{pendingApply.mode === 'all' ? ' selection' : ''}. Protected user changes are preserved by default.
 					{#if hasUnsavedChanges}

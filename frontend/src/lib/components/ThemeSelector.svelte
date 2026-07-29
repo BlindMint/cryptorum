@@ -316,18 +316,18 @@
 	{#if !panelOnly}
 		<button
 			onclick={() => showDropdown = !showDropdown}
-			class={`rounded-md text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors ${mobileMenu ? 'flex w-full items-center justify-between gap-3 px-0 py-0' : 'p-1.5'}`}
+			class={`rounded-md text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors ${mobileMenu ? 'flex w-full items-center justify-between gap-3 px-0 py-0' : 'p-2'}`}
 			aria-label="Change theme"
 		>
 			{#if mobileMenu}
 				<span class="flex items-center gap-3">
-					<svg class="h-[1.125rem] w-[1.125rem]" viewBox="0 -960 960 960" fill="currentColor">
+					<svg class="h-5 w-5" viewBox="0 -960 960 960" fill="currentColor">
 						<path d="M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 32.5-156t88-127Q256-817 330-848.5T488-880q80 0 151 27.5t124.5 76q53.5 48.5 85 115T880-518q0 115-70 176.5T640-280h-74q-9 0-12.5 5t-3.5 11q0 12 15 34.5t15 51.5q0 50-27.5 74T480-80Zm0-400Zm-177 23q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120-160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm200 0q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120 160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17ZM480-160q9 0 14.5-5t5.5-13q0-14-15-33t-15-57q0-42 29-67t71-25h70q66 0 113-38.5T800-518q0-121-92.5-201.5T488-800q-136 0-232 93t-96 227q0 133 93.5 226.5T480-160Z"/>
 					</svg>
 					<span class="text-sm font-medium text-[var(--color-surface-text)]">Theme</span>
 				</span>
 			{:else}
-				<svg class="h-[1.125rem] w-[1.125rem]" viewBox="0 -960 960 960" fill="currentColor">
+				<svg class="h-5 w-5" viewBox="0 -960 960 960" fill="currentColor">
 					<path d="M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 32.5-156t88-127Q256-817 330-848.5T488-880q80 0 151 27.5t124.5 76q53.5 48.5 85 115T880-518q0 115-70 176.5T640-280h-74q-9 0-12.5 5t-3.5 11q0 12 15 34.5t15 51.5q0 50-27.5 74T480-80Zm0-400Zm-177 23q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120-160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm200 0q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120 160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17ZM480-160q9 0 14.5-5t5.5-13q0-14-15-33t-15-57q0-42 29-67t71-25h70q66 0 113-38.5T800-518q0-121-92.5-201.5T488-800q-136 0-232 93t-96 227q0 133 93.5 226.5T480-160Z"/>
 				</svg>
 			{/if}
@@ -339,7 +339,7 @@
 			class={panelOnly
 				? 'w-full p-4'
 				: mobileMenu
-					? 'fixed left-3 right-3 top-[calc(var(--app-topbar-height)+0.75rem)] max-h-[calc(100dvh-var(--app-topbar-height)-1.5rem)] overflow-y-auto bg-[var(--color-surface-overlay)] backdrop-blur-sm border border-[var(--color-surface-border)] rounded-lg shadow-lg z-[95] p-3'
+					? 'fixed left-3 right-3 top-[calc(var(--app-topbar-height)+0.75rem)] max-h-[calc(100dvh-var(--app-topbar-height)-1.5rem)] overflow-y-auto bg-[var(--color-surface-overlay)] backdrop-blur-sm border border-[var(--color-surface-border)] rounded-lg shadow-lg z-[95] p-4'
 					: 'absolute right-0 top-full mt-2 w-96 bg-[var(--color-surface-overlay)] backdrop-blur-sm border border-[var(--color-surface-border)] rounded-lg shadow-lg z-50 p-4'}
 			use:clickOutside={panelOnly ? ignoreOutsideClick : closeDropdown}
 		>

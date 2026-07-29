@@ -88,35 +88,35 @@
 </script>
 
 <header class="relative z-50 overflow-visible border-b border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] backdrop-blur-sm">
-	<div class="flex h-[var(--app-topbar-height)] items-center gap-2 px-2.5 py-1.5 lg:gap-2.5 lg:px-4">
+	<div class="flex h-[var(--app-topbar-height)] items-center gap-2.5 px-3 py-2 lg:gap-3 lg:px-5">
 		<button
-			class="lg:hidden shrink-0 rounded-md p-1.5 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+			class="lg:hidden shrink-0 rounded-md p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
 			aria-label="Toggle navigation menu"
 			onclick={toggleMobileNavigation}
 		>
-			<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<svg class="h-[1.25rem] w-[1.25rem]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
 			</svg>
 		</button>
 
 		<div class="hidden items-center gap-2 shrink-0 lg:flex">
-			<AppLogo sizeClass="h-8 w-8" roundedClass="rounded-lg" />
+			<AppLogo sizeClass="h-9 w-9" roundedClass="rounded-lg" />
 			<div class="min-w-0">
-				<h1 class="text-sm font-bold leading-tight text-[var(--color-surface-text)]">Cryptorum</h1>
-				<p class="text-[10px] leading-tight text-[var(--color-surface-text-muted)]">Personal Library</p>
+				<h1 class="text-[0.9375rem] font-bold leading-tight text-[var(--color-surface-text)]">Cryptorum</h1>
+				<p class="text-[11px] leading-tight text-[var(--color-surface-text-muted)]">Personal Library</p>
 			</div>
 		</div>
 
 		<button
 			type="button"
-			class={`hidden shrink-0 rounded-md p-1.5 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]/70 lg:inline-flex ${$desktopSidebarCollapsed ? 'bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)]' : ''}`}
+			class={`hidden shrink-0 rounded-md p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]/70 lg:inline-flex ${$desktopSidebarCollapsed ? 'bg-[var(--color-surface-overlay)] text-[var(--color-surface-text)]' : ''}`}
 			aria-controls="app-sidebar"
 			aria-expanded={!$desktopSidebarCollapsed}
 			aria-label={$desktopSidebarCollapsed ? 'Open sidebar' : 'Collapse sidebar'}
 			title={$desktopSidebarCollapsed ? 'Open sidebar' : 'Collapse sidebar'}
 			onclick={toggleDesktopSidebar}
 		>
-			<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+			<svg class="h-[1.25rem] w-[1.25rem]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
 			</svg>
 		</button>
@@ -131,45 +131,45 @@
 					autocapitalize="none"
 					autocorrect="off"
 					spellcheck="false"
-					class="h-9 w-full min-w-0 rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] py-1.5 pl-9 pr-3 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+					class="h-10 w-full min-w-0 rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] py-2 pl-9 pr-3.5 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 				/>
-				<svg class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<svg class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
 				</svg>
 			</div>
 		</form>
 
-		<div class="hidden items-center gap-1 lg:flex">
+		<div class="hidden items-center gap-1.5 lg:flex">
 			<FullscreenToggle />
 			<NotificationBell />
 			<ThemeSelector />
 
 			<a
 				href="/history"
-				class="rounded-md p-1.5 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+				class="rounded-md p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
 				title="Reading History"
 			>
-				<svg class="h-[1.125rem] w-[1.125rem]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
 				</svg>
 			</a>
 
 			<a
 				href="/stats"
-				class="rounded-md p-1.5 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+				class="rounded-md p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
 				title="Statistics"
 			>
-				<svg class="h-[1.125rem] w-[1.125rem]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
 				</svg>
 			</a>
 
 			<a
 				href="/settings"
-				class="rounded-md p-1.5 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+				class="rounded-md p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
 				title="Settings"
 			>
-				<svg class="h-[1.125rem] w-[1.125rem]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
 				</svg>
@@ -182,12 +182,12 @@
 
 		<button
 			type="button"
-			class="lg:hidden shrink-0 rounded-md p-1.5 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+			class="lg:hidden shrink-0 rounded-md p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
 			aria-label="Open quick actions"
 			aria-expanded={showMobileActions}
 			onclick={toggleMobileActions}
 		>
-			<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<svg class="h-[1.25rem] w-[1.25rem]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6h.01M12 12h.01M12 18h.01"></path>
 			</svg>
 		</button>
@@ -204,7 +204,7 @@
 	></button>
 	<div class="mobile-actions-panel {mobileActionsView === 'menu' ? 'mobile-actions-panel-menu' : 'mobile-actions-panel-detail'}">
 		{#if mobileActionsView === 'menu'}
-			<div class="grid gap-1.5 p-2.5">
+			<div class="grid gap-2 p-3">
 				<button type="button" class="mobile-action-row w-full" onclick={openMobileNotifications}>
 					<span class="flex items-center gap-2.5">
 						<svg class="h-4 w-4 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
