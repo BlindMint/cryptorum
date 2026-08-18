@@ -146,7 +146,7 @@
 		<button
 			bind:this={buttonRef}
 			onclick={() => open = !open}
-			class={`relative rounded-lg text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] ${hasActiveJobs ? '' : 'hover:bg-[var(--color-surface-overlay)]'} ${mobileMenu ? 'flex w-full items-center justify-between gap-3 px-0 py-0' : 'inline-flex h-10 w-10 items-center justify-center p-0'}`}
+			class={`relative rounded-md text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] ${hasActiveJobs ? '' : 'hover:bg-[var(--color-surface-overlay)]'} ${mobileMenu ? 'flex w-full items-center justify-between gap-3 px-0 py-0' : 'inline-flex h-9 w-9 items-center justify-center p-0'}`}
 			title="Notifications"
 			aria-label="Notifications"
 		>
@@ -169,7 +169,7 @@
 			{:else}
 				<span class="notification-icon-frame" class:active={hasActiveJobs} class:reviewable={hasRecentReviewableMetadataJob && !hasActiveJobs}>
 					<span class="notification-activity-ring" aria-hidden="true"></span>
-					<svg class="notification-bell-icon w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<svg class="notification-bell-icon h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C8.67 6.165 7 8.388 7 11v3.159c0 .538-.214 1.055-.595 1.436L5 17h5m5 0a3 3 0 11-6 0m6 0H9"></path>
 					</svg>
 				</span>
@@ -189,7 +189,7 @@
 			class={panelOnly
 				? 'w-full overflow-hidden'
 				: mobileMenu
-					? 'fixed left-3 right-3 top-[7.75rem] max-h-[calc(100dvh-8.5rem)] rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-sm overflow-hidden z-[95]'
+					? 'fixed left-3 right-3 top-[calc(var(--app-topbar-height)+0.75rem)] max-h-[calc(100dvh-var(--app-topbar-height)-1.5rem)] rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-sm overflow-hidden z-[95]'
 					: 'absolute right-0 mt-3 w-[28rem] max-w-[calc(100vw-2rem)] rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-sm overflow-hidden z-[80]'}
 		>
 			{#if !hideHeader}

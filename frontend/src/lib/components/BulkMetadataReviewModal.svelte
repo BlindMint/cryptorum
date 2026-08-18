@@ -489,7 +489,7 @@
 <div class="fixed inset-0 z-[125] flex items-center justify-center p-4">
 	<button type="button" class="absolute inset-0 bg-black/70" aria-label="Close metadata review" onclick={onClose}></button>
 	<div class="relative flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
-		<header class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-6 py-4">
+		<header class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-5 py-3.5">
 			<div>
 				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Bulk Metadata Lookup</h2>
 				<p class="text-sm text-[var(--color-surface-text-muted)]">
@@ -578,7 +578,7 @@
 				{/if}
 			</div>
 
-			<div class="min-h-0 flex-1 overflow-y-auto p-4">
+			<div class="min-h-0 flex-1 overflow-y-auto p-5">
 				{#if items.length === 0}
 					<div class="rounded-lg border border-dashed border-[var(--color-surface-border)] px-6 py-12 text-center text-sm text-[var(--color-surface-text-muted)]">
 						{appliedBookIds.size > 0 ? 'All visible matches have been applied.' : 'No lookup results yet.'}

@@ -258,58 +258,58 @@
 	}
 </script>
 
-<div class="flex min-h-full flex-col gap-4 overflow-x-hidden overflow-y-auto">
+<div class="flex min-h-full flex-col gap-3.5 overflow-x-hidden overflow-y-auto">
 	<div class="hidden sm:grid grid-cols-2 lg:grid-cols-4 gap-3">
-		<a href="/library" class="block rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-colors hover:border-[var(--color-primary-500)]/50 hover:bg-[var(--color-surface-overlay)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]" aria-label="View all books">
+		<a href="/library" class="block rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3.5 transition-colors hover:border-[var(--color-primary-500)]/50 hover:bg-[var(--color-surface-overlay)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]" aria-label="View all books">
 			<div class="flex items-center justify-between">
 				<div>
 					<p class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">Total Books</p>
 					<p class="text-2xl font-bold text-[var(--color-surface-text)] mt-1">{stats.books}</p>
 				</div>
-				<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center flex-shrink-0">
-					<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<div class="w-9 h-9 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center flex-shrink-0">
+					<svg class="w-[1.125rem] h-[1.125rem] text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
 					</svg>
 				</div>
 			</div>
 		</a>
 
-		<a href="/library?status=reading" class="block rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-colors hover:border-[var(--color-primary-500)]/50 hover:bg-[var(--color-surface-overlay)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]" aria-label="View currently reading books">
+		<a href="/library?status=reading" class="block rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3.5 transition-colors hover:border-[var(--color-primary-500)]/50 hover:bg-[var(--color-surface-overlay)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]" aria-label="View currently reading books">
 			<div class="flex items-center justify-between">
 				<div>
 					<p class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">Reading</p>
 					<p class="text-2xl font-bold text-[var(--color-surface-text)] mt-1">{stats.reading}</p>
 				</div>
-				<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center flex-shrink-0">
-					<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<div class="w-9 h-9 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center flex-shrink-0">
+					<svg class="w-[1.125rem] h-[1.125rem] text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
 					</svg>
 				</div>
 			</div>
 		</a>
 
-		<a href="/library?status=finished" class="block rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-colors hover:border-[var(--color-primary-500)]/50 hover:bg-[var(--color-surface-overlay)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]" aria-label="View already read books">
+		<a href="/library?status=finished" class="block rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3.5 transition-colors hover:border-[var(--color-primary-500)]/50 hover:bg-[var(--color-surface-overlay)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]" aria-label="View already read books">
 			<div class="flex items-center justify-between">
 				<div>
 					<p class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">Finished</p>
 					<p class="text-2xl font-bold text-[var(--color-surface-text)] mt-1">{stats.finished}</p>
 				</div>
-				<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center flex-shrink-0">
-					<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<div class="w-9 h-9 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center flex-shrink-0">
+					<svg class="w-[1.125rem] h-[1.125rem] text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
 					</svg>
 				</div>
 			</div>
 		</a>
 
-		<a href="/libraries" class="block rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-colors hover:border-[var(--color-primary-500)]/50 hover:bg-[var(--color-surface-overlay)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]" aria-label="View libraries">
+		<a href="/libraries" class="block rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3.5 transition-colors hover:border-[var(--color-primary-500)]/50 hover:bg-[var(--color-surface-overlay)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]" aria-label="View libraries">
 			<div class="flex items-center justify-between">
 				<div>
 					<p class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">Libraries</p>
 					<p class="text-2xl font-bold text-[var(--color-surface-text)] mt-1">{stats.libraries}</p>
 				</div>
-				<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center flex-shrink-0">
-					<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<div class="w-9 h-9 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center flex-shrink-0">
+					<svg class="w-[1.125rem] h-[1.125rem] text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
 					</svg>
 				</div>
@@ -319,9 +319,9 @@
 
 	<!-- Continue Reading Section -->
 	{#if dashboardConfig.showContinueReading}
-	<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-none flex flex-col">
+	<div class="bg-[var(--color-surface-overlay)] rounded-lg p-3.5 border border-[var(--color-surface-border)] flex-none flex flex-col">
 		<div class="flex items-center justify-between mb-3">
-			<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Continue Reading</h2>
+			<h2 class="text-[1.0625rem] font-semibold text-[var(--color-surface-text)]">Continue Reading</h2>
 			<a href="/library?status=reading" class="text-sm text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">View all →</a>
 		</div>
 			{#if continueReadingBooks.length > 0}
@@ -401,9 +401,9 @@
 
 	<!-- Recently Added Section -->
 	{#if dashboardConfig.showRecentlyAdded}
-		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-none flex flex-col">
+		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-3.5 border border-[var(--color-surface-border)] flex-none flex flex-col">
 			<div class="flex items-center justify-between mb-3">
-				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Recently Added</h2>
+				<h2 class="text-[1.0625rem] font-semibold text-[var(--color-surface-text)]">Recently Added</h2>
 				<a href="/library" class="text-sm text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">View all →</a>
 			</div>
 			{#if recentBooks.length > 0}
@@ -478,9 +478,9 @@
 
  	<!-- Discover Section -->
 	{#if dashboardConfig.showDiscover}
-		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-4 border border-[var(--color-surface-border)] flex-none flex flex-col">
+		<div class="bg-[var(--color-surface-overlay)] rounded-lg p-3.5 border border-[var(--color-surface-border)] flex-none flex flex-col">
 			<div class="flex items-center justify-between mb-3">
-				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Discover</h2>
+				<h2 class="text-[1.0625rem] font-semibold text-[var(--color-surface-text)]">Discover</h2>
 				<button
 					onclick={toggleConfigModal}
 					class="p-2 rounded-lg text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors"

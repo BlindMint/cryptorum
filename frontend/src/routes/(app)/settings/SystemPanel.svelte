@@ -169,7 +169,7 @@
 	<section class="flex min-h-[24rem] flex-1 flex-col rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
 		<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-6 py-4">
 			<div>
-				<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Backups</h3>
+				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Backups</h3>
 				<p class="text-sm text-[var(--color-surface-text-muted)]">Manual backups, restore actions, and scheduled backup settings</p>
 			</div>
 			<div class="flex flex-wrap items-center gap-2">
@@ -200,7 +200,7 @@
 				</button>
 			</div>
 		</div>
-		<div class="grid gap-4 border-b border-[var(--color-surface-border)] p-6 lg:grid-cols-4">
+		<div class="grid gap-5 border-b border-[var(--color-surface-border)] p-5 lg:grid-cols-4">
 			<label class="space-y-2 lg:col-span-2">
 				<span class="text-sm font-medium text-[var(--color-surface-text)]">Backup Cron</span>
 				<input
@@ -243,7 +243,7 @@
 				{savingBackupSettings ? 'Saving...' : 'Save Backup Settings'}
 			</button>
 		</div>
-		<div class={sectionBodyClass(backupsExpanded) + ' flex flex-col p-6 space-y-3'}>
+		<div class={sectionBodyClass(backupsExpanded) + ' flex flex-col p-5 space-y-3'}>
 			{#if backupsLoading}
 				<div class="flex min-h-[12rem] flex-1 items-center justify-center text-sm text-[var(--color-surface-text-muted)]">Loading backups...</div>
 			{:else if backupError}
@@ -253,7 +253,7 @@
 			{:else}
 				<div class="grid gap-3 lg:grid-cols-2">
 					{#each backups as item}
-						<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
+						<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-5">
 							<div class="flex items-start justify-between gap-3">
 								<div class="space-y-1">
 									<div class="text-sm font-medium text-[var(--color-surface-text)]">{item.name}</div>

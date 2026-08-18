@@ -166,7 +166,7 @@
 		{#if !isReaderPage}
 			<TopBar />
 		{/if}
-		<div class="flex {isReaderPage ? 'h-dvh' : 'h-[calc(100dvh-4.75rem-1px)] lg:h-[calc(100dvh-5rem-1px)]'} relative min-w-0 overflow-x-hidden">
+		<div class="flex {isReaderPage ? 'h-dvh' : 'h-[calc(100dvh-var(--app-topbar-height)-1px)]'} relative min-w-0 overflow-x-hidden">
 			{#if $mobileMenuOpen}
 				<button
 					type="button"
@@ -179,7 +179,7 @@
 				<Sidebar {authDisabled} />
 			{/if}
 				<div class="flex-1 min-w-0 flex flex-col overflow-hidden">
-					<main class="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden {isReaderPage ? '[scrollbar-gutter:auto]' : '[scrollbar-gutter:stable]'} {isReaderPage || isCatalogPage ? '!p-0' : 'p-6'}">
+					<main class="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden {isReaderPage ? '[scrollbar-gutter:auto]' : '[scrollbar-gutter:stable]'} {isReaderPage || isCatalogPage ? '!p-0' : 'p-5'}">
 						{@render children()}
 					</main>
 				</div>
