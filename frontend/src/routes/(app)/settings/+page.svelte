@@ -902,10 +902,10 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	<link rel="stylesheet" href="/fonts/spectral.css" />
 </svelte:head>
 
-<div class="flex min-h-full flex-col gap-6 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+<div class="flex min-h-full flex-col gap-5 pb-[calc(1rem+env(safe-area-inset-bottom))]">
  	<div class="flex items-center justify-between">
  		<div>
- 			<h1 class="text-2xl font-bold text-[var(--color-surface-text)]">Settings</h1>
+ 			<h1 class="text-[1.375rem] font-bold text-[var(--color-surface-text)]">Settings</h1>
  			<p class="text-[var(--color-surface-text-muted)] mt-1">Manage your library and application settings</p>
  		</div>
  	</div>
@@ -916,35 +916,35 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
   		<button
   			onclick={() => setActiveTab('general')}
 			data-tab-active={activeTab === 'general'}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'general' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+  			class="settings-tab-button px-3.5 py-2 text-sm font-medium transition-colors {activeTab === 'general' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
   		>
   			General
   		</button>
   		<button
   			onclick={() => setActiveTab('appearance')}
 			data-tab-active={activeTab === 'appearance'}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'appearance' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+  			class="settings-tab-button px-3.5 py-2 text-sm font-medium transition-colors {activeTab === 'appearance' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
   		>
   			Appearance
   		</button>
   		<button
   			onclick={() => setActiveTab('reader')}
 			data-tab-active={activeTab === 'reader'}
-  			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'reader' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+  			class="settings-tab-button px-3.5 py-2 text-sm font-medium transition-colors {activeTab === 'reader' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
   		>
   			Reader
   		</button>
 		<button
 			onclick={() => setActiveTab('jobs')}
 			data-tab-active={activeTab === 'jobs'}
-			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'jobs' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+			class="settings-tab-button px-3.5 py-2 text-sm font-medium transition-colors {activeTab === 'jobs' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 		>
 			Activity
 		</button>
 		<button
 			onclick={() => setActiveTab('system')}
 			data-tab-active={activeTab === 'system'}
-			class="settings-tab-button px-4 py-2 text-sm font-medium transition-colors {activeTab === 'system' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+			class="settings-tab-button px-3.5 py-2 text-sm font-medium transition-colors {activeTab === 'system' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 		>
 			System
 		</button>
@@ -958,8 +958,8 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	{:else if activeTab === 'appearance'}
 		<div class="space-y-6">
 			<!-- Colors Section -->
-			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-6">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)] mb-4">Colors</h3>
+			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-5">
+				<h3 class="text-lg font-semibold text-[var(--color-surface-text)] mb-3">Colors</h3>
 				
 				<!-- Primary Color -->
 				<div class="mb-6">
@@ -1038,7 +1038,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 			</div>
 
 			<!-- Glow Section -->
-			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-6">
+			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-5">
 				<div class="flex items-center justify-between mb-4">
 					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Top Glow</h3>
 					<div class="flex items-center space-x-3">
@@ -1110,7 +1110,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 			</div>
 
 			<!-- Background Images Section -->
-			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-6">
+			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-5">
 				<div class="flex items-center justify-between mb-4">
 					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Background Image</h3>
 					<div class="flex items-center space-x-3">
@@ -1228,11 +1228,11 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	{:else if activeTab === 'reader'}
 		<div class="space-y-6">
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
+				<div class="px-5 py-3.5 border-b border-[var(--color-surface-border)]">
 					<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Screen Wake</h2>
 					<p class="text-sm text-[var(--color-surface-text-muted)]">Control when Cryptorum prevents the display from sleeping.</p>
 				</div>
-				<div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+				<div class="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
 					<label for="keep-screen-reading" class="flex items-start gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
 						<input
 							id="keep-screen-reading"
@@ -1264,7 +1264,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 			<!-- EPUB Reader Settings -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-5 py-3.5 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
@@ -1276,7 +1276,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					</div>
 				</div>
 				
-				<div class="p-6 space-y-6">
+				<div class="p-5 space-y-5">
 					<!-- Appearance -->
 					<div>
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4 flex items-center">
@@ -1563,7 +1563,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 			<!-- PDF Reader Settings -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-5 py-3.5 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
@@ -1575,7 +1575,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					</div>
 				</div>
 				
-				<div class="p-6 space-y-6">
+				<div class="p-5 space-y-5">
 					<div>
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Display</h3>
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1620,7 +1620,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 			<!-- Comic Reader Settings -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-5 py-3.5 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
@@ -1632,7 +1632,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					</div>
 				</div>
 				
-				<div class="p-6 space-y-6">
+				<div class="p-5 space-y-5">
 					<!-- Display Settings -->
 					<div>
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Display</h3>
@@ -1817,7 +1817,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 			<!-- Speed Reader Settings -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-5 py-3.5 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
@@ -1829,7 +1829,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					</div>
 				</div>
 				
-				<div class="p-6 space-y-6">
+				<div class="p-5 space-y-5">
 					<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 						<!-- WPM -->
 						<div>
@@ -1968,7 +1968,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 			<!-- Audio Reader Settings -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-5 py-3.5 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
@@ -1980,7 +1980,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					</div>
 				</div>
 				
-				<div class="p-6">
+				<div class="p-5">
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<!-- Playback Speed -->
 						<div>
@@ -2082,7 +2082,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</button>
 					</div>
 				</div>
-				<div class="p-6">
+				<div class="p-5">
 					<label class="mb-5 flex items-start justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4 transition-colors hover:border-[var(--color-primary-500)]/60">
 						<span>
 							<span class="block text-sm font-semibold text-[var(--color-surface-text)]">Protect existing metadata in all libraries</span>
@@ -2194,7 +2194,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 			<!-- BookDrop -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-5 py-3.5 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
@@ -2214,7 +2214,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</svg>
 					</button>
 				</div>
-				<div class="p-6">
+				<div class="p-5">
 					{#if settings.bookdrop}
 						<div class="flex items-center justify-between">
 							<div class="flex items-center space-x-3 text-[var(--color-surface-text)]">
@@ -2266,7 +2266,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							</button>
 					</div>
 				</div>
-				<div class="p-6 space-y-6">
+				<div class="p-5 space-y-5">
 					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
 						<div class="flex items-center justify-between gap-4">
 							<div>
@@ -2382,7 +2382,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 			<!-- About -->
 			<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] overflow-hidden">
-				<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
+				<div class="px-5 py-3.5 border-b border-[var(--color-surface-border)] flex items-center space-x-3">
 					<div class="w-10 h-10 rounded-lg bg-[var(--color-primary-500)]/20 flex items-center justify-center">
 						<svg class="w-5 h-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -2393,7 +2393,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						<p class="text-sm text-[var(--color-surface-text-muted)]">Version and system information</p>
 					</div>
 				</div>
-				<div class="p-6">
+				<div class="p-5">
 					<p class="text-[var(--color-surface-text)] mb-4">
 						Cryptorum is a personal digital library application designed for single-user self-hosting.
 					</p>
@@ -2423,7 +2423,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 {#if showRemoveBgModal}
 		<div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4" role="dialog" aria-modal="true" tabindex="-1">
 		<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-sm shadow-2xl">
-			<div class="p-6">
+			<div class="p-5">
 				<h3 class="text-lg font-semibold text-[var(--color-surface-text)] mb-2">Remove Background</h3>
 				<p class="text-[var(--color-surface-text-muted)] mb-6">Are you sure you want to remove this background image?</p>
 				<div class="flex justify-end space-x-3">
@@ -2495,11 +2495,11 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 			onclick={() => showBookdropModal = false}
 		></button>
 		<div class="relative z-10 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-2xl overflow-hidden shadow-2xl">
-			<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
+			<div class="px-5 py-3.5 border-b border-[var(--color-surface-border)]">
 				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add Bookdrop Location</h3>
 				<p class="text-sm text-[var(--color-surface-text-muted)] mt-1">Choose the folder where dropped books should be watched for import.</p>
 			</div>
-			<div class="p-6 space-y-4">
+			<div class="p-5 space-y-4">
 				<div>
 					<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Path</div>
 					<div class="flex items-center gap-2">
@@ -2551,12 +2551,12 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 			onclick={() => showCustomThemeEditor = false}
 		></button>
 		<div class="relative z-10 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-xl overflow-hidden shadow-2xl">
-			<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
+			<div class="px-5 py-3.5 border-b border-[var(--color-surface-border)]">
 				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">
 					{editingCustomTheme ? 'Edit Custom Theme' : 'Add Custom Theme'}
 				</h3>
 			</div>
-			<div class="p-6 space-y-4">
+			<div class="p-5 space-y-4">
 				<div>
 					<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Theme Name</div>
 					<input
@@ -2675,7 +2675,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 {#if showDirectoryModal}
 	<div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
 		<div class="bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden">
-			<div class="px-6 py-4 border-b border-[var(--color-surface-border)] flex-shrink-0">
+			<div class="px-5 py-3.5 border-b border-[var(--color-surface-border)] flex-shrink-0">
 				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">
 					Select Directory
 				</h3>

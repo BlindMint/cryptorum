@@ -28,7 +28,7 @@
 	type="button"
 	onclick={toggleFullscreen}
 	disabled={unavailable}
-	class="shrink-0 rounded-lg p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)] disabled:cursor-not-allowed disabled:opacity-40"
+	class="shrink-0 rounded-md p-2 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)] disabled:cursor-not-allowed disabled:opacity-40"
 	aria-label={fullscreen ? 'Exit true fullscreen' : 'Enter true fullscreen'}
 	title={fullscreen ? 'Exit true fullscreen' : 'Enter true fullscreen'}
 >

@@ -25,6 +25,13 @@
 	--color-bg-image-position: center center;
 	--color-bg-image-repeat: no-repeat;
 	--color-bg-image-size: cover;
+
+	/* App chrome density (between original spacious and ultra-compact) */
+	--app-topbar-height: 3.75rem; /* 60px */
+	--chrome-font: 0.875rem; /* 14px */
+	--chrome-font-sm: 0.8125rem; /* 13px */
+	--chrome-font-xs: 0.75rem; /* 12px */
+	--chrome-icon: 1.125rem; /* 18px */
 }
 
 body {
@@ -112,20 +119,20 @@ body::before {
 }
 
 .catalog-page-shell {
-	padding: 0.75rem 0.75rem 5rem;
+	padding: 0.75rem 0.875rem 4.5rem;
 }
 
 .catalog-page-header {
 	display: flex;
 	flex-direction: column;
-	gap: 0.75rem;
+	gap: 0.625rem;
 }
 
 .catalog-page-header-row {
 	display: flex;
 	min-width: 0;
 	flex-direction: column;
-	gap: 0.75rem;
+	gap: 0.625rem;
 }
 
 .catalog-page-title-row {
@@ -139,15 +146,15 @@ body::before {
 
 .catalog-page-title {
 	min-width: 0;
-	font-size: 1.25rem;
-	line-height: 1.75rem;
+	font-size: 1.1875rem;
+	line-height: 1.625rem;
 	font-weight: 700;
 	color: var(--color-surface-text);
 }
 
 .catalog-page-count {
 	white-space: nowrap;
-	font-size: 0.875rem;
+	font-size: var(--chrome-font-sm);
 	line-height: 1.25rem;
 	color: var(--color-surface-text-muted);
 }
@@ -167,13 +174,13 @@ body::before {
 }
 
 .catalog-page-control {
-	height: 2.5rem;
+	height: 2.375rem;
 	min-width: 0;
 	border: 1px solid var(--color-surface-border);
 	border-radius: 0.5rem;
 	background: var(--color-surface-overlay);
 	padding: 0 0.75rem;
-	font-size: 0.875rem;
+	font-size: var(--chrome-font);
 	line-height: 1.25rem;
 	color: var(--color-surface-text);
 }
@@ -205,18 +212,18 @@ body::before {
 
 .catalog-search-control {
 	width: 100%;
-	padding-left: 2.25rem;
+	padding-left: 2.125rem;
 }
 
 .catalog-page-action {
 	display: inline-flex;
-	height: 2.5rem;
+	height: 2.375rem;
 	align-items: center;
 	justify-content: center;
 	gap: 0.5rem;
 	border-radius: 0.5rem;
 	padding: 0 0.75rem;
-	font-size: 0.875rem;
+	font-size: var(--chrome-font);
 	line-height: 1.25rem;
 	font-weight: 500;
 	transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
@@ -237,12 +244,12 @@ body::before {
 
 @media (min-width: 640px) {
 	.catalog-page-shell {
-		padding: 1rem 1.5rem 5rem;
+		padding: 0.875rem 1.375rem 4.5rem;
 	}
 
 	.catalog-page-title {
-		font-size: 1.5rem;
-		line-height: 2rem;
+		font-size: 1.375rem;
+		line-height: 1.875rem;
 	}
 }
 
@@ -251,7 +258,7 @@ body::before {
 		flex-direction: row;
 		align-items: flex-start;
 		justify-content: space-between;
-		margin-bottom: -0.5rem;
+		margin-bottom: -0.25rem;
 	}
 
 	.catalog-page-actions {

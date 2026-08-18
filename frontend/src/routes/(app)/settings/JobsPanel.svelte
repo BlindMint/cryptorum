@@ -287,7 +287,7 @@
 	});
 </script>
 
-<div class="flex min-h-full flex-1 flex-col gap-6">
+<div class="flex min-h-full flex-1 flex-col gap-5">
 	{#if activeJobs.length > 0}
 		<section class="rounded-lg border border-[var(--color-primary-500)]/30 bg-[var(--color-surface-overlay)] overflow-hidden">
 			<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-5 py-3">
@@ -302,7 +302,7 @@
 					{activeJobs.length} active
 				</div>
 			</div>
-			<div class="space-y-2 p-4">
+			<div class="space-y-2 p-5">
 				{#each activeJobs as job}
 					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/70 p-3">
 						<div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
@@ -326,9 +326,9 @@
 
 	<section class="flex min-h-[24rem] flex-1 flex-col rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
 		<div class="space-y-4 border-b border-[var(--color-surface-border)] px-6 py-4">
-			<div class="flex flex-wrap items-start justify-between gap-4">
+			<div class="flex flex-wrap items-start justify-between gap-5">
 				<div>
-					<h3 class="text-base font-semibold text-[var(--color-surface-text)]">Activity Log</h3>
+					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Activity Log</h3>
 					<p class="text-sm text-[var(--color-surface-text-muted)]">
 						Most recent jobs, notifications, and app events · {unreadCount} active or unread
 					</p>
@@ -412,7 +412,7 @@
 			</div>
 
 			{#if showAdvancedFilters}
-				<div class="grid gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/70 p-4 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
+				<div class="grid gap-5 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/70 p-5 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
 					<div class="space-y-4">
 						<div class="grid gap-3 md:grid-cols-3">
 							<label class="space-y-1">
@@ -445,7 +445,7 @@
 						</div>
 					</div>
 
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-5">
 						<h4 class="text-sm font-semibold text-[var(--color-surface-text)]">Notification Panel</h4>
 						<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Choose which completed activity also appears in the top-bar notification panel.</p>
 						<label class="mt-4 flex items-start gap-3 text-sm text-[var(--color-surface-text-muted)]">
@@ -478,7 +478,7 @@
 			{/if}
 		</div>
 
-		<div class={(activityExpanded ? 'min-h-[24rem]' : 'min-h-[24rem] md:min-h-0 md:flex-1 md:overflow-auto') + ' flex flex-col p-6 space-y-3'}>
+		<div class={(activityExpanded ? 'min-h-[24rem]' : 'min-h-[24rem] md:min-h-0 md:flex-1 md:overflow-auto') + ' flex flex-col p-5 space-y-3'}>
 			{#if loading}
 				<div class="flex min-h-[16rem] flex-1 items-center justify-center text-sm text-[var(--color-surface-text-muted)]">Loading activity...</div>
 			{:else if error}
@@ -519,7 +519,7 @@
 							</div>
 						</div>
 					{:else}
-						<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
+						<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-5">
 							<div class="flex items-start justify-between gap-3">
 								<button onclick={() => openEvent(item)} class="min-w-0 flex-1 text-left">
 									<div class="flex flex-wrap items-center gap-2">
@@ -564,10 +564,10 @@
 {/if}
 
 {#if detailJob}
-	<div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+	<div class="fixed inset-0 z-50 flex items-center justify-center p-5">
 		<button type="button" class="absolute inset-0 bg-black/75" aria-label="Close job details" onclick={() => detailJob = null}></button>
 		<div class="relative z-10 flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
-			<div class="flex items-start justify-between gap-4 border-b border-[var(--color-surface-border)] px-6 py-4">
+			<div class="flex items-start justify-between gap-5 border-b border-[var(--color-surface-border)] px-6 py-4">
 				<div class="min-w-0">
 					<h3 class="truncate text-lg font-semibold text-[var(--color-surface-text)]">{detailJob.title}</h3>
 					<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">
@@ -580,15 +580,15 @@
 					</svg>
 				</button>
 			</div>
-			<div class="min-h-0 flex-1 overflow-y-auto p-6">
+			<div class="min-h-0 flex-1 overflow-y-auto p-5">
 				{#if detailLoading}
 					<div class="text-sm text-[var(--color-surface-text-muted)]">Loading details...</div>
 				{:else if getJobItems(detailJob).length === 0}
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4 text-sm text-[var(--color-surface-text-muted)]">
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-5 text-sm text-[var(--color-surface-text-muted)]">
 						This job only has aggregate totals. Per-item details are recorded for newer jobs where item-level results are available.
 					</div>
 				{:else}
-					<div class="grid gap-4 lg:grid-cols-2">
+					<div class="grid gap-5 lg:grid-cols-2">
 						<section class="min-w-0 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]">
 							<div class="border-b border-[var(--color-surface-border)] px-4 py-3">
 								<h4 class="text-sm font-semibold text-red-300">Failed Items ({getFailedJobItems(detailJob).length})</h4>

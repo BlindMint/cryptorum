@@ -146,7 +146,7 @@
 	function filterRowClass(selected: boolean, extra = ''): string {
 		const selectedClasses = 'filter-option-selected border-l-2 border-[var(--color-primary-400)] bg-[var(--color-primary-500)]/25 hover:bg-[var(--color-primary-500)]/35';
 		const unselectedClasses = 'border-l-2 border-transparent';
-		return `filter-option-row grid w-full items-center gap-2 px-4 py-2 text-left text-[var(--color-surface-text)] transition-colors ${selected ? selectedClasses : unselectedClasses} ${extra}`;
+		return `filter-option-row grid w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--color-surface-text)] transition-colors ${selected ? selectedClasses : unselectedClasses} ${extra}`;
 	}
 
 	function countClass(selected: boolean): string {
@@ -231,7 +231,7 @@
 {#if open && showBackdrop}
 	<button
 		type="button"
-		class="fixed inset-x-0 bottom-0 top-20 z-[35] bg-black/70 lg:hidden"
+		class="fixed inset-x-0 bottom-0 top-[var(--app-topbar-height)] z-[35] bg-black/70 lg:hidden"
 		aria-label="Close filters"
 		onclick={onClose}
 	></button>
@@ -256,7 +256,7 @@
 </style>
 
 <div
-	class="filter-panel-shell fixed right-0 top-20 z-40 h-[calc(100dvh-5rem)] max-w-[calc(100vw-1rem)] overflow-y-auto border-l border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-xl {open ? 'translate-x-0' : 'invisible translate-x-full pointer-events-none'}"
+	class="filter-panel-shell fixed right-0 top-[var(--app-topbar-height)] z-40 h-[calc(100dvh-var(--app-topbar-height))] max-w-[calc(100vw-1rem)] overflow-y-auto border-l border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-xl {open ? 'translate-x-0' : 'invisible translate-x-full pointer-events-none'}"
 	style={`--filter-panel-width: ${$filterPanelWidth}px;`}
 	aria-hidden={!open}
 	inert={!open}
@@ -273,15 +273,15 @@
 		<div class="h-full w-px bg-transparent transition-colors group-hover:bg-[var(--color-primary-500)]/55 {isResizing ? 'bg-[var(--color-primary-500)]/70' : ''}"></div>
 	</div>
 	<div class="sticky top-0 z-10 border-b border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
-		<div class="flex min-h-16 items-center justify-between gap-3 px-4 py-3">
-			<div class="flex items-center gap-2">
-				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Filters</h2>
+		<div class="flex min-h-12 items-center justify-between gap-2.5 px-3.5 py-2.5">
+			<div class="flex items-center gap-1.5">
+				<h2 class="text-base font-semibold text-[var(--color-surface-text)]">Filters</h2>
 				<button
 					type="button"
 					onclick={() => showSettings = !showSettings}
 					aria-label="Filter settings"
 					aria-expanded={showSettings}
-					class="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)] {showSettings ? 'bg-[var(--color-surface-700)] text-[var(--color-surface-text)]' : ''}"
+					class="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)] {showSettings ? 'bg-[var(--color-surface-700)] text-[var(--color-surface-text)]' : ''}"
 				>
 					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.607 2.296.07 2.572-1.065z"></path>
@@ -292,12 +292,12 @@
 					</svg>
 				</button>
 			</div>
-			<div class="flex items-center gap-2">
+			<div class="flex items-center gap-1.5">
 				<button
 					type="button"
 					onclick={onClear}
 					disabled={!hasActiveFilters}
-					class="rounded px-2 py-1 text-xs font-semibold text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--color-surface-text-muted)]"
+					class="rounded px-1.5 py-0.5 text-xs font-semibold text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--color-surface-text-muted)]"
 				>
 					Clear
 				</button>
@@ -313,18 +313,18 @@
 			</div>
 		</div>
 		{#if showSettings}
-			<div class="space-y-3 border-t border-[var(--color-surface-border)] px-4 pb-4 pt-3">
+			<div class="space-y-2.5 border-t border-[var(--color-surface-border)] px-3.5 pb-3.5 pt-2.5">
 				<div>
-					<div class="mb-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">Across categories</div>
-					<div class="relative grid grid-cols-3 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
+					<div class="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">Across categories</div>
+					<div class="relative grid grid-cols-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-0.5">
 						<span
-							class="absolute bottom-1 left-1 top-1 rounded-lg bg-[var(--color-primary-500)] shadow-sm transition-transform duration-200 ease-out"
-							style="width: calc((100% - 0.5rem) / 3); transform: translateX({getModeIndex(filterMode) * 100}%);"
+							class="absolute bottom-0.5 left-0.5 top-0.5 rounded-md bg-[var(--color-primary-500)] shadow-sm transition-transform duration-200 ease-out"
+							style="width: calc((100% - 0.25rem) / 3); transform: translateX({getModeIndex(filterMode) * 100}%);"
 						></span>
 						{#each FILTER_MODES as mode}
 							<button
 								onclick={() => onSetFilterMode(mode)}
-								class="relative z-10 rounded-lg px-2 py-1.5 text-[11px] font-semibold tracking-wide transition-colors {filterMode === mode ? 'text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+								class="relative z-10 rounded-md px-1.5 py-1 text-[11px] font-semibold tracking-wide transition-colors {filterMode === mode ? 'text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 							>
 								{mode}
 							</button>
@@ -332,16 +332,16 @@
 					</div>
 				</div>
 				<div>
-					<div class="mb-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">Within categories</div>
-					<div class="relative grid grid-cols-3 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
+					<div class="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">Within categories</div>
+					<div class="relative grid grid-cols-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-0.5">
 						<span
-							class="absolute bottom-1 left-1 top-1 rounded-lg bg-[var(--color-primary-500)] shadow-sm transition-transform duration-200 ease-out"
-							style="width: calc((100% - 0.5rem) / 3); transform: translateX({getModeIndex(valueFilterMode) * 100}%);"
+							class="absolute bottom-0.5 left-0.5 top-0.5 rounded-md bg-[var(--color-primary-500)] shadow-sm transition-transform duration-200 ease-out"
+							style="width: calc((100% - 0.25rem) / 3); transform: translateX({getModeIndex(valueFilterMode) * 100}%);"
 						></span>
 						{#each FILTER_MODES as mode}
 							<button
 								onclick={() => onSetValueFilterMode(mode)}
-								class="relative z-10 rounded-lg px-2 py-1.5 text-[11px] font-semibold tracking-wide transition-colors {valueFilterMode === mode ? 'text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+								class="relative z-10 rounded-md px-1.5 py-1 text-[11px] font-semibold tracking-wide transition-colors {valueFilterMode === mode ? 'text-white' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
 							>
 								{mode}
 							</button>
@@ -349,13 +349,13 @@
 					</div>
 				</div>
 				<div>
-					<div class="mb-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">Filter sort</div>
-					<div class="grid grid-cols-2 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
+					<div class="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">Filter sort</div>
+					<div class="grid grid-cols-2 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-0.5">
 						{#each FILTER_OPTION_SORTS as option}
 							<button
 								type="button"
 								onclick={() => filterOptionSort = option.value}
-								class="rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors {filterOptionSort === option.value ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]'}"
+								class="rounded-md px-1.5 py-1 text-xs font-semibold transition-colors {filterOptionSort === option.value ? 'bg-[var(--color-primary-500)] text-white' : 'text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]'}"
 							>
 								{option.label}
 							</button>
@@ -366,9 +366,9 @@
 		{/if}
 	</div>
 
-	<div class="space-y-2 p-4">
-		<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-3" aria-labelledby="reading-status-filter-label">
-			<div id="reading-status-filter-label" class="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Reading Status</div>
+	<div class="space-y-2 p-3">
+		<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-2.5" aria-labelledby="reading-status-filter-label">
+			<div id="reading-status-filter-label" class="mb-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Reading Status</div>
 			<div class="flex flex-wrap gap-2">
 				{#each STATUS_FILTER_OPTIONS as statusOption}
 					{@const selected = isStatusSelected(statusOption.value)}
@@ -376,10 +376,10 @@
 						type="button"
 						onclick={() => onToggleStatus(statusOption.value)}
 						aria-pressed={selected}
-						class="inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-overlay)] {statusChipClass(statusOption.value, selected)}"
+						class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--color-surface-overlay)] {statusChipClass(statusOption.value, selected)}"
 					>
 						{#if selected}
-							<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
 							</svg>
 						{/if}
@@ -390,10 +390,10 @@
 		</section>
 
 		<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-			<button onclick={() => authorsOpen = !authorsOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-700)]">
-				<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Author</span>
+			<button onclick={() => authorsOpen = !authorsOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-3 py-2 transition-colors hover:bg-[var(--color-surface-700)]">
+				<span class="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Author</span>
 				<div class="flex items-center space-x-2">
-					<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{authors.length}</span>
+					<span class="rounded bg-[var(--color-surface-overlay)] px-1.5 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{authors.length}</span>
 					<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {authorsOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 					</svg>
@@ -401,7 +401,7 @@
 			</button>
 			{#if authorsOpen}
 				<div class="border-b border-[var(--color-surface-border)] p-2">
-					<input type="search" bind:value={authorSearch} placeholder="Search authors" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
+					<input type="search" bind:value={authorSearch} placeholder="Search authors" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-2.5 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
 				</div>
 				<div class="max-h-48 overflow-y-auto">
 					{#each visibleAuthors as author}
@@ -427,19 +427,19 @@
 						</button>
 					{/each}
 					{#if authors.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No authors found</p>
+						<p class="px-3 py-2 text-sm text-[var(--color-surface-text-muted)]">No authors found</p>
 					{:else if visibleAuthors.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching authors</p>
+						<p class="px-3 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching authors</p>
 					{/if}
 				</div>
 			{/if}
 		</div>
 
 		<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-			<button onclick={() => seriesOpen = !seriesOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-700)]">
-				<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Series</span>
+			<button onclick={() => seriesOpen = !seriesOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-3 py-2 transition-colors hover:bg-[var(--color-surface-700)]">
+				<span class="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Series</span>
 				<div class="flex items-center space-x-2">
-					<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{series.length}</span>
+					<span class="rounded bg-[var(--color-surface-overlay)] px-1.5 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{series.length}</span>
 					<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {seriesOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 					</svg>
@@ -447,7 +447,7 @@
 			</button>
 			{#if seriesOpen}
 				<div class="border-b border-[var(--color-surface-border)] p-2">
-					<input type="search" bind:value={seriesSearch} placeholder="Search series" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
+					<input type="search" bind:value={seriesSearch} placeholder="Search series" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-2.5 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
 				</div>
 				<div class="max-h-48 overflow-y-auto">
 					{#each visibleSeries as serie}
@@ -472,19 +472,19 @@
 						</button>
 					{/each}
 					{#if series.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No series found</p>
+						<p class="px-3 py-2 text-sm text-[var(--color-surface-text-muted)]">No series found</p>
 					{:else if visibleSeries.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching series</p>
+						<p class="px-3 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching series</p>
 					{/if}
 				</div>
 			{/if}
 		</div>
 
 		<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-			<button onclick={() => tagsOpen = !tagsOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-700)]">
-				<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Tags</span>
+			<button onclick={() => tagsOpen = !tagsOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-3 py-2 transition-colors hover:bg-[var(--color-surface-700)]">
+				<span class="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Tags</span>
 				<div class="flex items-center space-x-2">
-					<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{tags.length}</span>
+					<span class="rounded bg-[var(--color-surface-overlay)] px-1.5 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{tags.length}</span>
 					<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {tagsOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 					</svg>
@@ -492,7 +492,7 @@
 			</button>
 			{#if tagsOpen}
 				<div class="border-b border-[var(--color-surface-border)] p-2">
-					<input type="search" bind:value={tagSearch} placeholder="Search tags" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
+					<input type="search" bind:value={tagSearch} placeholder="Search tags" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-2.5 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
 				</div>
 				<div class="max-h-48 overflow-y-auto">
 					{#each visibleTags as tag}
@@ -517,19 +517,19 @@
 						</button>
 					{/each}
 					{#if tags.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No tags found</p>
+						<p class="px-3 py-2 text-sm text-[var(--color-surface-text-muted)]">No tags found</p>
 					{:else if visibleTags.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching tags</p>
+						<p class="px-3 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching tags</p>
 					{/if}
 				</div>
 			{/if}
 		</div>
 
 		<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-			<button onclick={() => formatsOpen = !formatsOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-700)]">
-				<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Format</span>
+			<button onclick={() => formatsOpen = !formatsOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-3 py-2 transition-colors hover:bg-[var(--color-surface-700)]">
+				<span class="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Format</span>
 				<div class="flex items-center space-x-2">
-					<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{formats.length}</span>
+					<span class="rounded bg-[var(--color-surface-overlay)] px-1.5 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{formats.length}</span>
 					<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {formatsOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 					</svg>
@@ -537,7 +537,7 @@
 			</button>
 			{#if formatsOpen}
 				<div class="border-b border-[var(--color-surface-border)] p-2">
-					<input type="search" bind:value={formatSearch} placeholder="Search formats" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
+					<input type="search" bind:value={formatSearch} placeholder="Search formats" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-2.5 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
 				</div>
 				<div class="max-h-48 overflow-y-auto">
 					{#each visibleFormats as format}
@@ -562,19 +562,19 @@
 						</button>
 					{/each}
 					{#if formats.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No formats found</p>
+						<p class="px-3 py-2 text-sm text-[var(--color-surface-text-muted)]">No formats found</p>
 					{:else if visibleFormats.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching formats</p>
+						<p class="px-3 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching formats</p>
 					{/if}
 				</div>
 			{/if}
 		</div>
 
 		<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-			<button onclick={() => publishersOpen = !publishersOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-overlay)]">
-				<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Publisher</span>
+			<button onclick={() => publishersOpen = !publishersOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-3 py-2 transition-colors hover:bg-[var(--color-surface-overlay)]">
+				<span class="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Publisher</span>
 				<div class="flex items-center space-x-2">
-					<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{publishers.length}</span>
+					<span class="rounded bg-[var(--color-surface-overlay)] px-1.5 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{publishers.length}</span>
 					<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {publishersOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 					</svg>
@@ -582,7 +582,7 @@
 			</button>
 			{#if publishersOpen}
 				<div class="border-b border-[var(--color-surface-border)] p-2">
-					<input type="search" bind:value={publisherSearch} placeholder="Search publishers" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
+					<input type="search" bind:value={publisherSearch} placeholder="Search publishers" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-2.5 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
 				</div>
 				<div class="max-h-48 overflow-y-auto">
 					{#each visiblePublishers as publisher}
@@ -607,19 +607,19 @@
 						</button>
 					{/each}
 					{#if publishers.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No publishers found</p>
+						<p class="px-3 py-2 text-sm text-[var(--color-surface-text-muted)]">No publishers found</p>
 					{:else if visiblePublishers.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching publishers</p>
+						<p class="px-3 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching publishers</p>
 					{/if}
 				</div>
 			{/if}
 		</div>
 
 		<div class="overflow-hidden rounded-lg border border-[var(--color-surface-border)]">
-			<button onclick={() => languagesOpen = !languagesOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-4 py-3 transition-colors hover:bg-[var(--color-surface-overlay)]">
-				<span class="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Language</span>
+			<button onclick={() => languagesOpen = !languagesOpen} class="flex w-full items-center justify-between border-l-4 border-[var(--color-primary-500)]/50 bg-[var(--color-surface-base)] px-3 py-2 transition-colors hover:bg-[var(--color-surface-overlay)]">
+				<span class="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--color-surface-text)]">Language</span>
 				<div class="flex items-center space-x-2">
-					<span class="rounded bg-[var(--color-surface-overlay)] px-2 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{languages.length}</span>
+					<span class="rounded bg-[var(--color-surface-overlay)] px-1.5 py-0.5 text-xs text-[var(--color-surface-text-muted)]">{languages.length}</span>
 					<svg class="h-4 w-4 text-[var(--color-surface-text-muted)] transition-transform {languagesOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 					</svg>
@@ -627,7 +627,7 @@
 			</button>
 			{#if languagesOpen}
 				<div class="border-b border-[var(--color-surface-border)] p-2">
-					<input type="search" bind:value={languageSearch} placeholder="Search languages" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
+					<input type="search" bind:value={languageSearch} placeholder="Search languages" class="h-8 w-full rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-2.5 text-sm text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none" />
 				</div>
 				<div class="max-h-48 overflow-y-auto">
 					{#each visibleLanguages as language}
@@ -652,9 +652,9 @@
 						</button>
 					{/each}
 					{#if languages.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No languages found</p>
+						<p class="px-3 py-2 text-sm text-[var(--color-surface-text-muted)]">No languages found</p>
 					{:else if visibleLanguages.length === 0}
-						<p class="px-4 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching languages</p>
+						<p class="px-3 py-2 text-sm text-[var(--color-surface-text-muted)]">No matching languages</p>
 					{/if}
 				</div>
 			{/if}

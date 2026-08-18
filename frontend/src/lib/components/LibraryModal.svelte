@@ -290,7 +290,7 @@
 		></button>
 
 		<div class="relative z-10 flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
-			<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-6 py-4">
+			<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-5 py-3.5">
 				<div>
 					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">{isEditing ? 'Edit Library' : 'Add Library'}</h3>
 					<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">
@@ -310,7 +310,7 @@
 				</button>
 			</div>
 
-			<div class="min-h-0 flex-1 space-y-6 overflow-y-auto p-6">
+			<div class="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
 				<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 					<div>
 						<label for="library-modal-name" class="mb-2 block text-sm font-medium text-[var(--color-surface-text)]">
@@ -360,7 +360,7 @@
 					</div>
 				</div>
 
-				<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
+				<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-5 py-3.5">
 					<label for="library-exclude-suggestions" class="flex items-start justify-between gap-4">
 						<span class="min-w-0">
 							<span class="block text-sm font-medium text-[var(--color-surface-text)]">Exclude from discovery and recommendations</span>
@@ -511,11 +511,11 @@
 				{/if}
 
 				{#if errorMessage}
-					<div class="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{errorMessage}</div>
+					<div class="rounded-lg border border-red-500/30 bg-red-500/10 px-5 py-3.5 text-sm text-red-300">{errorMessage}</div>
 				{/if}
 			</div>
 
-			<div class="flex justify-end gap-3 border-t border-[var(--color-surface-border)] px-6 py-4">
+			<div class="flex justify-end gap-3 border-t border-[var(--color-surface-border)] px-5 py-3.5">
 				<button
 					type="button"
 					onclick={closeModal}
@@ -550,11 +550,11 @@
 					onclick={closeDirectoryModal}
 				></button>
 				<div class="relative z-10 flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
-					<div class="flex-shrink-0 border-b border-[var(--color-surface-border)] px-6 py-4">
+					<div class="flex-shrink-0 border-b border-[var(--color-surface-border)] px-5 py-3.5">
 						<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Select Directory</h3>
 						<p class="mt-1 truncate font-mono text-sm text-[var(--color-surface-text-muted)]">{currentDirectory}</p>
 					</div>
-					<div class="flex-1 overflow-y-auto p-4">
+					<div class="flex-1 overflow-y-auto p-5">
 						{#if directoryLoading}
 							<div class="flex items-center justify-center py-8">
 								<div class="h-8 w-8 animate-spin rounded-full border-b-2 border-[var(--color-primary-500)]"></div>
@@ -593,7 +593,7 @@
 							</div>
 						{/if}
 					</div>
-					<div class="flex justify-end gap-3 border-t border-[var(--color-surface-border)] px-6 py-4">
+					<div class="flex justify-end gap-3 border-t border-[var(--color-surface-border)] px-5 py-3.5">
 						<button
 							type="button"
 							onclick={closeDirectoryModal}
