@@ -25,10 +25,18 @@
 		onScrollActivity?: (delta: number, scrollTop: number) => void;
 		onPageChange?: (page: number, totalPages: number) => void;
 		onReady?: (registry: PluginRegistry) => void;
-		onSidebarOpenChange?: (open: boolean) => void;
+		onSidebarOpenChange?: (open: boolean, state?: EmbedPdfSidebarState) => void;
 		onDocumentCenterTap?: () => void;
 		onError?: (error: string) => void;
 		style?: string;
+	}
+
+	interface EmbedPdfSidebarState {
+		open: boolean;
+		leftOpen: boolean;
+		rightOpen: boolean;
+		searchOpen: boolean;
+		thumbnailOpen: boolean;
 	}
 
 	let {
@@ -58,6 +66,7 @@
 	let searchFocusObserver: MutationObserver | null = null;
 	let searchInputWasVisible = false;
 	let embedPdfSidebarOpen = false;
+	let lastSidebarState: EmbedPdfSidebarState | null = null;
 	let embedPdfZoomScope: ZoomScope | null = null;
 	let embedPdfUiScope: any = null;
 	let embedPdfThumbnailScope: any = null;
@@ -245,15 +254,36 @@
 		return (plugin?.provides?.() as T | undefined) ?? null;
 	}
 
-	function hasOpenEmbedPdfSidebar(uiScope: any) {
+	function getEmbedPdfSidebarState(uiScope: any): EmbedPdfSidebarState {
 		const activeSidebars = uiScope?.getState?.()?.activeSidebars ?? {};
-		return Object.values(activeSidebars).some((sidebar: any) => !!sidebar?.isOpen);
+		const leftOpen = !!uiScope?.isSidebarOpen?.('left', 'main');
+		const rightOpen = !!uiScope?.isSidebarOpen?.('right', 'main');
+		const searchOpen = !!uiScope?.isSidebarOpen?.('right', 'main', 'search-panel');
+		const thumbnailOpen = !!uiScope?.isSidebarOpen?.('left', 'main', 'sidebar-panel');
+
+		return {
+			open: leftOpen || rightOpen || Object.values(activeSidebars).some((sidebar: any) => !!sidebar?.isOpen),
+			leftOpen,
+			rightOpen,
+			searchOpen,
+			thumbnailOpen
+		};
 	}
 
-	function setEmbedPdfSidebarOpen(open: boolean) {
-		if (embedPdfSidebarOpen === open) return;
-		embedPdfSidebarOpen = open;
-		onSidebarOpenChange?.(open);
+	function setEmbedPdfSidebarOpen(state: EmbedPdfSidebarState) {
+		if (
+			lastSidebarState &&
+			lastSidebarState.open === state.open &&
+			lastSidebarState.leftOpen === state.leftOpen &&
+			lastSidebarState.rightOpen === state.rightOpen &&
+			lastSidebarState.searchOpen === state.searchOpen &&
+			lastSidebarState.thumbnailOpen === state.thumbnailOpen
+		) {
+			return;
+		}
+		lastSidebarState = state;
+		embedPdfSidebarOpen = state.open;
+		onSidebarOpenChange?.(state.open, state);
 		chromePatch.schedule();
 	}
 
@@ -378,9 +408,9 @@
 			const uiScope = ui.forDocument(documentId);
 			embedPdfUiScope = uiScope;
 			unsubscribeSidebarChange?.();
-			setEmbedPdfSidebarOpen(hasOpenEmbedPdfSidebar(uiScope));
+			setEmbedPdfSidebarOpen(getEmbedPdfSidebarState(uiScope));
 			unsubscribeSidebarChange = uiScope.onSidebarChanged?.((event: any) => {
-				setEmbedPdfSidebarOpen(hasOpenEmbedPdfSidebar(uiScope));
+				setEmbedPdfSidebarOpen(getEmbedPdfSidebarState(uiScope));
 				if (event?.sidebarId === 'search-panel' && uiScope.isSidebarOpen?.('right', 'main', 'search-panel')) {
 					scheduleSearchInputFocus(true);
 				}
