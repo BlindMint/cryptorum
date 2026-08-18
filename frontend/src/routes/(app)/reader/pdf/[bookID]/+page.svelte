@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { ZoomMode } from '@embedpdf/plugin-zoom';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
@@ -32,9 +33,18 @@
 	let embedPdfInitialPage = $state(1);
 	let embedPdfViewerReady = $state(false);
 	let embedPdfScroll: any = null;
+	let embedPdfUiScope = $state<any>(null);
+	let embedPdfZoomScope = $state<any>(null);
+	let embedPdfRotateScope = $state<any>(null);
+	let embedPdfExportScope = $state<any>(null);
+	let embedPdfPrintScope = $state<any>(null);
+	let unsubscribeEmbedPdfZoomState: (() => void) | null = null;
 	let embedPdfRestoringInitialPage = false;
 	let embedPdfRestoreTimers: ReturnType<typeof setTimeout>[] = [];
 	let embedPdfSidebarOpen = $state(false);
+	let embedPdfThumbnailsOpen = $state(false);
+	let embedPdfSearchOpen = $state(false);
+	let rightSidebarOpen = $state(false);
 	let pdfLoadRetryToken = $state(0);
 	let pdfLoadRetryAttempts = 0;
 	let progressLoaded = false;
@@ -57,6 +67,8 @@
 	let progressPreviewPage = $state<number | null>(null);
 	let pdfProgressBarEl = $state<HTMLElement | null>(null);
 	let activeProgressPointerId: number | null = null;
+	let currentZoomPercent = $state<number | null>(null);
+	let currentZoomLevel = $state<number | string | null>(null);
 
 	const progress = $derived(numPages > 1 ? ((currentPage - 1) / (numPages - 1)) * 100 : 0);
 	const progressPreviewProgress = $derived(
@@ -164,6 +176,7 @@
 		return (
 			!settings.autoHideControls ||
 			embedPdfSidebarOpen ||
+			rightSidebarOpen ||
 			isDraggingProgress
 		);
 	}
@@ -551,13 +564,89 @@
 			showTopBar(true);
 		}
 
-		if (e.key === 'Escape' && !embedPdfSidebarOpen) {
-			void closeReader();
+		if (e.key === 'Escape') {
+			if (rightSidebarOpen) {
+				rightSidebarOpen = false;
+				resetTopBarBehavior();
+			} else if (!embedPdfSidebarOpen) {
+				void closeReader();
+			}
 		}
 	}
 
 	function toggleFullscreen() {
 		toggleReaderFullscreen(settings.useStandardFullscreen).catch(console.error);
+	}
+
+	function closeEmbedPdfSidebars() {
+		embedPdfUiScope?.closeSidebarSlot?.('left', 'main');
+		embedPdfUiScope?.closeSidebarSlot?.('right', 'main');
+	}
+
+	function togglePdfThumbnails() {
+		if (!embedPdfUiScope) return;
+		rightSidebarOpen = false;
+		showTopBar(false);
+		embedPdfUiScope.toggleSidebar?.('left', 'main', 'sidebar-panel');
+	}
+
+	function togglePdfSearch() {
+		if (!embedPdfUiScope) return;
+		rightSidebarOpen = false;
+		showTopBar(false);
+		embedPdfUiScope.toggleSidebar?.('right', 'main', 'search-panel');
+	}
+
+	function toggleRightSidebar() {
+		rightSidebarOpen = !rightSidebarOpen;
+		if (rightSidebarOpen) {
+			closeEmbedPdfSidebars();
+			showTopBar(false);
+		} else {
+			resetTopBarBehavior();
+		}
+	}
+
+	function updatePdfSetting<K extends keyof PdfReaderSetting>(key: K, value: PdfReaderSetting[K]) {
+		settings = { ...settings, [key]: value };
+		readerSettings.updatePdf({ [key]: value });
+		resetTopBarBehavior();
+	}
+
+	function resetPdfSettings() {
+		settings = { ...defaultReaderSettings.pdf };
+		readerSettings.resetToDefaults('pdf');
+		resetTopBarBehavior();
+	}
+
+	function zoomPdfOut() {
+		embedPdfZoomScope?.zoomOut?.();
+		showTopBar(false);
+	}
+
+	function zoomPdfIn() {
+		embedPdfZoomScope?.zoomIn?.();
+		showTopBar(false);
+	}
+
+	function fitPdfToWidth() {
+		embedPdfZoomScope?.requestZoom?.(ZoomMode.FitWidth);
+		showTopBar(false);
+	}
+
+	function rotatePdf() {
+		embedPdfRotateScope?.rotateForward?.();
+		showTopBar(false);
+	}
+
+	function downloadPdf() {
+		embedPdfExportScope?.download?.();
+		showTopBar(false);
+	}
+
+	function printPdf() {
+		embedPdfPrintScope?.print?.();
+		showTopBar(false);
 	}
 
 	function startCloseBackgroundTasks(defer = false) {
@@ -681,8 +770,13 @@
 		}
 	}
 
-	function handleEmbedPdfSidebarOpenChange(open: boolean) {
+	function handleEmbedPdfSidebarOpenChange(
+		open: boolean,
+		state?: { searchOpen?: boolean; thumbnailOpen?: boolean }
+	) {
 		embedPdfSidebarOpen = open;
+		embedPdfSearchOpen = !!state?.searchOpen;
+		embedPdfThumbnailsOpen = !!state?.thumbnailOpen;
 		if (open) {
 			showTopBar(false);
 		} else {
@@ -690,8 +784,27 @@
 		}
 	}
 
+	function updateEmbedPdfZoomPercent() {
+		const zoomState = embedPdfZoomScope?.getState?.();
+		const zoomPercent = zoomState?.currentZoomLevel;
+		const zoomLevel = zoomState?.zoomLevel;
+		currentZoomPercent = typeof zoomPercent === 'number' ? Math.round(zoomPercent * 100) : null;
+		currentZoomLevel = typeof zoomLevel === 'number' || typeof zoomLevel === 'string' ? zoomLevel : null;
+	}
+
 	function handleEmbedPdfReady(registry: any) {
+		unsubscribeEmbedPdfZoomState?.();
+		unsubscribeEmbedPdfZoomState = null;
 		embedPdfScroll = registry.getPlugin?.('scroll')?.provides?.() ?? null;
+		embedPdfUiScope = registry.getPlugin?.('ui')?.provides?.()?.forDocument?.(embedPdfDocumentId) ?? null;
+		embedPdfZoomScope = registry.getPlugin?.('zoom')?.provides?.()?.forDocument?.(embedPdfDocumentId) ?? null;
+		embedPdfRotateScope = registry.getPlugin?.('rotate')?.provides?.()?.forDocument?.(embedPdfDocumentId) ?? null;
+		embedPdfExportScope = registry.getPlugin?.('export')?.provides?.()?.forDocument?.(embedPdfDocumentId) ?? null;
+		embedPdfPrintScope = registry.getPlugin?.('print')?.provides?.()?.forDocument?.(embedPdfDocumentId) ?? null;
+		updateEmbedPdfZoomPercent();
+		unsubscribeEmbedPdfZoomState = embedPdfZoomScope?.onStateChange?.(() => {
+			updateEmbedPdfZoomPercent();
+		}) ?? null;
 		embedPdfViewerReady = embedPdfInitialPage <= 1;
 		pdfLoadRetryAttempts = 0;
 		topBarVisible = true;
@@ -707,6 +820,15 @@
 		if (retryable && pdfLoadRetryAttempts < 1) {
 			pdfLoadRetryAttempts += 1;
 			embedPdfViewerReady = false;
+			unsubscribeEmbedPdfZoomState?.();
+			unsubscribeEmbedPdfZoomState = null;
+			embedPdfUiScope = null;
+			embedPdfZoomScope = null;
+			embedPdfRotateScope = null;
+			embedPdfExportScope = null;
+			embedPdfPrintScope = null;
+			currentZoomPercent = null;
+			currentZoomLevel = null;
 			clearEmbedPdfRestoreTimers();
 			error = '';
 			pdfLoadRetryToken = Date.now();
@@ -799,6 +921,7 @@
 
 	onDestroy(() => {
 		readerClosing = true;
+		unsubscribeEmbedPdfZoomState?.();
 		clearTopBarHideTimer();
 		clearProgressSaveTimer();
 		clearEmbedPdfRestoreTimers();
@@ -832,12 +955,13 @@
 		onpointerenter={() => showTopBar(true)}
 	></div>
 
-	<div class="embedpdf-wrapper">
-			{#if readerChromeReady}
+	{#if readerChromeReady}
+		<header class="top-nav" class:top-nav-hidden={!topBarVisible}>
+			<div class="nav-left">
 				<a
 					href={getReaderReturnUrl()}
 					onclick={closeReader}
-					class="embedpdf-shell-control embedpdf-close-control nav-btn nav-close"
+					class="nav-btn nav-close"
 					title="Close (Esc)"
 				>
 					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -845,14 +969,91 @@
 						<line x1="6" y1="6" x2="18" y2="18"></line>
 					</svg>
 				</a>
-				<div class="embedpdf-shell-title" class:top-nav-hidden={!topBarVisible} title={getPdfDisplayTitle()}>
-					<span>{getPdfDisplayTitle()}</span>
-				</div>
+
 				<button
-					class="embedpdf-shell-control embedpdf-fullscreen-control nav-btn"
-					onclick={toggleFullscreen}
-					title="Fullscreen"
+					onclick={togglePdfThumbnails}
+					class="nav-btn"
+					class:active={embedPdfThumbnailsOpen}
+					disabled={!embedPdfUiScope}
+					title="Pages"
 				>
+					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<rect x="3" y="3" width="7" height="7"></rect>
+						<rect x="14" y="3" width="7" height="7"></rect>
+						<rect x="14" y="14" width="7" height="7"></rect>
+						<rect x="3" y="14" width="7" height="7"></rect>
+					</svg>
+				</button>
+			</div>
+
+			<div class="nav-center">
+				<span class="book-title">{getPdfDisplayTitle()}</span>
+				<span class="chapter-title">Page {currentPage} / {Math.max(numPages, currentPage)}</span>
+			</div>
+
+			<div class="nav-right">
+				<button
+					onclick={togglePdfSearch}
+					class="nav-btn mobile-secondary"
+					class:active={embedPdfSearchOpen}
+					disabled={!embedPdfUiScope}
+					title="Search (Ctrl+F)"
+				>
+					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<circle cx="11" cy="11" r="8"></circle>
+						<line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+					</svg>
+				</button>
+
+				<div class="zoom-controls">
+					<button onclick={zoomPdfOut} class="nav-btn mobile-secondary" disabled={!embedPdfZoomScope} title="Zoom out">
+						<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<line x1="5" y1="12" x2="19" y2="12"></line>
+						</svg>
+					</button>
+
+					<span class="zoom-label" aria-label="Zoom level">{currentZoomPercent === null ? 'Fit' : `${currentZoomPercent}%`}</span>
+
+					<button onclick={zoomPdfIn} class="nav-btn mobile-secondary" disabled={!embedPdfZoomScope} title="Zoom in">
+						<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<line x1="12" y1="5" x2="12" y2="19"></line>
+							<line x1="5" y1="12" x2="19" y2="12"></line>
+						</svg>
+					</button>
+
+					<button
+						onclick={fitPdfToWidth}
+						class="nav-btn"
+						class:active={currentZoomLevel === ZoomMode.FitWidth}
+						disabled={!embedPdfZoomScope}
+						title="Fit to width"
+						aria-label="Fit to width"
+					>
+						<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M6 3H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h2"></path>
+							<path d="M18 3h2a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-2"></path>
+							<path d="M8 12h8"></path>
+							<path d="m10 9-3 3 3 3"></path>
+							<path d="m14 9 3 3-3 3"></path>
+						</svg>
+					</button>
+				</div>
+
+				<button onclick={rotatePdf} class="nav-btn mobile-secondary" disabled={!embedPdfRotateScope} title="Rotate">
+					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M21 12a9 9 0 1 1-3-6.7"></path>
+						<polyline points="21 3 21 9 15 9"></polyline>
+					</svg>
+				</button>
+
+				<button onclick={toggleRightSidebar} class="nav-btn" class:active={rightSidebarOpen} title="Settings">
+					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<circle cx="12" cy="12" r="3"></circle>
+						<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+					</svg>
+				</button>
+
+				<button onclick={toggleFullscreen} class="nav-btn mobile-secondary" title="Fullscreen">
 					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<polyline points="15 3 21 3 21 9"></polyline>
 						<polyline points="9 21 3 21 3 15"></polyline>
@@ -860,49 +1061,52 @@
 						<line x1="3" y1="21" x2="10" y2="14"></line>
 					</svg>
 				</button>
-				<div class="embedpdf-top-progress-shell" class:top-nav-hidden={!topBarVisible}>
-					<ReaderProgressTrack
-						progress={progress}
-						visible={topBarVisible}
-						variant="top"
-						ariaLabel="Reading progress"
-						ariaValueMin={1}
-						ariaValueMax={Math.max(numPages, currentPage)}
-						ariaValueNow={currentPage}
-					/>
-				</div>
-			{/if}
-			{#if error}
-				<div class="error-message">
-					<p>{error}</p>
-					<a href={getReaderReturnUrl()} class="btn">Return to Library</a>
-				</div>
-			{:else if book && embedPdfProgressReady}
-				<div class="embedpdf-viewer-container">
-					{#key `${book.id}:${requestedFormat}:${pdfLoadRetryToken}`}
-					<EmbedPDFViewer
-						src={getPdfSourceUrl()}
-						title={getPdfDisplayTitle()}
-						initialPage={embedPdfInitialPage}
-						toolbarVisible={readerChromeReady && topBarVisible}
-						onScrollActivity={handleEmbedPdfScrollActivity}
-						onPageChange={handleEmbedPdfPageChange}
-						onReady={handleEmbedPdfReady}
-						onSidebarOpenChange={handleEmbedPdfSidebarOpenChange}
-						onDocumentCenterTap={toggleTopBarFromCenterTap}
-						onError={handleEmbedPdfError}
-						style="height: 100%; width: 100%;"
-					/>
-					{/key}
-				</div>
-			{/if}
-			{#if !error && !embedPdfViewerReady}
-				<div class="reader-loading-overlay" aria-live="polite">
-					<div class="loading-spinner"></div>
-					<p>{loading || !book ? 'Loading PDF...' : 'Preparing reader...'}</p>
-				</div>
-			{/if}
-		</div>
+			</div>
+
+			<ReaderProgressTrack
+				progress={progress}
+				visible={topBarVisible}
+				variant="top"
+				ariaLabel="Reading progress"
+				ariaValueMin={1}
+				ariaValueMax={Math.max(numPages, currentPage)}
+				ariaValueNow={currentPage}
+			/>
+		</header>
+	{/if}
+
+	<div class="embedpdf-wrapper">
+		{#if error}
+			<div class="error-message">
+				<p>{error}</p>
+				<a href={getReaderReturnUrl()} class="btn">Return to Library</a>
+			</div>
+		{:else if book && embedPdfProgressReady}
+			<div class="embedpdf-viewer-container">
+				{#key `${book.id}:${requestedFormat}:${pdfLoadRetryToken}`}
+				<EmbedPDFViewer
+					src={getPdfSourceUrl()}
+					title={getPdfDisplayTitle()}
+					initialPage={embedPdfInitialPage}
+					toolbarVisible={false}
+					onScrollActivity={handleEmbedPdfScrollActivity}
+					onPageChange={handleEmbedPdfPageChange}
+					onReady={handleEmbedPdfReady}
+					onSidebarOpenChange={handleEmbedPdfSidebarOpenChange}
+					onDocumentCenterTap={toggleTopBarFromCenterTap}
+					onError={handleEmbedPdfError}
+					style="height: 100%; width: 100%;"
+				/>
+				{/key}
+			</div>
+		{/if}
+		{#if !error && !embedPdfViewerReady}
+			<div class="reader-loading-overlay" aria-live="polite">
+				<div class="loading-spinner"></div>
+				<p>{loading || !book ? 'Loading PDF...' : 'Preparing reader...'}</p>
+			</div>
+		{/if}
+	</div>
 		{#if readerChromeReady}
 			<ReaderProgressTrack
 				bind:element={pdfProgressBarEl}
@@ -927,6 +1131,61 @@
 				onpointercancel={(e) => handleProgressPointerCancel(e)}
 				onkeydown={(e) => handleProgressBarKeydown(e)}
 			/>
+		{/if}
+
+		{#if readerChromeReady}
+			<aside class="right-sidebar" class:open={rightSidebarOpen}>
+				<div class="settings-tabs">
+					<button class="settings-tab active" title="PDF Settings">PDF</button>
+				</div>
+
+				<div class="settings-content">
+					<div class="settings-section">
+						<label class="settings-label" for="pdf-view-mode">View mode</label>
+						<select
+							id="pdf-view-mode"
+							value={settings.viewMode}
+							onchange={(e) => updatePdfSetting('viewMode', e.currentTarget.value as PdfViewMode)}
+							class="settings-select"
+						>
+							<option value="light">Light</option>
+							<option value="dark">Dark</option>
+							<option value="trueDark">True black</option>
+						</select>
+					</div>
+
+					<div class="settings-section">
+						<label class="toggle-option">
+							<input
+								type="checkbox"
+								checked={settings.autoHideControls}
+								onchange={(e) => updatePdfSetting('autoHideControls', e.currentTarget.checked)}
+							/>
+							<span>Auto-hide controls</span>
+						</label>
+					</div>
+
+					<div class="settings-section">
+						<label class="toggle-option">
+							<input
+								type="checkbox"
+								checked={settings.useStandardFullscreen}
+								onchange={(e) => updatePdfSetting('useStandardFullscreen', e.currentTarget.checked)}
+							/>
+							<span>Use browser fullscreen</span>
+						</label>
+					</div>
+
+					<div class="settings-section">
+						<div class="action-row">
+							<button type="button" class="settings-action" onclick={downloadPdf} disabled={!embedPdfExportScope}>Download</button>
+							<button type="button" class="settings-action" onclick={printPdf} disabled={!embedPdfPrintScope}>Print</button>
+						</div>
+					</div>
+
+					<button type="button" class="reset-btn" onclick={resetPdfSettings}>Reset PDF settings</button>
+				</div>
+			</aside>
 		{/if}
 </div>
 
@@ -954,6 +1213,57 @@
 		pointer-events: none;
 	}
 
+	.top-nav {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: center;
+		column-gap: 16px;
+		height: var(--reader-top-bar-height);
+		padding: 0 12px;
+		background: var(--color-surface-base, #0f172a);
+		border-bottom: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
+		z-index: 150;
+		transform: translateY(0);
+		transition: transform 0.22s ease, opacity 0.22s ease;
+		will-change: transform, opacity;
+	}
+
+	.top-nav-hidden {
+		transform: translateY(-100%);
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	.nav-left,
+	.nav-center,
+	.nav-right {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.nav-center {
+		justify-content: center;
+		flex-direction: column;
+		gap: 0;
+		text-align: center;
+	}
+
+	.nav-right {
+		justify-content: flex-end;
+	}
+
+	.zoom-controls {
+		display: flex;
+		align-items: center;
+		gap: 0;
+	}
+
 	.nav-btn {
 		display: flex;
 		align-items: center;
@@ -977,9 +1287,46 @@
 		cursor: not-allowed;
 	}
 
+	.nav-btn.active {
+		background: var(--color-primary-500, #22c55e);
+		color: white;
+	}
+
 	.icon {
 		width: 20px;
 		height: 20px;
+	}
+
+	.book-title {
+		max-width: min(48vw, 560px);
+		overflow: hidden;
+		color: var(--color-surface-text, #e2e8f0);
+		font-size: 14px;
+		font-weight: 600;
+		line-height: 1.2;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.chapter-title {
+		max-width: min(44vw, 460px);
+		overflow: hidden;
+		color: var(--color-surface-text-muted, #94a3b8);
+		font-size: 11px;
+		line-height: 1.2;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.zoom-label {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 44px;
+		height: 32px;
+		color: var(--color-surface-text-muted, #94a3b8);
+		font-size: 12px;
+		font-weight: 600;
 	}
 
 	.reader-loading-overlay {
@@ -1032,9 +1379,119 @@
 		text-decoration: none;
 	}
 
+	.right-sidebar {
+		position: absolute;
+		right: 0;
+		top: var(--reader-top-bar-height);
+		bottom: 0;
+		width: 360px;
+		display: flex;
+		flex-direction: column;
+		background: var(--color-surface-base, #0f172a);
+		border-left: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
+		transform: translateX(100%);
+		transition: transform 0.25s ease-in-out;
+		z-index: 120;
+	}
+
+	.right-sidebar.open {
+		transform: translateX(0);
+	}
+
+	.settings-tabs {
+		display: flex;
+		border-bottom: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
+	}
+
+	.settings-tab {
+		flex: 1;
+		padding: 12px 8px;
+		border: none;
+		background: transparent;
+		color: var(--color-primary-500, #22c55e);
+		font-size: 12px;
+		font-weight: 600;
+		box-shadow: inset 0 -2px 0 var(--color-primary-500, #22c55e);
+	}
+
+	.settings-content {
+		flex: 1;
+		overflow-y: auto;
+		padding: 16px;
+	}
+
+	.settings-section {
+		margin-bottom: 20px;
+	}
+
+	.settings-label {
+		display: block;
+		margin-bottom: 8px;
+		color: var(--color-surface-text-muted, #94a3b8);
+		font-size: 12px;
+	}
+
+	.settings-select {
+		width: 100%;
+		padding: 10px 12px;
+		border: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
+		border-radius: 6px;
+		background: var(--color-surface-overlay, rgba(15, 23, 42, 0.85));
+		color: var(--color-surface-text, #e2e8f0);
+		font-size: 13px;
+	}
+
+	.toggle-option {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		color: var(--color-surface-text, #e2e8f0);
+		font-size: 13px;
+	}
+
+	.toggle-option input[type="checkbox"] {
+		width: 16px;
+		height: 16px;
+		accent-color: var(--color-primary-500, #22c55e);
+	}
+
+	.action-row {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px;
+	}
+
+	.settings-action,
+	.reset-btn {
+		width: 100%;
+		padding: 10px 12px;
+		border: 1px solid var(--color-surface-border, rgba(55, 65, 81, 0.6));
+		border-radius: 6px;
+		background: var(--color-surface-overlay, rgba(15, 23, 42, 0.85));
+		color: var(--color-surface-text, #e2e8f0);
+		font-size: 13px;
+		cursor: pointer;
+	}
+
+	.settings-action:hover:not(:disabled),
+	.reset-btn:hover {
+		background: var(--color-primary-500, #22c55e);
+		color: white;
+	}
+
+	.settings-action:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+
 	@media (max-width: 768px) {
 		.pdf-reader {
 			--reader-top-bar-height: 72px;
+		}
+
+		.top-nav {
+			column-gap: 8px;
+			padding: 0 8px;
 		}
 
 		.nav-btn {
@@ -1050,6 +1507,27 @@
 		.loading-spinner {
 			width: 40px;
 			height: 40px;
+		}
+
+		.book-title {
+			max-width: 36vw;
+			font-size: 13px;
+		}
+
+		.chapter-title {
+			max-width: 34vw;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.mobile-secondary,
+		.zoom-label {
+			display: none;
+		}
+
+		.right-sidebar {
+			left: 0;
+			width: auto;
 		}
 	}
 
@@ -1113,97 +1591,10 @@
 		padding-left: 0 !important;
 	}
 
-	.embedpdf-shell-control {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		position: absolute;
-		top: calc((var(--reader-top-bar-height) - var(--embedpdf-shell-control-size)) / 2);
-		width: var(--embedpdf-shell-control-size);
-		height: var(--embedpdf-shell-control-size);
-		border: none;
-		background: transparent;
-		color: var(--color-surface-text, #e2e8f0);
-		cursor: pointer;
-		text-decoration: none;
-		transition: opacity 0.18s ease, transform 0.18s ease, background-color 0.16s ease;
-		z-index: 130;
-	}
-
-	.embedpdf-shell-control::after {
-		display: none;
-	}
-
-	.embedpdf-close-control {
-		left: calc(6px + max(0px, env(safe-area-inset-left)));
-		border-radius: 10px;
-	}
-
-	.embedpdf-fullscreen-control {
-		right: calc(6px + max(0px, env(safe-area-inset-right)));
-		border-radius: 10px;
-	}
-
-	.embedpdf-shell-title {
-		position: absolute;
-		top: 0;
-		left: calc(var(--embedpdf-shell-left-reserve) + max(0px, env(safe-area-inset-left)));
-		right: calc(var(--embedpdf-shell-right-reserve) + max(0px, env(safe-area-inset-right)));
-		height: var(--reader-top-bar-height);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		min-width: 0;
-		padding: 0 14px;
-		border-bottom: 1px solid transparent;
-		background: transparent;
-		color: var(--color-surface-text, #e2e8f0);
-		font-size: 14px;
-		font-weight: 600;
-		line-height: 1.2;
-		pointer-events: none;
-		transition: opacity 0.18s ease, transform 0.18s ease;
-		z-index: 110;
-	}
-
-	.embedpdf-shell-title span {
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.embedpdf-top-progress-shell {
-		position: absolute;
-		top: 0;
-		left: 0;
-		right: 0;
-		height: var(--reader-top-bar-height);
-		pointer-events: none;
-		transition: opacity 0.18s ease, transform 0.18s ease;
-		z-index: 120;
-	}
-
 	.embedpdf-viewer-container {
 		position: absolute;
 		inset: 0;
 		overflow: hidden;
-	}
-
-	.embedpdf-shell-control:hover {
-		background: var(--color-surface-overlay, rgba(15, 23, 42, 0.85));
-	}
-
-	.pdf-reader.controls-hidden .embedpdf-shell-control {
-		opacity: 0;
-		pointer-events: none;
-		transform: translateY(calc(-1 * var(--reader-top-bar-height)));
-	}
-
-	.pdf-reader.controls-hidden .embedpdf-shell-title,
-	.pdf-reader.controls-hidden .embedpdf-top-progress-shell {
-		opacity: 0;
-		transform: translateY(-100%);
 	}
 
 	:global([data-overlay-id="page-controls"]),
@@ -1214,36 +1605,12 @@
 		transform: translateY(8px) !important;
 	}
 
-	@media (min-width: 641px) and (max-width: 767px) {
-		.embedpdf-wrapper {
-			--embedpdf-shell-left-reserve: 272px;
-			--embedpdf-shell-right-reserve: 84px;
-		}
-	}
-
 	@media (max-width: 640px) {
 		.embedpdf-wrapper {
 			--embedpdf-shell-control-size: 44px;
 			--embedpdf-shell-title-width: clamp(136px, 38vw, 260px);
 			--embedpdf-shell-left-reserve: 224px;
 			--embedpdf-shell-right-reserve: clamp(92px, 24vw, 180px);
-		}
-
-		.embedpdf-shell-title {
-			padding: 0 10px;
-			font-size: 13px;
-		}
-	}
-
-	@media (max-width: 420px) {
-		.embedpdf-wrapper {
-			--embedpdf-shell-title-width: 108px;
-			--embedpdf-shell-left-reserve: 204px;
-			--embedpdf-shell-right-reserve: 84px;
-		}
-
-		.embedpdf-shell-title {
-			padding: 0 8px;
 		}
 	}
 </style>
