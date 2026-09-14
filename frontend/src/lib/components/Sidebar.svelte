@@ -520,7 +520,7 @@
 	style={`--sidebar-width: ${sidebarWidth}px;`}
 >
 	<div class={`flex h-full min-w-[220px] flex-col min-h-0 ${$desktopSidebarCollapsed ? 'lg:pointer-events-none lg:opacity-0' : 'lg:opacity-100'}`}>
-	<div class="flex-shrink-0 space-y-0.5 p-2.5 pb-2 text-sm">
+	<div class="flex-shrink-0 space-y-0.5 p-2.5 pb-2 text-[0.9375rem] leading-[1.375rem]">
 		<a
 			href="/"
 			onclick={closeMobileNavigation}
@@ -568,13 +568,13 @@
 
 	<div class="mx-2.5 h-px bg-[var(--color-surface-border)]"></div>
 
-	<nav class="custom-scrollbar min-h-0 flex-1 space-y-2.5 overflow-x-hidden overflow-y-auto p-2.5 text-sm">
+	<nav class="custom-scrollbar min-h-0 flex-1 space-y-2.5 overflow-x-hidden overflow-y-auto p-2.5 text-[0.9375rem] leading-[1.375rem]">
 		<div>
 			<div class="flex items-center justify-between px-2.5 py-1.5">
 				<a
 					href="/libraries"
 					onclick={closeMobileNavigation}
-					class="flex items-center gap-1.5 rounded-md text-[11px] font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
+					class="flex items-center gap-1.5 rounded-md text-xs font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
 					aria-label="View libraries"
 				>
 					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -713,7 +713,7 @@
 				<a
 					href="/shelves"
 					onclick={closeMobileNavigation}
-					class="flex items-center gap-1.5 rounded-md text-[11px] font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
+					class="flex items-center gap-1.5 rounded-md text-xs font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
 					aria-label="View shelves"
 				>
 					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -791,7 +791,7 @@
 	</nav>
 
 	{#if !authDisabled}
-		<footer class="flex-shrink-0 space-y-0.5 border-t border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] text-sm">
+		<footer class="flex-shrink-0 space-y-0.5 border-t border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] text-[0.9375rem] leading-[1.375rem]">
 			<button
 				onclick={async () => {
 					await fetch('/api/auth/logout', { method: 'POST' });
@@ -840,7 +840,7 @@
 		</a>
 		<button
 			type="button"
-			class="block w-full px-2.5 py-1.5 text-left text-[13px] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+			class="block w-full px-2.5 py-1.5 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
 			role="menuitem"
 			onclick={() => openEditLibrary(activeLibraryMenu)}
 		>
@@ -848,7 +848,7 @@
 		</button>
 		<button
 			type="button"
-			class="block w-full px-2.5 py-1.5 text-left text-[13px] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] disabled:cursor-not-allowed disabled:opacity-60"
+			class="block w-full px-2.5 py-1.5 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] disabled:cursor-not-allowed disabled:opacity-60"
 			role="menuitem"
 			disabled={isLibraryScanActive(activeLibraryMenu)}
 			onclick={() => scanLibrary(activeLibraryMenu)}
@@ -857,7 +857,7 @@
 		</button>
 		<button
 			type="button"
-			class="block w-full px-2.5 py-1.5 text-left text-[13px] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+			class="block w-full px-2.5 py-1.5 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
 			role="menuitem"
 			onclick={() => regenerateLibraryCovers(activeLibraryMenu, 'all')}
 		>
@@ -865,7 +865,7 @@
 		</button>
 		<button
 			type="button"
-			class="block w-full px-2.5 py-1.5 text-left text-[13px] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
+			class="block w-full px-2.5 py-1.5 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
 			role="menuitem"
 			onclick={() => regenerateLibraryCovers(activeLibraryMenu, 'missing')}
 		>

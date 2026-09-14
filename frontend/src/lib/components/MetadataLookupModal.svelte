@@ -810,7 +810,7 @@
 										</div>
 								{#if targets.length > 1}
 									<button
-										class="w-full rounded-lg border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/10 px-3 py-2 text-sm font-medium text-[var(--color-primary-300)] transition-colors hover:bg-[var(--color-primary-500)]/20 disabled:opacity-50"
+										class="accent-action w-full rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 										onclick={requestApplyAllSelected}
 										disabled={applying}
 									>
@@ -836,7 +836,7 @@
 									</div>
 									<div class="flex flex-wrap items-center justify-end gap-2 text-sm text-[var(--color-surface-text-muted)]">
 										{#if target.loading}
-											<span class="inline-flex items-center gap-2 rounded-full border border-[var(--color-primary-500)]/35 bg-[var(--color-primary-500)]/10 px-2.5 py-1 text-xs font-medium text-[var(--color-primary-200)]">
+											<span class="inline-flex items-center gap-2 rounded-full border border-[var(--color-primary-500)]/35 bg-[var(--color-primary-500)]/10 px-2.5 py-1 text-xs font-medium text-[var(--color-primary-300)]">
 												<span class="h-3 w-3 animate-spin rounded-full border-2 border-[var(--color-surface-border)] border-t-[var(--color-primary-500)]" aria-hidden="true"></span>
 												Searching providers...
 											</span>
@@ -986,7 +986,7 @@
 							type="button"
 							onclick={() => continuePendingApply(true)}
 							disabled={applying}
-							class="rounded-lg border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/10 px-4 py-2 text-sm font-medium text-[var(--color-primary-200)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-primary-500)]/20 disabled:opacity-50"
+							class="accent-action rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ease-out hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 						>
 							Apply Current Edits First
 						</button>

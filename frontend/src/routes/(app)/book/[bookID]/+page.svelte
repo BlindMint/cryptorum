@@ -53,6 +53,7 @@
 		getPreferredTextFormat,
 		getReaderRouteKind,
 		getSpeedReaderHref,
+		normalizeBookFormat,
 		uniqueBookFormats
 	} from '$lib/utils/book-formats';
 
@@ -1204,7 +1205,7 @@
 								<button
 									type="button"
 									onclick={addAuthor}
-									class="inline-flex items-center rounded-md px-1.5 py-0.5 text-sm text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:bg-[var(--color-primary-500)]/12 hover:text-[var(--color-primary-200)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
+									class="inline-flex items-center rounded-md px-1.5 py-0.5 text-sm text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:bg-[var(--color-primary-500)]/12 hover:text-[var(--color-primary-300)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
 								>
 									Add Author
 								</button>
@@ -1216,7 +1217,7 @@
 									{#if i > 0}<span class="text-[var(--color-surface-text-muted)]">,</span>{/if}
 									<button
 										onclick={() => navigateWithFilter('author', author)}
-										class="inline-flex items-center rounded-md px-1.5 py-0.5 text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:bg-[var(--color-primary-500)]/12 hover:text-[var(--color-primary-200)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+										class="inline-flex items-center rounded-md px-1.5 py-0.5 text-[var(--color-primary-400)] transition-colors duration-200 ease-out hover:bg-[var(--color-primary-500)]/12 hover:text-[var(--color-primary-300)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 									>
 										{author}
 									</button>
@@ -1513,7 +1514,7 @@
 				<div class="flex-1 min-w-0">
 					<div class="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
 						<div class="flex items-start gap-2 sm:col-span-2">
-							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Status</dt>
+							<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0 pt-[5px]">Status</dt>
 							<dd class="flex flex-wrap gap-2 text-sm">
 								{#each statusOptions as option}
 									<button
@@ -1531,14 +1532,21 @@
 								{/if}
 							</dd>
 						</div>
-						{#if uniqueBookFormats(files).length > 0}
+						{#if files.length > 0}
 							<div class="flex items-start gap-2 sm:col-span-2">
 								<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Formats</dt>
-								<dd class="flex flex-wrap gap-2 min-w-0">
-									{#each uniqueBookFormats(files) as format}
-										<span class="rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-2.5 py-0.5 text-xs font-medium uppercase tracking-[0.08em] text-[var(--color-surface-text)]">
-											{getFormatDisplayLabel(format)}
-										</span>
+								<dd class="flex flex-wrap gap-x-4 gap-y-3 min-w-0">
+									{#each files as file (file.id)}
+										{@const duplicateFormat = files.filter((candidate) => normalizeBookFormat(candidate.format) === normalizeBookFormat(file.format)).length > 1}
+										<div class="flex max-w-40 min-w-0 flex-col items-center gap-1">
+											<span class="rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-2.5 py-0.5 text-xs font-medium uppercase tracking-[0.08em] text-[var(--color-surface-text)]">
+												{getFormatDisplayLabel(file.format)}
+											</span>
+											<span class="text-xs text-[var(--color-surface-text-muted)]">{formatSize(file.size)}</span>
+											{#if duplicateFormat}
+												<span class="max-w-full break-all text-center text-xs text-[var(--color-surface-text-muted)]" title={file.path}>{getFileName(file.path)}</span>
+											{/if}
+										</div>
 									{/each}
 								</dd>
 							</div>

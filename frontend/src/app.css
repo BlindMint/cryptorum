@@ -82,6 +82,8 @@ body::before {
 	z-index: -1;
 }
 
+/* Shared primary action colors and disabled state. Keep sizing/layout at the call site;
+   do not override these colors with utility classes. See AGENTS.md for the template. */
 .accent-action {
 	border: 1px solid color-mix(in srgb, var(--color-primary-500) 55%, transparent);
 	background: color-mix(in srgb, var(--color-primary-500) 10%, var(--color-surface-overlay));

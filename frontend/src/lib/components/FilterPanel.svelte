@@ -151,7 +151,7 @@
 
 	function countClass(selected: boolean): string {
 		return selected
-			? 'text-xs font-semibold text-[var(--color-primary-200)]'
+			? 'text-xs font-semibold text-[var(--color-primary-300)]'
 			: 'text-xs text-[var(--color-surface-text-muted)]';
 	}
 

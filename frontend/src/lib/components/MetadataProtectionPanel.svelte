@@ -160,7 +160,7 @@
 				type="button"
 				onclick={() => updateProtection('lock', allFields)}
 				disabled={saving || protectedFields.length === allFields.length}
-				class="rounded-lg border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/10 px-3 py-2 text-xs font-semibold text-[var(--color-primary-200)] transition-colors hover:bg-[var(--color-primary-500)]/20 disabled:opacity-50"
+				class="accent-action rounded-lg px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 			>
 				Protect all
 			</button>
