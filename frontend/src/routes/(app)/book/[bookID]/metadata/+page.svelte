@@ -1,10 +1,12 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import BookMetadataContext from '$lib/components/BookMetadataContext.svelte';
 	import MetadataFields from '$lib/components/MetadataFields.svelte';
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
-	import MetadataProtectionPanel from '$lib/components/MetadataProtectionPanel.svelte';
+	import MetadataProtectionModal from '$lib/components/MetadataProtectionModal.svelte';
+	import CoverUploadModal from '$lib/components/CoverUploadModal.svelte';
 	import {
 		buildMetadataPayload,
 		comicSpreadFallbackOptions,
@@ -20,6 +22,18 @@
 		type MetadataEditSelectionSession
 	} from '$lib/utils/metadata-edit-session';
 	import { addMetadataSuggestionsFromPayload, refreshMetadataSuggestions } from '$lib/stores/metadataSuggestions';
+	import { getCoverThumbUrl } from '$lib/utils/covers';
+	import {
+		createPendingCover,
+		discardPendingCover,
+		pendingCoverDirty,
+		pendingCoverDisplaySrc,
+		pendingCoverIsCustom,
+		fetchSourceCoverPreview,
+		persistPendingCover,
+		stagePendingCoverFile,
+		stagePendingCoverReset
+	} from '$lib/utils/cover-upload';
 
 	let book = $state<any>(null);
 	let files = $state<any[]>([]);
@@ -27,9 +41,14 @@
 	let saving = $state(false);
 	let saveError = $state<string | null>(null);
 	let regeneratingCover = $state(false);
-	let coverFileInput: HTMLInputElement | null = $state(null);
 	let coverUploading = $state(false);
+	let showCoverUpload = $state(false);
+	let pendingCover = $state(createPendingCover());
+	let savedCoverSrc = $derived(book?.cover_path ? getCoverThumbUrl(book.id, 'large', book.cover_updated_on) : null);
+	let displayCoverSrc = $derived(pendingCoverDisplaySrc(pendingCover, savedCoverSrc));
+	let displayCoverIsCustom = $derived(pendingCoverIsCustom(pendingCover, book?.cover_source));
 	let showMetadataLookup = $state(false);
+	let showMetadataProtection = $state(false);
 	let editForm = $state<MetadataEditForm>(createMetadataEditForm(null));
 	let authorsList = $state<string[]>([]);
 	let selectionSession = $state<MetadataEditSelectionSession | null>(null);
@@ -124,6 +143,14 @@
 		}
 	}
 
+	function clearPendingCover() {
+		pendingCover = discardPendingCover(pendingCover);
+	}
+
+	onDestroy(() => {
+		clearPendingCover();
+	});
+
 	async function saveMetadata(): Promise<boolean> {
 		if (!book?.id || saving) return false;
 		saveError = null;
@@ -138,6 +165,17 @@
 			if (!res.ok) {
 				saveError = `Failed to save: ${res.status} ${await res.text()}`;
 				return false;
+			}
+			if (pendingCoverDirty(pendingCover)) {
+				coverUploading = true;
+				const coverResult = await persistPendingCover(Number(book.id), pendingCover);
+				coverUploading = false;
+				if (coverResult.error) {
+					saveError = coverResult.error;
+					return false;
+				}
+				if (coverResult.update) applyCoverMutation(coverResult.update);
+				clearPendingCover();
 			}
 			const data = (await res.json()) as MetadataSaveResponse;
 			if (data.book) {
@@ -249,57 +287,32 @@
 	}
 
 	function openCoverPicker() {
-		coverFileInput?.click();
+		showCoverUpload = true;
 	}
 
-	async function uploadCustomCover(event: Event) {
-		const input = event.currentTarget as HTMLInputElement;
-		const file = input.files?.[0];
-		if (!file || !book?.id || coverUploading) return;
-		coverUploading = true;
-		saveError = null;
-		try {
-			const formData = new FormData();
-			formData.append('cover', file);
-			const res = await fetch(`/api/books/${book.id}/cover/custom`, {
-				method: 'POST',
-				body: formData
-			});
-			if (res.ok) {
-				applyCoverMutation(await res.json());
-			} else {
-				saveError = await res.text();
-			}
-		} catch (error) {
-			console.error('Failed to upload cover:', error);
-			saveError = 'Failed to upload cover.';
-		} finally {
-			coverUploading = false;
-			input.value = '';
-		}
+	function stageSelectedCover(file: File) {
+		pendingCover = stagePendingCoverFile(pendingCover, file);
 	}
 
 	async function resetCustomCover() {
 		if (!book?.id || coverUploading) return;
+		if (pendingCover.file) {
+			pendingCover = stagePendingCoverReset(pendingCover, false);
+			return;
+		}
+		if (book.cover_source !== 'custom' || pendingCover.reset) return;
 		if (!confirm('Remove the custom cover and restore the imported or generated cover?')) return;
 		coverUploading = true;
-		saveError = null;
 		try {
-			const res = await fetch(`/api/books/${book.id}/cover/custom`, { method: 'DELETE' });
-			if (res.ok) {
-				applyCoverMutation(await res.json());
-			} else {
-				saveError = await res.text();
-			}
-		} catch (error) {
-			console.error('Failed to reset cover:', error);
-			saveError = 'Failed to reset cover.';
+			const previewUrl = await fetchSourceCoverPreview(Number(book.id));
+			pendingCover = stagePendingCoverReset(pendingCover, true, previewUrl);
 		} finally {
 			coverUploading = false;
 		}
 	}
 
 	async function refreshAfterMetadataApply() {
+		clearPendingCover();
 		await fetchBook();
 		showMetadataLookup = false;
 	}
@@ -345,7 +358,6 @@
 		</div>
 	{:else if book}
 		<div class="flex flex-col gap-6 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-6 lg:flex-row lg:items-start">
-			<input bind:this={coverFileInput} type="file" accept="image/*" class="hidden" onchange={uploadCustomCover} />
 			<div class="lg:w-72 lg:flex-shrink-0">
 				<BookMetadataContext
 					{book}
@@ -353,6 +365,8 @@
 					positionLabel={getPositionLabel()}
 					framed={false}
 					showCoverActions={true}
+					coverSrc={displayCoverSrc}
+					customCover={displayCoverIsCustom}
 					coverActionLabel={coverUploading ? 'Saving...' : 'Edit'}
 					coverActionBusy={coverUploading}
 					onEditCover={openCoverPicker}
@@ -398,6 +412,18 @@
 							{/if}
 						</button>
 						<button
+							onclick={() => showMetadataProtection = true}
+							type="button"
+							class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-surface-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+							title="Metadata protection"
+						>
+							<svg class="h-4 w-4 text-[var(--color-primary-400)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+								<rect x="5" y="10" width="14" height="10" rx="2"></rect>
+								<path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
+							</svg>
+							Protection
+						</button>
+						<button
 							onclick={() => showMetadataLookup = true}
 							type="button"
 							class="accent-action inline-flex items-center rounded-lg px-3 py-1.5 text-sm transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
@@ -406,17 +432,6 @@
 						</button>
 					</div>
 				</div>
-
-				<MetadataProtectionPanel
-					bookId={Number(book.id)}
-					lockedFields={book.locked_fields || []}
-					libraryProtectionEnabled={!!book.library_metadata_protection_enabled}
-					onChanged={(fields) => book = { ...book, locked_fields: fields }}
-					onRestored={(restoredBook) => {
-						book = restoredBook;
-						initializeForm();
-					}}
-				/>
 
 				<MetadataFields bind:editForm bind:authorsList />
 
@@ -460,5 +475,32 @@
 		confirmBeforeApply={true}
 		onClose={() => showMetadataLookup = false}
 		onApplied={refreshAfterMetadataApply}
+	/>
+{/if}
+
+{#if showMetadataProtection && book?.id}
+	<MetadataProtectionModal
+		bookId={Number(book.id)}
+		lockedFields={book.locked_fields || []}
+		libraryProtectionEnabled={!!book.library_metadata_protection_enabled}
+		onClose={() => showMetadataProtection = false}
+		onChanged={(fields) => book = { ...book, locked_fields: fields }}
+		onRestored={(restoredBook) => {
+			book = restoredBook;
+			initializeForm();
+		}}
+	/>
+{/if}
+
+{#if showCoverUpload && book?.id}
+	<CoverUploadModal
+		bookId={Number(book.id)}
+		coverPath={book.cover_path}
+		coverUpdatedOn={book.cover_updated_on}
+		previewSrc={displayCoverSrc}
+		format={book.format}
+		title={book.title || 'book'}
+		onClose={() => showCoverUpload = false}
+		onSelected={stageSelectedCover}
 	/>
 {/if}

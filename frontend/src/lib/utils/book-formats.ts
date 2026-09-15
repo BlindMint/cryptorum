@@ -11,7 +11,10 @@ export type ReaderRouteKind = 'epub' | 'pdf' | 'cbx' | 'audio' | null;
 export type BookMediaKind = 'book' | 'audio';
 
 export type BookFile = {
+	id?: number;
 	format?: string;
+	path?: string;
+	size?: number;
 };
 
 export function normalizeBookFormat(format: string | null | undefined): string {
@@ -110,6 +113,46 @@ export function uniqueBookFormats(files: BookFile[]): string[] {
 		formats.push(normalized);
 	}
 	return formats;
+}
+
+export function bookFileName(path: string | null | undefined): string {
+	if (!path) return 'file';
+	return path.split(/[/\\]/).pop() || path;
+}
+
+export function isReadableBookFile(file: BookFile): boolean {
+	const format = normalizeBookFormat(file?.format);
+	if (!format || format === 'cb7') return false;
+	return getReaderRouteKind(format) !== null;
+}
+
+export function getReadableBookFiles(files: BookFile[]): BookFile[] {
+	return files.filter(isReadableBookFile);
+}
+
+export function formatHasDuplicateFiles(files: BookFile[], format: string | null | undefined): boolean {
+	const normalized = normalizeBookFormat(format);
+	if (!normalized) return false;
+	return files.filter((file) => normalizeBookFormat(file.format) === normalized).length > 1;
+}
+
+export function getPrimaryReadableFile(
+	files: BookFile[],
+	resumeFileId?: number | null,
+	resumeFormat?: string | null
+): BookFile | null {
+	const readable = getReadableBookFiles(files);
+	if (readable.length === 0) return null;
+	if (resumeFileId) {
+		const resumeFile = readable.find((file) => file.id === resumeFileId);
+		if (resumeFile) return resumeFile;
+	}
+	const preferredFormat = normalizeBookFormat(resumeFormat) || getPreferredBookFormat(readable);
+	if (preferredFormat) {
+		const match = readable.find((file) => normalizeBookFormat(file.format) === preferredFormat);
+		if (match) return match;
+	}
+	return readable[0];
 }
 
 export function getPreferredBookFormat(files: BookFile[]): string | null {

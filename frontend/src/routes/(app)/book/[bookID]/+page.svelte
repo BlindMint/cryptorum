@@ -1,18 +1,30 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import AutocompleteInput from '$lib/components/AutocompleteInput.svelte';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import BookCoverProgressChip from '$lib/components/BookCoverProgressChip.svelte';
 	import MetadataLookupModal from '$lib/components/MetadataLookupModal.svelte';
-	import MetadataProtectionPanel from '$lib/components/MetadataProtectionPanel.svelte';
+	import MetadataProtectionModal from '$lib/components/MetadataProtectionModal.svelte';
+	import CoverUploadModal from '$lib/components/CoverUploadModal.svelte';
 	import PathDisplay from '$lib/components/PathDisplay.svelte';
 	import ShelfPickerRow from '$lib/components/ShelfPickerRow.svelte';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
 	import { showFormatOnCover, showProgressChipOnCover, getFormatColor } from '$lib/stores';
 	import { addMetadataSuggestionsFromPayload, refreshMetadataSuggestions } from '$lib/stores/metadataSuggestions';
 	import { getCoverThumbUrl } from '$lib/utils/covers';
+	import {
+		createPendingCover,
+		discardPendingCover,
+		pendingCoverDirty,
+		pendingCoverDisplaySrc,
+		pendingCoverIsCustom,
+		fetchSourceCoverPreview,
+		persistPendingCover,
+		stagePendingCoverFile,
+		stagePendingCoverReset
+	} from '$lib/utils/cover-upload';
 	import { bookHasCoverProgress } from '$lib/utils/cover-progress';
 	import {
 		getBookDetailContextUrl,
@@ -47,12 +59,17 @@
 		type MetadataDraft
 	} from '$lib/utils/metadata-draft';
 	import {
+		bookFileName,
+		formatHasDuplicateFiles,
 		getBookReaderHref,
 		getFormatDisplayLabel,
 		getPreferredBookFormat,
 		getPreferredTextFormat,
+		getPrimaryReadableFile,
+		getReadableBookFiles,
 		getReaderRouteKind,
 		getSpeedReaderHref,
+		isReadableBookFile,
 		normalizeBookFormat,
 		uniqueBookFormats
 	} from '$lib/utils/book-formats';
@@ -76,6 +93,7 @@
 	let filesError = $state('');
 	let saveError = $state<string | null>(null);
 	let showMetadataLookup = $state(false);
+	let showMetadataProtection = $state(false);
 	let showCoverModal = $state(false);
 	let showShelfPicker = $state(false);
 	let showCreateShelfModal = $state(false);
@@ -91,8 +109,12 @@
 	let statusSaving = $state(false);
 	let statusError = $state('');
 	let hoveredRating = $state(0);
-	let coverFileInput: HTMLInputElement | null = $state(null);
 	let coverUploading = $state(false);
+	let showCoverUpload = $state(false);
+	let pendingCover = $state(createPendingCover());
+	let savedCoverSrc = $derived(book?.cover_path ? getCoverThumbUrl(book.id, 'large', book.cover_updated_on) : null);
+	let displayCoverSrc = $derived(pendingCoverDisplaySrc(pendingCover, savedCoverSrc));
+	let displayCoverIsCustom = $derived(pendingCoverIsCustom(pendingCover, book?.cover_source));
 
 	let editForm = $state<MetadataEditForm>(createMetadataEditForm(null));
 	let authorsList = $state<string[]>([]);
@@ -170,6 +192,10 @@
 			window.removeEventListener('beforeunload', warnBeforeDiscard);
 			if (metadataDraftSaveTimer) clearTimeout(metadataDraftSaveTimer);
 		};
+	});
+
+	onDestroy(() => {
+		clearPendingCover();
 	});
 
 	function loadSelectionSession() {
@@ -409,6 +435,10 @@
 		});
 	}
 
+	function getReadableFiles() {
+		return getReadableBookFiles(files);
+	}
+
 	function getSpeedReadableFormats(): string[] {
 		return uniqueBookFormats(files).filter((format) => format === 'pdf' || getReaderRouteKind(format) === 'epub');
 	}
@@ -453,9 +483,11 @@
 	}
 
 	const readableFormats = $derived(getReadableFormats());
+	const readableFiles = $derived(getReadableFiles());
 	const primaryReadFormat = $derived(getPrimaryReadFormat());
+	const primaryReadFile = $derived(getPrimaryReadableFile(files, book?.resume_file_id, book?.resume_format || primaryReadFormat));
 	const primarySpeedReadFormat = $derived(getPrimarySpeedReadFormat());
-	const isAudioItem = $derived(getReaderRouteKind(primaryReadFormat || getPreferredBookFormat(files) || book?.format) === 'audio');
+	const isAudioItem = $derived(getReaderRouteKind(primaryReadFile?.format || primaryReadFormat || getPreferredBookFormat(files) || book?.format) === 'audio');
 
 	function formatSize(bytes: number): string {
 		if (bytes < 1024) return bytes + ' B';
@@ -464,8 +496,11 @@
 	}
 
 	function getFileName(path: string): string {
-		if (!path) return 'file';
-		return path.split(/[/\\]/).pop() || path;
+		return bookFileName(path);
+	}
+
+	function getFileReadLabel(file: any): string {
+		return getReaderRouteKind(file?.format) === 'audio' ? 'Play' : 'Read';
 	}
 
 	function getPrimaryReadActionLabel(): string {
@@ -655,6 +690,7 @@
 	}
 
 	function cancelEditing() {
+		clearPendingCover();
 		clearMetadataDraftContext();
 		editing = false;
 		editForm = createMetadataEditForm(book);
@@ -663,6 +699,8 @@
 	}
 
 	function handleCancelEditing() {
+		showMetadataProtection = false;
+		showCoverUpload = false;
 		if (shouldOpenInlineMetadataEdit()) {
 			exitInlineMetadataEdit();
 			return;
@@ -716,6 +754,7 @@
 	}
 
 	async function refreshAfterMetadataApply() {
+		clearPendingCover();
 		const wasEditing = editing;
 		await fetchBook({ mode: 'quiet', resetRelated: false });
 		if (wasEditing && book) {
@@ -761,7 +800,12 @@
 
 	function hasUnsavedMetadataChanges(): boolean {
 		if (!editing || !book) return false;
+		if (pendingCoverDirty(pendingCover)) return true;
 		return JSON.stringify(getCurrentMetadataPayload()) !== JSON.stringify(getSavedMetadataPayload());
+	}
+
+	function clearPendingCover() {
+		pendingCover = discardPendingCover(pendingCover);
 	}
 
 	function confirmDiscardUnsavedChanges(): boolean {
@@ -824,12 +868,15 @@
 		const targetUrl = editing
 			? getInlineMetadataEditUrl(nextBookId, selectionSession, resolvedIndex)
 			: getBookDetailContextUrl(nextBookId, selectionSession, resolvedIndex);
-		if (editing) clearMetadataDraftContext();
+		if (editing) {
+			clearPendingCover();
+			clearMetadataDraftContext();
+		}
 		goto(targetUrl);
 	}
 
 	function openCoverModal() {
-		if (book?.cover_path) {
+		if (displayCoverSrc) {
 			showCoverModal = true;
 		}
 	}
@@ -914,49 +961,25 @@
 	}
 
 	function openCoverPicker() {
-		coverFileInput?.click();
+		showCoverUpload = true;
 	}
 
-	async function uploadCustomCover(event: Event) {
-		const input = event.currentTarget as HTMLInputElement;
-		const file = input.files?.[0];
-		if (!file || !book?.id || coverUploading) return;
-		coverUploading = true;
-		try {
-			const formData = new FormData();
-			formData.append('cover', file);
-			const res = await fetch(`/api/books/${book.id}/cover/custom`, {
-				method: 'POST',
-				body: formData
-			});
-			if (res.ok) {
-				applyCoverMutation(await res.json());
-			} else {
-				saveError = await res.text();
-			}
-		} catch (e) {
-			console.error('Failed to upload cover:', e);
-			saveError = 'Failed to upload cover.';
-		} finally {
-			coverUploading = false;
-			input.value = '';
-		}
+	function stageSelectedCover(file: File) {
+		pendingCover = stagePendingCoverFile(pendingCover, file);
 	}
 
 	async function resetCustomCover() {
 		if (!book?.id || coverUploading) return;
+		if (pendingCover.file) {
+			pendingCover = stagePendingCoverReset(pendingCover, false);
+			return;
+		}
+		if (book.cover_source !== 'custom' || pendingCover.reset) return;
 		if (!confirm('Remove the custom cover and restore the imported or generated cover?')) return;
 		coverUploading = true;
 		try {
-			const res = await fetch(`/api/books/${book.id}/cover/custom`, { method: 'DELETE' });
-			if (res.ok) {
-				applyCoverMutation(await res.json());
-			} else {
-				saveError = await res.text();
-			}
-		} catch (e) {
-			console.error('Failed to reset cover:', e);
-			saveError = 'Failed to reset cover.';
+			const previewUrl = await fetchSourceCoverPreview(Number(book.id));
+			pendingCover = stagePendingCoverReset(pendingCover, true, previewUrl);
 		} finally {
 			coverUploading = false;
 		}
@@ -975,6 +998,17 @@
 			});
 
 			if (res.ok) {
+				if (pendingCoverDirty(pendingCover)) {
+					coverUploading = true;
+					const coverResult = await persistPendingCover(Number(book.id), pendingCover);
+					coverUploading = false;
+					if (coverResult.error) {
+						saveError = coverResult.error;
+						return false;
+					}
+					if (coverResult.update) applyCoverMutation(coverResult.update);
+					clearPendingCover();
+				}
 				clearMetadataDraftContext();
 				await fetchBook({ mode: 'quiet', resetRelated: false });
 				editing = stayEditing && !exitingInlineMetadataEdit;
@@ -1256,13 +1290,27 @@
 								{/if}
 							</div>
 							{#if editing}
-								<button
-									type="button"
-									onclick={() => showMetadataLookup = true}
-									class="accent-action rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
-								>
-									Lookup Metadata
-								</button>
+								<div class="flex flex-wrap justify-end gap-2">
+									<button
+										type="button"
+										onclick={() => showMetadataProtection = true}
+										class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+										title="Metadata protection"
+									>
+										<svg class="h-4 w-4 text-[var(--color-primary-400)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+											<rect x="5" y="10" width="14" height="10" rx="2"></rect>
+											<path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
+										</svg>
+										Protection
+									</button>
+									<button
+										type="button"
+										onclick={() => showMetadataLookup = true}
+										class="accent-action rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+									>
+										Lookup Metadata
+									</button>
+								</div>
 							{/if}
 						</div>
 					</div>
@@ -1305,33 +1353,18 @@
 						</div>
 					{/if}
 
-					{#if editing}
-						<div class="mt-5">
-							<MetadataProtectionPanel
-								bookId={Number(book.id)}
-								lockedFields={book.locked_fields || []}
-								libraryProtectionEnabled={!!book.library_metadata_protection_enabled}
-								onChanged={(fields) => book = { ...book, locked_fields: fields }}
-								onRestored={async () => {
-									await fetchBook({ mode: 'quiet', resetRelated: false });
-								}}
-							/>
-						</div>
-					{/if}
-
 					<div class="mt-7 flex flex-col gap-6 md:flex-row md:items-start md:gap-8">
 					<div class="w-full max-w-[13rem] mx-auto md:mx-0 flex-shrink-0 flex flex-col">
-						<input bind:this={coverFileInput} type="file" accept="image/*" class="hidden" onchange={uploadCustomCover} />
 						<div class="relative">
 							<button
 								type="button"
 								onclick={openCoverModal}
-								class="group block w-full text-left transition-all duration-200 ease-out {book.cover_path ? 'cursor-zoom-in hover:-translate-y-0.5 hover:shadow-lg' : 'cursor-default'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
-								disabled={!book.cover_path}
-								title={book.cover_path ? 'Open cover preview' : undefined}
+								class="group block w-full text-left transition-all duration-200 ease-out {displayCoverSrc ? 'cursor-zoom-in hover:-translate-y-0.5 hover:shadow-lg' : 'cursor-default'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+								disabled={!displayCoverSrc}
+								title={displayCoverSrc ? 'Open cover preview' : undefined}
 							>
 							<BookCoverFrame
-								src={book.cover_path ? getCoverThumbUrl(book.id, 'large', book.cover_updated_on) : null}
+								src={displayCoverSrc}
 								alt={book.title}
 								format={book.format}
 								mode="contain"
@@ -1342,7 +1375,7 @@
 						</button>
 						{#if editing}
 							<div class="absolute bottom-2 right-2 z-20 flex gap-1.5">
-								{#if book.cover_source === 'custom'}
+								{#if displayCoverIsCustom}
 									<button
 										type="button"
 										onclick={resetCustomCover}
@@ -1430,12 +1463,13 @@
 							<div class="flex w-full overflow-hidden rounded-lg {primaryReadFormat ? 'read-action-control' : ''}">
 								{#if primaryReadFormat}
 									<a
-									href={getBookReaderHref(book.id, book.resume_format || primaryReadFormat, getCurrentBookDetailUrl(), book.resume_file_id)}
+									href={getBookReaderHref(book.id, primaryReadFile?.format || book.resume_format || primaryReadFormat, getCurrentBookDetailUrl(), primaryReadFile?.id || book.resume_file_id)}
 										onclick={handleReaderLaunch}
+										title={formatHasDuplicateFiles(files, primaryReadFile?.format) ? getFileName(primaryReadFile?.path || '') : undefined}
 												class="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2 text-sm font-medium transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
 										>
 											<span class="truncate">{getPrimaryReadActionLabel()}</span>
-											<span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-primary-300)]">{getFormatDisplayLabel(primaryReadFormat)}</span>
+											<span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-primary-300)]">{getFormatDisplayLabel(primaryReadFile?.format || primaryReadFormat)}</span>
 										</a>
 								{:else}
 									<button
@@ -1447,12 +1481,12 @@
 										<span class="text-[10px] uppercase tracking-[0.14em]">{filesError ? 'retry' : 'no reader'}</span>
 									</button>
 								{/if}
-								{#if readableFormats.length > 1}
+								{#if readableFiles.length > 1}
 									<button
 										type="button"
 										onclick={() => formatMenuOpen = !formatMenuOpen}
 										class="read-action-format-toggle inline-flex items-center justify-center px-3 transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
-										aria-label="Choose reader format"
+										aria-label="Choose reader file"
 										aria-expanded={formatMenuOpen}
 									>
 										<svg class="h-4 w-4 transition-transform duration-200 ease-out {formatMenuOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1466,20 +1500,39 @@
 									Retry reader check
 								</button>
 							{/if}
-							{#if formatMenuOpen && readableFormats.length > 1}
-								<div class="absolute right-0 top-full z-20 mt-2 w-56 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-800)] shadow-lg">
-									{#each readableFormats.filter((format) => format !== primaryReadFormat) as format}
+							{#if formatMenuOpen && readableFiles.length > 1}
+								<div class="absolute left-0 top-full z-30 mt-2 w-full min-w-full overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] shadow-xl md:w-80" role="menu">
+									{#each readableFiles as file}
+										{@const isCurrent = file.id === primaryReadFile?.id}
 										<a
-											href={getBookReaderHref(book.id, format, getCurrentBookDetailUrl())}
+											href={getBookReaderHref(book.id, file.format, getCurrentBookDetailUrl(), file.id)}
 											onclick={(event) => {
 												formatMenuOpen = false;
 												handleReaderLaunch(event);
 											}}
-											class="flex items-center justify-between px-3 py-2 text-sm text-[var(--color-surface-text)] transition-colors duration-200 hover:bg-[var(--color-surface-700)]"
+											class="read-file-menu-item flex items-start justify-between gap-3 px-3 py-2 text-sm text-[var(--color-surface-text)] {isCurrent ? 'is-current' : ''}"
+											title={getFileName(file.path || '')}
+											role="menuitem"
+											aria-current={isCurrent ? 'true' : undefined}
 										>
-											<span>{getFormatDisplayLabel(format)}</span>
-											<span class="text-xs uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">
-												{getReaderRouteKind(format) || 'reader'}
+											<span class="min-w-0 flex-1">
+												<span class="font-medium">{getFormatDisplayLabel(file.format)}</span>
+												<span class="ml-1.5 text-xs text-[var(--color-surface-text-muted)]">{formatSize(file.size || 0)}</span>
+												{#if formatHasDuplicateFiles(files, file.format)}
+													<span class="mt-0.5 block break-words text-xs font-normal text-[var(--color-surface-text-muted)]">{getFileName(file.path || '')}</span>
+												{/if}
+											</span>
+											<span class="flex flex-shrink-0 items-center gap-2 pt-0.5 text-xs uppercase tracking-[0.12em] text-[var(--color-surface-text-muted)]">
+												{#if isCurrent}
+													<span class="inline-flex items-center gap-1 font-medium normal-case tracking-normal text-[var(--color-primary-400)]">
+														<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+															<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+														</svg>
+														Current
+													</span>
+												{:else}
+													{getReaderRouteKind(file.format) || 'reader'}
+												{/if}
 											</span>
 										</a>
 									{/each}
@@ -1537,15 +1590,11 @@
 								<dt class="text-sm text-[var(--color-surface-text-muted)] w-24 flex-shrink-0">Formats</dt>
 								<dd class="flex flex-wrap gap-x-4 gap-y-3 min-w-0">
 									{#each files as file (file.id)}
-										{@const duplicateFormat = files.filter((candidate) => normalizeBookFormat(candidate.format) === normalizeBookFormat(file.format)).length > 1}
-										<div class="flex max-w-40 min-w-0 flex-col items-center gap-1">
+										<div class="flex flex-col items-center gap-1">
 											<span class="rounded-full border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-2.5 py-0.5 text-xs font-medium uppercase tracking-[0.08em] text-[var(--color-surface-text)]">
 												{getFormatDisplayLabel(file.format)}
 											</span>
 											<span class="text-xs text-[var(--color-surface-text-muted)]">{formatSize(file.size)}</span>
-											{#if duplicateFormat}
-												<span class="max-w-full break-all text-center text-xs text-[var(--color-surface-text-muted)]" title={file.path}>{getFileName(file.path)}</span>
-											{/if}
 										</div>
 									{/each}
 								</dd>
@@ -1887,9 +1936,18 @@
 												</div>
 												</div>
 												<div class="flex items-center gap-2">
+													{#if isReadableBookFile(file)}
+														<a
+															href={getBookReaderHref(book.id, file.format, getCurrentBookDetailUrl(), file.id)}
+															onclick={handleReaderLaunch}
+															class="accent-action rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+														>
+															{getFileReadLabel(file)}
+														</a>
+													{/if}
 													<button
 														onclick={() => downloadFile(file)}
-													class="accent-action rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
+													class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-surface-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 													>
 														Download
 													</button>
@@ -2031,6 +2089,32 @@
 	/>
 {/if}
 
+{#if showMetadataProtection && book?.id}
+	<MetadataProtectionModal
+		bookId={Number(book.id)}
+		lockedFields={book.locked_fields || []}
+		libraryProtectionEnabled={!!book.library_metadata_protection_enabled}
+		onClose={() => showMetadataProtection = false}
+		onChanged={(fields) => book = { ...book, locked_fields: fields }}
+		onRestored={async () => {
+			await fetchBook({ mode: 'quiet', resetRelated: false });
+		}}
+	/>
+{/if}
+
+{#if showCoverUpload && book?.id}
+	<CoverUploadModal
+		bookId={Number(book.id)}
+		coverPath={book.cover_path}
+		coverUpdatedOn={book.cover_updated_on}
+		previewSrc={displayCoverSrc}
+		format={book.format}
+		title={book.title || 'book'}
+		onClose={() => showCoverUpload = false}
+		onSelected={stageSelectedCover}
+	/>
+{/if}
+
 {#if showShelfPicker}
 	<div class="fixed inset-0 z-[80] flex items-center justify-center p-4">
 		<button
@@ -2122,7 +2206,7 @@
 			<div class="flex justify-center p-4">
 				<div class="w-full max-w-[24rem]">
 					<BookCoverFrame
-						src={book.cover_path ? `/api/covers/${book.id}` : null}
+						src={pendingCover.previewUrl || (book.cover_path ? `/api/covers/${book.id}` : null)}
 						alt={book.title}
 						format={book.format}
 						mode="contain"
@@ -2149,6 +2233,20 @@
 
 	.read-action-format-toggle {
 		border-left: 1px solid color-mix(in srgb, var(--color-primary-500) 35%, transparent);
+	}
+
+	.read-file-menu-item {
+		background: transparent;
+		transition: background-color 200ms ease-out, color 200ms ease-out;
+	}
+
+	.read-file-menu-item.is-current {
+		background: color-mix(in srgb, var(--color-primary-500) 8%, var(--color-surface-overlay));
+	}
+
+	.read-file-menu-item:hover,
+	.read-file-menu-item:focus-visible {
+		background: color-mix(in srgb, var(--color-primary-500) 16%, var(--color-surface-overlay));
 	}
 
 	.book-tab-indicator {

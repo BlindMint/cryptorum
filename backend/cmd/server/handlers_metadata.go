@@ -2065,22 +2065,13 @@ func ResetBookCoverHandler(w http.ResponseWriter, r *http.Request) {
 	var previousPath, previousSource string
 	_ = appDB.QueryRow(`SELECT COALESCE(cover_path, ''), COALESCE(cover_source, '') FROM book_metadata WHERE book_id = ?`, bookIDInt).Scan(&previousPath, &previousSource)
 
-	var sourcePath string
-	_ = appDB.QueryRow(`SELECT path FROM book_file WHERE book_id = ? LIMIT 1`, bookIDInt).Scan(&sourcePath)
-	sourcePath = translateHostPathToContainerPath(sourcePath)
-
+	sourceCover, err := extractSourceCoverBytes(bookIDInt)
+	if err != nil {
+		slog.Warn("Failed to extract source cover for reset", "bookID", bookIDInt, "error", err)
+	}
 	var restoredPath string
-	if sourcePath != "" {
-		if meta, err := metadata.ExtractWithOptions(sourcePath, metadata.ExtractOptions{
-			ComicSpreadFallbackSide: resolveBookComicSpreadFallback(bookIDInt),
-		}); err == nil && meta != nil && len(meta.CoverData) > 0 {
-			settings := covers.LoadSettings(appDB.DB)
-			processed, processErr := covers.ProcessCover(meta.CoverData, settings)
-			if processErr != nil || len(processed) == 0 {
-				processed = meta.CoverData
-			}
-			restoredPath, _ = covers.SaveCoverBytes(appConfig.GetCoversPath(), bookIDInt, processed)
-		}
+	if len(sourceCover) > 0 {
+		restoredPath, _ = covers.SaveCoverBytes(appConfig.GetCoversPath(), bookIDInt, sourceCover)
 	}
 
 	now := time.Now().Unix()
@@ -2144,6 +2135,77 @@ func ResetBookCoverHandler(w http.ResponseWriter, r *http.Request) {
 		"cover_source":     "",
 		"cover_updated_on": now,
 	})
+}
+
+// PreviewSourceCoverHandler returns the cover embedded in the book file without saving it.
+func PreviewSourceCoverHandler(w http.ResponseWriter, r *http.Request) {
+	current := getUserFromContext(r.Context())
+	bookID := chi.URLParam(r, "bookID")
+	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid book ID")
+		return
+	}
+	allowed, err := canAccessBook(current, bookIDInt)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
+		return
+	}
+	if !allowed {
+		errorResponse(w, http.StatusForbidden, "Permission denied")
+		return
+	}
+
+	data, err := extractSourceCoverBytes(bookIDInt)
+	if err != nil {
+		slog.Warn("Failed to extract source cover preview", "bookID", bookIDInt, "error", err)
+		errorResponse(w, http.StatusInternalServerError, "Failed to extract source cover")
+		return
+	}
+	if len(data) == 0 {
+		errorResponse(w, http.StatusNotFound, "No source cover found")
+		return
+	}
+
+	contentType := http.DetectContentType(data)
+	if !strings.HasPrefix(contentType, "image/") {
+		contentType = "image/jpeg"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func extractSourceCoverBytes(bookID int64) ([]byte, error) {
+	var sourcePath string
+	_ = appDB.QueryRow(`
+		SELECT path FROM book_file
+		WHERE book_id = ? AND missing_at IS NULL
+		ORDER BY id
+		LIMIT 1
+	`, bookID).Scan(&sourcePath)
+	sourcePath = translateHostPathToContainerPath(sourcePath)
+	if strings.TrimSpace(sourcePath) == "" {
+		return nil, nil
+	}
+
+	meta, err := metadata.ExtractWithOptions(sourcePath, metadata.ExtractOptions{
+		ComicSpreadFallbackSide: resolveBookComicSpreadFallback(bookID),
+	})
+	if err != nil || meta == nil || len(meta.CoverData) == 0 {
+		if err != nil {
+			slog.Warn("Failed to extract source cover", "bookID", bookID, "path", sourcePath, "error", err)
+		}
+		return nil, nil
+	}
+
+	settings := covers.LoadSettings(appDB.DB)
+	processed, processErr := covers.ProcessCover(meta.CoverData, settings)
+	if processErr != nil || len(processed) == 0 {
+		return meta.CoverData, nil
+	}
+	return processed, nil
 }
 
 func updateBookComicSpreadFallback(bookID, ownerUserID int64, value string) error {

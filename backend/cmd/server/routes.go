@@ -345,6 +345,7 @@ func initRoutes(r *chi.Mux) {
 			r.Post("/bulk-delete", bulkDeleteBooksHandler)
 			r.Post("/bulk-delete-by-filter", bulkDeleteByFilterHandler)
 			r.Post("/bulk-metadata", bulkUpdateMetadataHandler)
+			r.Post("/combine", combineBooksHandler)
 			r.Route("/{bookID}", func(r chi.Router) {
 				r.Get("/", getBookHandler)
 				r.Put("/", updateBookHandler)
@@ -364,6 +365,7 @@ func initRoutes(r *chi.Mux) {
 				r.Post("/cover/regenerate", RegenerateBookCoverHandler)
 				r.Post("/cover/custom", UploadBookCoverHandler)
 				r.Delete("/cover/custom", ResetBookCoverHandler)
+				r.Get("/cover/source", PreviewSourceCoverHandler)
 				r.Get("/metadata/revisions", ListBookMetadataRevisionsHandler)
 				r.Post("/metadata/revisions/{revisionID}/restore", RestoreBookMetadataRevisionHandler)
 				r.Get("/annotations", GetAnnotationsHandler)

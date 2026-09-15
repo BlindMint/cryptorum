@@ -3,6 +3,7 @@
 		bookId: number;
 		lockedFields?: string[];
 		libraryProtectionEnabled?: boolean;
+		heading?: boolean;
 		onChanged?: (fields: string[]) => void | Promise<void>;
 		onRestored?: (book: any) => void | Promise<void>;
 	}
@@ -11,6 +12,7 @@
 		bookId,
 		lockedFields = [],
 		libraryProtectionEnabled = false,
+		heading = true,
 		onChanged,
 		onRestored
 	}: Props = $props();
@@ -127,17 +129,19 @@
 	}
 </script>
 
-<div class="rounded-xl border border-[var(--color-primary-500)]/25 bg-[var(--color-primary-500)]/[0.06] p-4">
-	<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+<div>
+	<div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 		<div class="min-w-0">
-			<div class="flex items-center gap-2">
-				<svg class="h-4 w-4 shrink-0 text-[var(--color-primary-400)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-					<rect x="5" y="10" width="14" height="10" rx="2"></rect>
-					<path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
-				</svg>
-				<h3 class="text-sm font-semibold text-[var(--color-surface-text)]">Metadata protection</h3>
-			</div>
-			<p class="mt-1 text-xs leading-5 text-[var(--color-surface-text-muted)]">
+			{#if heading}
+				<div class="flex items-center gap-2">
+					<svg class="h-4 w-4 shrink-0 text-[var(--color-primary-400)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+						<rect x="5" y="10" width="14" height="10" rx="2"></rect>
+						<path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
+					</svg>
+					<h3 class="text-sm font-semibold text-[var(--color-surface-text)]">Metadata protection</h3>
+				</div>
+			{/if}
+			<p class="text-[var(--color-surface-text-muted)] {heading ? 'mt-1 text-xs leading-5' : 'text-sm leading-6'}">
 				User-edited fields are protected automatically. Scans and metadata refreshes can only update unprotected fields.
 			</p>
 			{#if libraryProtectionEnabled}

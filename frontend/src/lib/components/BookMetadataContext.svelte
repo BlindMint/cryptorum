@@ -13,6 +13,8 @@
 		showCoverActions?: boolean;
 		coverActionLabel?: string;
 		coverActionBusy?: boolean;
+		coverSrc?: string | null;
+		customCover?: boolean;
 		onEditCover?: () => void;
 		onResetCover?: () => void;
 	}
@@ -25,9 +27,20 @@
 		showCoverActions = false,
 		coverActionLabel = 'Edit',
 		coverActionBusy = false,
+		coverSrc,
+		customCover,
 		onEditCover,
 		onResetCover
 	}: Props = $props();
+
+	let frameSrc = $derived(
+		coverSrc !== undefined
+			? coverSrc
+			: book?.cover_path
+				? getCoverThumbUrl(book.id, 'large', book.cover_updated_on)
+				: null
+	);
+	let showReset = $derived(customCover ?? book?.cover_source === 'custom');
 
 	function getPrimaryFilePath(): string {
 		return files[0]?.path || '';
@@ -37,7 +50,7 @@
 <aside class="space-y-4 {framed ? 'rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4' : ''}">
 	<div class="relative mx-auto w-full max-w-[12rem]">
 		<BookCoverFrame
-			src={book?.cover_path ? getCoverThumbUrl(book.id, 'large', book.cover_updated_on) : null}
+			src={frameSrc}
 			alt={book?.title || 'Book cover'}
 			format={book?.format}
 			mode="contain"
@@ -46,7 +59,7 @@
 		/>
 		{#if showCoverActions}
 			<div class="absolute bottom-2 right-2 z-20 flex gap-1.5">
-				{#if book?.cover_source === 'custom' && onResetCover}
+				{#if showReset && onResetCover}
 					<button
 						type="button"
 						onclick={onResetCover}

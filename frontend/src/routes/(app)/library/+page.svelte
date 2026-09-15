@@ -21,9 +21,11 @@
 	import FilterPanel from '$lib/components/FilterPanel.svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
 	import BulkMetadataEditModal from '$lib/components/BulkMetadataEditModal.svelte';
+	import CombineBooksModal from '$lib/components/CombineBooksModal.svelte';
 	import ShelfPickerRow from '$lib/components/ShelfPickerRow.svelte';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
 	import LibraryModal from '$lib/components/LibraryModal.svelte';
+	import { combineSelectionError } from '$lib/utils/combine-books';
 
 		type FilterMode = 'AND' | 'OR' | 'NOT';
 		const COMPACT_TOOLBAR_WIDTH = 720;
@@ -137,6 +139,8 @@
 	let showMetadataMenu = $state(false);
 	let metadataLookupJob = $state<any | null>(null);
 	let showBulkMetadataReview = $state(false);
+	let showCombineModal = $state(false);
+	let combineBookIds = $state<number[]>([]);
 	let showShelfPicker = $state(false);
 	let showCreateShelfModal = $state(false);
 	let showLibraryModal = $state(false);
@@ -1224,6 +1228,13 @@
 		showBulkMetadataEdit = true;
 	}
 
+	function openCombineModal() {
+		const error = combineSelectionError(selectedBooks.size, selectAllMode === 'filtered');
+		if (error) return;
+		combineBookIds = Array.from(selectedBooks);
+		showCombineModal = true;
+	}
+
 	function openBulkMetadataLookup() {
 		if (selectedBooks.size === 0) return;
 		showMetadataMenu = false;
@@ -2000,6 +2011,17 @@
 							{/if}
 							</div>
 							<button
+								onclick={openCombineModal}
+								disabled={actionInProgress || !!combineSelectionError(selectedBooks.size, selectAllMode === 'filtered')}
+								title={combineSelectionError(selectedBooks.size, selectAllMode === 'filtered') || 'Combine selected books into one'}
+								class="px-4 py-2 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none flex items-center space-x-2"
+							>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12M8 12h12M8 17h8M4 7h.01M4 12h.01M4 17h.01"></path>
+								</svg>
+								<span>Combine</span>
+							</button>
+							<button
 								onclick={openShelfPicker}
 								disabled={actionInProgress}
 								class="accent-action flex items-center space-x-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
@@ -2078,6 +2100,19 @@
 		onClose={() => showCreateShelfModal = false}
 		onSaved={handleShelfCreatedFromPicker}
 	/>
+
+	{#if showCombineModal}
+		<CombineBooksModal
+			bookIds={combineBookIds}
+			onClose={() => { showCombineModal = false; combineBookIds = []; }}
+			onCombined={(primaryBookId) => {
+				showCombineModal = false;
+				combineBookIds = [];
+				deselectAll();
+				goto(`/book/${primaryBookId}`);
+			}}
+		/>
+	{/if}
 
 	{#if showBulkMetadataEdit}
 		<BulkMetadataEditModal
