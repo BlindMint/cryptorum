@@ -382,6 +382,76 @@ func TestLibraryMetadataProtectionPreservesExistingMetadataButAllowsInitialImpor
 	}
 }
 
+func TestRepairSwappedFilenameMetadata(t *testing.T) {
+	db := setupScannerTestDB(t)
+	mustScannerExec(t, db.DB, `UPDATE library SET metadata_protection_enabled = 1 WHERE id = 1`)
+	scanner := New(db.DB, t.TempDir(), filepath.Join(t.TempDir(), "covers"))
+
+	insertRepairBook(t, db.DB, 40, "/books/Nmap Network Scanning Official Guide - Gordon Lyon.pdf", "Gordon Lyon", `["Nmap Network Scanning Official Guide"]`, "[]")
+	insertRepairBook(t, db.DB, 41, "/books/Nmap Network Scanning - Gordon Lyon.pdf", "Nmap Network Scanning", `["Gordon Lyon"]`, "[]")
+	insertRepairBook(t, db.DB, 42, "/books/AI Investing for Dummies - Paul Mladjenovic.pdf", "User Fixed Title", `["User Fixed Author"]`, "[]")
+	insertRepairBook(t, db.DB, 43, "/books/Chess Evolution 1 - The Fundamentals.pdf", "The Fundamentals", `["Chess Evolution 1"]`, "[]")
+	insertRepairBook(t, db.DB, 44, "/books/Locked Book - Ada Lovelace.pdf", "Ada Lovelace", `["Locked Book"]`, `["title","authors"]`)
+	insertRepairBook(t, db.DB, 45, "/books/Linux Fundamentals - Neba Nfonsang.pdf", "Neba Nfonsang", `["Zamzar"]`, "[]")
+	insertRepairBook(t, db.DB, 46, "/books/Manual Edit - Ada Lovelace.pdf", "Ada Lovelace", `["Manual Edit"]`, "[]")
+	mustScannerExec(t, db.DB, `
+		INSERT INTO book_metadata_revision (
+			book_id, changed_at, changed_by_user_id, change_source, changed_fields, previous_metadata_json
+		) VALUES (46, 100, 1, 'manual_edit', '["title","authors"]', '{}')
+	`)
+
+	count, err := scanner.RepairSwappedFilenameMetadata()
+	if err != nil {
+		t.Fatalf("repair swapped filename metadata: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("repaired %d books, want 2", count)
+	}
+
+	assertRepairMetadata(t, db.DB, 40, "Nmap Network Scanning Official Guide", `["Gordon Lyon"]`)
+	assertRepairMetadata(t, db.DB, 41, "Nmap Network Scanning", `["Gordon Lyon"]`)
+	assertRepairMetadata(t, db.DB, 42, "User Fixed Title", `["User Fixed Author"]`)
+	assertRepairMetadata(t, db.DB, 43, "The Fundamentals", `["Chess Evolution 1"]`)
+	assertRepairMetadata(t, db.DB, 44, "Ada Lovelace", `["Locked Book"]`)
+	assertRepairMetadata(t, db.DB, 45, "Linux Fundamentals", `["Zamzar"]`)
+	assertRepairMetadata(t, db.DB, 46, "Ada Lovelace", `["Manual Edit"]`)
+
+	second, err := scanner.RepairSwappedFilenameMetadata()
+	if err != nil {
+		t.Fatalf("second repair: %v", err)
+	}
+	if second != 0 {
+		t.Fatalf("second repair changed %d books, want 0", second)
+	}
+}
+
+func insertRepairBook(t *testing.T, db *sql.DB, id int64, path, title, authors, locked string) {
+	t.Helper()
+	mustScannerExec(t, db, `
+		INSERT INTO book (id, library_id, added_at, last_scanned, owner_user_id)
+		VALUES (?, 1, 100, 100, 1)
+	`, id)
+	mustScannerExec(t, db, `
+		INSERT INTO book_file (book_id, path, format, size, hash, hash_algorithm, last_modified, owner_user_id)
+		VALUES (?, ?, 'pdf', 10, 'hash', 'sha256-full-v1', 100, 1)
+	`, id, path)
+	mustScannerExec(t, db, `
+		INSERT INTO book_metadata (book_id, title, authors, genres, tags, locked_fields, owner_user_id)
+		VALUES (?, ?, ?, '[]', '[]', ?, 1)
+	`, id, title, authors, locked)
+}
+
+func assertRepairMetadata(t *testing.T, db *sql.DB, bookID int64, wantTitle, wantAuthors string) {
+	t.Helper()
+	var title, authors string
+	if err := db.QueryRow(`SELECT title, authors FROM book_metadata WHERE book_id = ?`, bookID).Scan(&title, &authors); err != nil {
+		t.Fatalf("load repaired metadata for %d: %v", bookID, err)
+	}
+	if title != wantTitle || authors != wantAuthors {
+		t.Fatalf("book %d title=%q authors=%s, want title=%q authors=%s", bookID, title, authors, wantTitle, wantAuthors)
+	}
+}
+
 func setupScannerTestDB(t *testing.T) *appdb.DB {
 	t.Helper()
 	db, err := appdb.New(t.TempDir())

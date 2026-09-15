@@ -1524,13 +1524,19 @@ func extractEbookMetaCover(filePath string) []byte {
 	return data
 }
 
-// extractFromFilename extracts metadata from filename patterns
-// Common patterns:
-// "Author - Title.epub"
-// "Author - Series - Title.epub"
-// "Title (Author).epub"
-// "Series 01 - Title.epub"
+// extractFromFilename extracts metadata from filename patterns.
+// Default dash convention is "Title - Author".
 func extractFromFilename(filePath string) *BookMetadata {
+	return parseFilenameMetadata(filePath, true)
+}
+
+// extractFromFilenameAuthorFirst is the historical "Author - Title" parser.
+// It exists so repairs can detect books that were imported under that convention.
+func extractFromFilenameAuthorFirst(filePath string) *BookMetadata {
+	return parseFilenameMetadata(filePath, false)
+}
+
+func parseFilenameMetadata(filePath string, titleFirst bool) *BookMetadata {
 	metadata := &BookMetadata{
 		Authors: []string{},
 		Genres:  []string{},
@@ -1539,8 +1545,53 @@ func extractFromFilename(filePath string) *BookMetadata {
 
 	filename := filepath.Base(filePath)
 	name := strings.TrimSuffix(filename, filepath.Ext(filename))
+	if titleFirst {
+		parseTitleFirstFilename(name, metadata)
+	} else {
+		parseAuthorFirstFilename(name, metadata)
+	}
+	return metadata
+}
 
-	// Pattern: "Author - Title" or "Author - Series - Title"
+func parseTitleFirstFilename(name string, metadata *BookMetadata) {
+	// Pattern: "Series 01 - Title" or "Series IV - Title"
+	if series, number, display, title, ok := parseSeriesTitlePattern(name); ok {
+		metadata.Series = series
+		metadata.SeriesNumber = number
+		metadata.SeriesNumberDisplay = display
+		metadata.Title = title
+		return
+	}
+
+	parts := splitFilenameDashParts(name)
+	if len(parts) == 3 {
+		if series, number, display, ok := parseSeriesLabel(parts[1]); ok {
+			metadata.Title = parts[0]
+			metadata.Series = series
+			metadata.SeriesNumber = number
+			metadata.SeriesNumberDisplay = display
+			metadata.Authors = append(metadata.Authors, parts[2])
+			return
+		}
+	}
+	if title, author, ok := splitTitleAndAuthor(name); ok {
+		metadata.Title = title
+		metadata.Authors = append(metadata.Authors, author)
+		return
+	}
+
+	// Pattern: "Title (Author)"
+	if match := findParenthesesContent(name); match != "" {
+		metadata.Authors = append(metadata.Authors, match)
+		metadata.Title = strings.TrimSpace(strings.Replace(name, "("+match+")", "", 1))
+		return
+	}
+
+	metadata.Title = name
+}
+
+func parseAuthorFirstFilename(name string, metadata *BookMetadata) {
+	// Historical pattern: "Author - Title" or "Author - Series - Title"
 	if parts := strings.SplitN(name, " - ", 3); len(parts) >= 2 {
 		if len(parts) == 3 {
 			if series, number, display, ok := parseSeriesLabel(parts[1]); ok {
@@ -1555,28 +1606,92 @@ func extractFromFilename(filePath string) *BookMetadata {
 			metadata.Title = strings.TrimSpace(parts[1])
 		}
 		metadata.Authors = append(metadata.Authors, strings.TrimSpace(parts[0]))
-		return metadata
+		return
 	}
 
-	// Pattern: "Title (Author)"
 	if match := findParenthesesContent(name); match != "" {
 		metadata.Authors = append(metadata.Authors, match)
 		metadata.Title = strings.TrimSpace(strings.Replace(name, "("+match+")", "", 1))
-		return metadata
+		return
 	}
 
-	// Pattern: "Series 01 - Title" or "Series IV - Title"
 	if series, number, display, title, ok := parseSeriesTitlePattern(name); ok {
 		metadata.Series = series
 		metadata.SeriesNumber = number
 		metadata.SeriesNumberDisplay = display
 		metadata.Title = title
-		return metadata
+		return
 	}
 
-	// Fallback: use full filename as title
 	metadata.Title = name
-	return metadata
+}
+
+func splitFilenameDashParts(name string) []string {
+	raw := strings.Split(name, " - ")
+	parts := make([]string, 0, len(raw))
+	for _, part := range raw {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
+func splitTitleAndAuthor(name string) (string, string, bool) {
+	idx := strings.LastIndex(name, " - ")
+	if idx <= 0 {
+		return "", "", false
+	}
+	title := strings.TrimSpace(name[:idx])
+	author := strings.TrimSpace(name[idx+3:])
+	if title == "" || author == "" {
+		return "", "", false
+	}
+	return title, author, true
+}
+
+// FilenameOrderCorrection reports which title/author fields still match the
+// historical "Author - Title" filename parse and should be rewritten using
+// the current "Title - Author" convention. Fields that no longer match are
+// treated as user- or provider-updated and left unchanged.
+func FilenameOrderCorrection(path, title string, authors []string) (string, []string, bool, bool) {
+	legacy := extractFromFilenameAuthorFirst(path)
+	corrected := extractFromFilename(path)
+
+	updateTitle := false
+	newTitle := ""
+	if filenameFieldEqual(title, legacy.Title) {
+		if candidate := strings.TrimSpace(corrected.Title); candidate != "" && !filenameFieldEqual(title, candidate) {
+			updateTitle = true
+			newTitle = candidate
+		}
+	}
+
+	updateAuthors := false
+	var newAuthors []string
+	if sameAuthorsFold(authors, legacy.Authors) && len(corrected.Authors) > 0 && !sameAuthorsFold(authors, corrected.Authors) {
+		updateAuthors = true
+		newAuthors = append([]string{}, corrected.Authors...)
+	}
+
+	return newTitle, newAuthors, updateTitle, updateAuthors
+}
+
+func filenameFieldEqual(left, right string) bool {
+	return strings.EqualFold(strings.TrimSpace(left), strings.TrimSpace(right))
+}
+
+func sameAuthorsFold(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if !filenameFieldEqual(left[i], right[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func extractTitleFromFilename(filePath string) string {
@@ -1593,7 +1708,7 @@ func findParenthesesContent(s string) string {
 }
 
 func parseSeriesTitlePattern(s string) (string, float64, string, string, bool) {
-	parts := strings.SplitN(s, "-", 2)
+	parts := strings.SplitN(s, " - ", 2)
 	if len(parts) != 2 {
 		return "", 0, "", "", false
 	}

@@ -96,6 +96,11 @@ func main() {
 
 	// Initialize scanner
 	appScanner = scanner.New(appDB.DB, appConfig.Server.DataPath, appConfig.GetCoversPath())
+	if count, err := appScanner.RepairSwappedFilenameMetadata(); err != nil {
+		slog.Error("Failed to repair swapped filename metadata", "error", err)
+	} else if count > 0 {
+		slog.Info("Repaired swapped filename metadata", "count", count)
+	}
 	requeueInterruptedLibraryScans()
 	signalLibraryScanWorker()
 

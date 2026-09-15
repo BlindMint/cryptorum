@@ -65,7 +65,13 @@ func TestExtractCBZMetadataParsesRomanComicInfoNumber(t *testing.T) {
 }
 
 func TestExtractFilenameParsesRomanSeriesNumber(t *testing.T) {
-	meta := ExtractFilename(filepath.Join(t.TempDir(), "Author - Test Series IV - Title.epub"))
+	meta := ExtractFilename(filepath.Join(t.TempDir(), "Title - Test Series IV - Author.epub"))
+	if meta.Title != "Title" {
+		t.Fatalf("expected title Title, got %q", meta.Title)
+	}
+	if len(meta.Authors) != 1 || meta.Authors[0] != "Author" {
+		t.Fatalf("expected author Author, got %#v", meta.Authors)
+	}
 	if meta.Series != "Test Series" {
 		t.Fatalf("expected series Test Series, got %q", meta.Series)
 	}
@@ -74,6 +80,108 @@ func TestExtractFilenameParsesRomanSeriesNumber(t *testing.T) {
 	}
 	if meta.SeriesNumberDisplay != "IV" {
 		t.Fatalf("expected series number display IV, got %q", meta.SeriesNumberDisplay)
+	}
+}
+
+func TestExtractFilenameUsesTitleDashAuthor(t *testing.T) {
+	tests := []struct {
+		name    string
+		file    string
+		title   string
+		authors []string
+		series  string
+	}{
+		{
+			name:    "title then author",
+			file:    "Nmap Network Scanning Official Nmap Project Guide to Network Discovery and Security Scanning - Gordon Lyon.pdf",
+			title:   "Nmap Network Scanning Official Nmap Project Guide to Network Discovery and Security Scanning",
+			authors: []string{"Gordon Lyon"},
+		},
+		{
+			name:    "title with extra dash then author",
+			file:    "AI Strategy and Security - A roadman for Secure, Responsible, and Resilient AI Adoption - Donnie W. Wendt.pdf",
+			title:   "AI Strategy and Security - A roadman for Secure, Responsible, and Resilient AI Adoption",
+			authors: []string{"Donnie W. Wendt"},
+		},
+		{
+			name:   "series number then title",
+			file:   "Series 01 - The Beginning.cbz",
+			title:  "The Beginning",
+			series: "Series",
+		},
+		{
+			name:    "title in parentheses author without dash",
+			file:    "Useful Book (Ada Lovelace).epub",
+			title:   "Useful Book",
+			authors: []string{"Ada Lovelace"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := ExtractFilename(filepath.Join(t.TempDir(), tt.file))
+			if meta.Title != tt.title {
+				t.Fatalf("title = %q, want %q", meta.Title, tt.title)
+			}
+			if tt.authors == nil {
+				tt.authors = []string{}
+			}
+			if !sameAuthorsFold(meta.Authors, tt.authors) {
+				t.Fatalf("authors = %#v, want %#v", meta.Authors, tt.authors)
+			}
+			if meta.Series != tt.series {
+				t.Fatalf("series = %q, want %q", meta.Series, tt.series)
+			}
+		})
+	}
+}
+
+func TestFilenameOrderCorrectionRepairsOnlyLegacyFields(t *testing.T) {
+	path := "/books/Nmap Network Scanning - Gordon Lyon.pdf"
+
+	newTitle, newAuthors, updateTitle, updateAuthors := FilenameOrderCorrection(
+		path,
+		"Gordon Lyon",
+		[]string{"Nmap Network Scanning"},
+	)
+	if !updateTitle || newTitle != "Nmap Network Scanning" {
+		t.Fatalf("title correction = %q update=%v, want Nmap Network Scanning true", newTitle, updateTitle)
+	}
+	if !updateAuthors || !sameAuthorsFold(newAuthors, []string{"Gordon Lyon"}) {
+		t.Fatalf("author correction = %#v update=%v, want [Gordon Lyon] true", newAuthors, updateAuthors)
+	}
+
+	newTitle, newAuthors, updateTitle, updateAuthors = FilenameOrderCorrection(
+		path,
+		"Nmap Network Scanning",
+		[]string{"Gordon Lyon"},
+	)
+	if updateTitle || updateAuthors || newTitle != "" || newAuthors != nil {
+		t.Fatalf("already-correct metadata was rewritten: title=%q authors=%#v updateTitle=%v updateAuthors=%v", newTitle, newAuthors, updateTitle, updateAuthors)
+	}
+
+	newTitle, newAuthors, updateTitle, updateAuthors = FilenameOrderCorrection(
+		path,
+		"Gordon Lyon",
+		[]string{"dlavieri"},
+	)
+	if !updateTitle || newTitle != "Nmap Network Scanning" {
+		t.Fatalf("title-only correction = %q update=%v", newTitle, updateTitle)
+	}
+	if updateAuthors {
+		t.Fatalf("updated authors %#v even though they no longer match the legacy parse", newAuthors)
+	}
+}
+
+func TestFilenameOrderCorrectionLeavesSeriesTitleFilesAlone(t *testing.T) {
+	path := "/books/Chess Evolution 1 - The Fundamentals.pdf"
+	newTitle, newAuthors, updateTitle, updateAuthors := FilenameOrderCorrection(
+		path,
+		"The Fundamentals",
+		[]string{"Chess Evolution 1"},
+	)
+	if updateTitle || updateAuthors || newTitle != "" || newAuthors != nil {
+		t.Fatalf("series-title file rewritten: title=%q authors=%#v updateTitle=%v updateAuthors=%v", newTitle, newAuthors, updateTitle, updateAuthors)
 	}
 }
 

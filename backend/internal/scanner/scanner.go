@@ -1126,6 +1126,209 @@ func sameStringList(raw string, expected []string) bool {
 	return true
 }
 
+var userFilenameEditSources = map[string]bool{
+	"manual_edit":      true,
+	"bulk_edit":        true,
+	"provider_apply":   true,
+	"revision_restore": true,
+}
+
+// RepairSwappedFilenameMetadata rewrites title/author pairs that still match the
+// historical "Author - Title" filename parse. User-edited values, explicit field
+// locks, and metadata that no longer matches that parse are left unchanged.
+func (s *Scanner) RepairSwappedFilenameMetadata() (int, error) {
+	rows, err := s.db.Query(`
+		SELECT b.id, COALESCE(b.owner_user_id, 1), bf.path,
+		       COALESCE(bm.title, ''), COALESCE(bm.authors, '[]'),
+		       COALESCE(bm.locked_fields, '[]')
+		FROM book b
+		JOIN book_metadata bm ON bm.book_id = b.id
+		JOIN book_file bf ON bf.id = (
+			SELECT bf2.id
+			FROM book_file bf2
+			WHERE bf2.book_id = b.id AND bf2.missing_at IS NULL
+			ORDER BY bf2.id
+			LIMIT 1
+		)
+		WHERE bf.path LIKE '% - %'
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	type entry struct {
+		bookID      int64
+		ownerUserID int64
+		path        string
+		title       string
+		authorsRaw  string
+		lockedRaw   string
+	}
+	var entries []entry
+	for rows.Next() {
+		var item entry
+		if err := rows.Scan(&item.bookID, &item.ownerUserID, &item.path, &item.title, &item.authorsRaw, &item.lockedRaw); err != nil {
+			continue
+		}
+		entries = append(entries, item)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	repaired := 0
+	for _, item := range entries {
+		changed, err := s.repairSwappedFilenameMetadata(item.bookID, item.ownerUserID, item.path, item.title, item.authorsRaw, item.lockedRaw)
+		if err != nil {
+			slog.Warn("Failed to repair swapped filename metadata", "bookID", item.bookID, "path", item.path, "error", err)
+			continue
+		}
+		if changed {
+			repaired++
+		}
+	}
+	return repaired, nil
+}
+
+func (s *Scanner) repairSwappedFilenameMetadata(
+	bookID, ownerUserID int64,
+	path, title, authorsRaw, lockedRaw string,
+) (bool, error) {
+	var authors []string
+	if err := json.Unmarshal([]byte(authorsRaw), &authors); err != nil {
+		authors = []string{}
+	}
+
+	newTitle, newAuthors, updateTitle, updateAuthors := metadata.FilenameOrderCorrection(path, title, authors)
+	if !updateTitle && !updateAuthors {
+		return false, nil
+	}
+
+	locked := metaprotection.ParseLocked(lockedRaw)
+	if locked[metaprotection.FieldTitle] {
+		updateTitle = false
+	}
+	if locked[metaprotection.FieldAuthors] {
+		updateAuthors = false
+	}
+
+	titleEdited, authorsEdited, err := s.filenameFieldsEditedByUser(bookID)
+	if err != nil {
+		return false, err
+	}
+	if titleEdited {
+		updateTitle = false
+	}
+	if authorsEdited {
+		updateAuthors = false
+	}
+	if !updateTitle && !updateAuthors {
+		return false, nil
+	}
+
+	if err := s.applyFilenameOrderCorrection(bookID, ownerUserID, newTitle, newAuthors, updateTitle, updateAuthors); err != nil {
+		return false, err
+	}
+	slog.Info("Repaired swapped filename metadata", "bookID", bookID, "path", path, "title", updateTitle, "authors", updateAuthors)
+	return true, nil
+}
+
+func (s *Scanner) filenameFieldsEditedByUser(bookID int64) (bool, bool, error) {
+	rows, err := s.db.Query(`
+		SELECT change_source, changed_fields
+		FROM book_metadata_revision
+		WHERE book_id = ?
+	`, bookID)
+	if err != nil {
+		return false, false, err
+	}
+	defer rows.Close()
+
+	titleEdited := false
+	authorsEdited := false
+	for rows.Next() {
+		var source, fieldsRaw string
+		if err := rows.Scan(&source, &fieldsRaw); err != nil {
+			continue
+		}
+		if !userFilenameEditSources[strings.TrimSpace(source)] {
+			continue
+		}
+		var fields []string
+		if err := json.Unmarshal([]byte(fieldsRaw), &fields); err != nil {
+			continue
+		}
+		for _, field := range metaprotection.NormalizeFields(fields) {
+			if field == metaprotection.FieldTitle {
+				titleEdited = true
+			}
+			if field == metaprotection.FieldAuthors {
+				authorsEdited = true
+			}
+		}
+	}
+	return titleEdited, authorsEdited, rows.Err()
+}
+
+func (s *Scanner) applyFilenameOrderCorrection(
+	bookID, ownerUserID int64,
+	title string,
+	authors []string,
+	updateTitle, updateAuthors bool,
+) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	current, exists, err := metaprotection.LoadSnapshot(tx, bookID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	previous := current
+	changed := []string{}
+	if updateTitle {
+		current.Title = title
+		changed = append(changed, metaprotection.FieldTitle)
+	}
+	if updateAuthors {
+		authorsJSON, err := json.Marshal(authors)
+		if err != nil {
+			return err
+		}
+		current.Authors = string(authorsJSON)
+		changed = append(changed, metaprotection.FieldAuthors)
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+
+	if err := metaprotection.RecordRevision(tx, previous, changed, "filename_order_repair", 0); err != nil {
+		return err
+	}
+
+	now := time.Now().Unix()
+	if _, err := tx.Exec(`
+		UPDATE book_metadata
+		SET title = ?, authors = ?, metadata_updated_at = ?, owner_user_id = ?
+		WHERE book_id = ?
+	`, current.Title, current.Authors, now, ownerUserID, bookID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	s.syncFTSFromDB(bookID)
+	return nil
+}
+
 func (s *Scanner) syncFTSFromDB(bookID int64) {
 	var title, authorsRaw, description, series string
 	err := s.db.QueryRow(`
