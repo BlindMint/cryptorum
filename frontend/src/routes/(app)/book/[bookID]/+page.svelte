@@ -555,9 +555,9 @@
 		});
 	}
 
-	function formatDuration(start: number, end: number | null): string {
-		if (!end) return 'In progress';
-		const seconds = end - start;
+	function formatSessionDuration(session: any): string {
+		if (!session.activity_tracked) return 'Legacy (untracked)';
+		const seconds = Math.max(0, Number(session.active_seconds) || 0);
 		if (seconds < 60) return `${seconds}s`;
 		const minutes = Math.floor(seconds / 60);
 		if (minutes < 60) return `${minutes}m`;
@@ -1891,7 +1891,7 @@
 													{formatTime(session.started_at)} → {session.ended_at ? formatTime(session.ended_at) : 'In progress'}
 												</div>
 												<div class="mt-2 text-xs text-[var(--color-surface-text-muted)]">
-													Duration: <span class="text-[var(--color-surface-text)]">{formatDuration(session.started_at, session.ended_at)}</span>
+													Active time: <span class="text-[var(--color-surface-text)]">{formatSessionDuration(session)}</span>
 												</div>
 											</div>
 											<div class="flex items-center gap-2 flex-shrink-0">

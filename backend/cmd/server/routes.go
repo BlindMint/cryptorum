@@ -361,6 +361,7 @@ func initRoutes(r *chi.Mux) {
 				r.Post("/reading-sessions", StartReadingPositionSessionHandler)
 				r.Get("/reading-sessions/{sessionID}/position", GetReadingPositionSessionHandler)
 				r.Put("/reading-sessions/{sessionID}/position", SaveReadingPositionHandler)
+				r.Put("/reading-sessions/{sessionID}/activity", UpdateReadingSessionActivityHandler)
 				r.Put("/reading-sessions/{sessionID}", EndReadingPositionSessionHandler)
 				r.Post("/cover/regenerate", RegenerateBookCoverHandler)
 				r.Post("/cover/custom", UploadBookCoverHandler)

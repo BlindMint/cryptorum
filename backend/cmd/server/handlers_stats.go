@@ -146,6 +146,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		SessionsThisWeek      int64             `json:"sessions_this_week"`
 		TotalSessionMinutes   int64             `json:"total_session_minutes"`
 		AverageSessionMinutes float64           `json:"average_session_minutes"`
+		UntrackedSessions     int64             `json:"untracked_sessions"`
 		CurrentReadingStreak  int64             `json:"current_reading_streak"`
 		BooksByFormat         FormatCounts      `json:"books_by_format"`
 		ReadingActivity       []ActivityDay     `json:"reading_activity"`
@@ -243,12 +244,17 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		WHERE `+ownerClause+` AND rs.started_at > ?
 	`, withOwnerArgs(weekAgo)...).Scan(&stats.SessionsThisWeek)
 	appDB.QueryRow(`
-		SELECT COALESCE(SUM(COALESCE(ended_at, started_at) - started_at), 0),
-		       COALESCE(AVG(COALESCE(ended_at, started_at) - started_at), 0)
+		SELECT COALESCE(SUM(CASE WHEN activity_tracked = 1 THEN active_seconds ELSE 0 END), 0),
+		       COALESCE(AVG(CASE WHEN activity_tracked = 1 THEN active_seconds END), 0),
+		       COALESCE(SUM(CASE WHEN activity_tracked = 0 THEN 1 ELSE 0 END), 0)
 		FROM reading_session rs
 		JOIN book b ON rs.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause, ownerArgs...).Scan(&stats.TotalSessionMinutes, &stats.AverageSessionMinutes)
+		WHERE `+ownerClause, ownerArgs...).Scan(
+		&stats.TotalSessionMinutes,
+		&stats.AverageSessionMinutes,
+		&stats.UntrackedSessions,
+	)
 	stats.TotalSessionMinutes /= 60
 	stats.AverageSessionMinutes /= 60
 
@@ -293,8 +299,8 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		var sessionCount int
 		var totalSeconds int64
 		appDB.QueryRow(`
-			SELECT COUNT(*),
-			       COALESCE(SUM(COALESCE(ended_at, started_at) - started_at), 0)
+			SELECT COALESCE(SUM(CASE WHEN activity_tracked = 1 THEN 1 ELSE 0 END), 0),
+			       COALESCE(SUM(CASE WHEN activity_tracked = 1 THEN active_seconds ELSE 0 END), 0)
 			FROM reading_session rs
 			JOIN book b ON rs.book_id = b.id
 			JOIN library l ON b.library_id = l.id
@@ -490,17 +496,17 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	sessionRows, _ := appDB.Query(`
 		SELECT
 			CASE
-				WHEN COALESCE(rs.ended_at, rs.started_at) - rs.started_at < 600 THEN '<10m'
-				WHEN COALESCE(rs.ended_at, rs.started_at) - rs.started_at < 1800 THEN '10-30m'
-				WHEN COALESCE(rs.ended_at, rs.started_at) - rs.started_at < 3600 THEN '30-60m'
-				WHEN COALESCE(rs.ended_at, rs.started_at) - rs.started_at < 7200 THEN '1-2h'
+				WHEN rs.active_seconds < 600 THEN '<10m'
+				WHEN rs.active_seconds < 1800 THEN '10-30m'
+				WHEN rs.active_seconds < 3600 THEN '30-60m'
+				WHEN rs.active_seconds < 7200 THEN '1-2h'
 				ELSE '2h+'
 			END as bucket,
 			COUNT(*) as cnt
 		FROM reading_session rs
 		JOIN book b ON rs.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause+`
+		WHERE `+ownerClause+` AND rs.activity_tracked = 1
 		GROUP BY bucket
 	`, ownerArgs...)
 	stats.SessionBuckets = []CountItem{}

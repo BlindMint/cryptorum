@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"cryptorum/internal/db"
 
@@ -93,6 +94,20 @@ func savePosition(t *testing.T, sessionID, sequence, revision int64, percent flo
 	return recorder
 }
 
+func updateSessionActivity(t *testing.T, sessionID, activeSeconds int64) *httptest.ResponseRecorder {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	body := fmt.Sprintf(`{"active_seconds":%d}`, activeSeconds)
+	req := readingPositionRequest(
+		http.MethodPut,
+		fmt.Sprintf("/api/books/1/reading-sessions/%d/activity", sessionID),
+		body,
+		map[string]string{"bookID": "1", "sessionID": fmt.Sprint(sessionID)},
+	)
+	UpdateReadingSessionActivityHandler(recorder, req)
+	return recorder
+}
+
 func TestReadingPositionSessionMigratesLegacyProgressToExplicitFile(t *testing.T) {
 	setupReadingPositionHandlerTestDB(t)
 	mustExec(t, `
@@ -140,6 +155,50 @@ func TestReadingPositionRejectsSupersededAndOutOfOrderSessions(t *testing.T) {
 	olderSequence := savePosition(t, secondSession, 0, 2, 33, false)
 	if olderSequence.Code != http.StatusBadRequest {
 		t.Fatalf("invalid sequence status = %d, want 400", olderSequence.Code)
+	}
+}
+
+func TestReadingSessionActivityIsCumulativeAndIdempotent(t *testing.T) {
+	setupReadingPositionHandlerTestDB(t)
+	sessionID, _ := startPositionSession(t, 10, "standard", "pdf")
+	mustExec(t, `UPDATE reading_session SET started_at = ? WHERE id = ?`, time.Now().Add(-2*time.Minute).Unix(), sessionID)
+
+	for _, seconds := range []int64{30, 30, 20, 45} {
+		response := updateSessionActivity(t, sessionID, seconds)
+		if response.Code != http.StatusOK {
+			t.Fatalf("activity update %d status = %d: %s", seconds, response.Code, response.Body.String())
+		}
+	}
+
+	var activeSeconds int64
+	if err := appDB.QueryRow(`SELECT active_seconds FROM reading_session WHERE id = ?`, sessionID).Scan(&activeSeconds); err != nil {
+		t.Fatalf("load active seconds: %v", err)
+	}
+	if activeSeconds != 45 {
+		t.Fatalf("active seconds = %d, want 45", activeSeconds)
+	}
+
+	recorder := httptest.NewRecorder()
+	req := readingPositionRequest(
+		http.MethodPut,
+		fmt.Sprintf("/api/books/1/reading-sessions/%d", sessionID),
+		`{"active_seconds":60}`,
+		map[string]string{"bookID": "1", "sessionID": fmt.Sprint(sessionID)},
+	)
+	EndReadingPositionSessionHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("end session status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if err := appDB.QueryRow(`SELECT active_seconds FROM reading_session WHERE id = ?`, sessionID).Scan(&activeSeconds); err != nil {
+		t.Fatalf("load ended active seconds: %v", err)
+	}
+	if activeSeconds != 60 {
+		t.Fatalf("ended active seconds = %d, want 60", activeSeconds)
+	}
+
+	response := updateSessionActivity(t, sessionID, 75)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("ended activity update status = %d, want 409", response.Code)
 	}
 }
 

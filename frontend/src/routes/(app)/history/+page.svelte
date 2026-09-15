@@ -50,9 +50,9 @@
 		return new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 	}
 	
-	function formatDuration(start: number, end: number | null): string {
-		if (!end) return 'In progress';
-		const seconds = end - start;
+	function formatSessionDuration(item: any): string {
+		if (!item.activity_tracked) return 'Legacy (untracked)';
+		const seconds = Math.max(0, Number(item.active_seconds) || 0);
 		if (seconds < 60) return `${seconds}s`;
 		const minutes = Math.floor(seconds / 60);
 		if (minutes < 60) return `${minutes}m`;
@@ -130,7 +130,7 @@
 											</span>
 											<span class="text-[var(--color-surface-600)]">·</span>
 											<span class="text-xs text-[var(--color-primary-400)]">
-												{formatDuration(item.started_at, item.ended_at)}
+														{formatSessionDuration(item)}{item.activity_tracked ? ' active' : ''}
 											</span>
 											<span class="px-2 py-0.5 text-[10px] rounded-full bg-[var(--color-primary-500)]/20 text-[var(--color-primary-300)]">
 												{item.reader_type === 'speed' ? 'Speed Reader' : item.reader_type === 'epub' || item.reader_type === 'normal' ? 'Normal Reader' : item.reader_type}

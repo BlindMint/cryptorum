@@ -143,7 +143,9 @@
 			bookId: book.id,
 			file: activeFile,
 			channel: 'standard',
-			readerMode: 'audio'
+			readerMode: 'audio',
+			isActivityActive: () => isPlaying,
+			idleTimeoutMs: null
 		});
 		const position = await progressController.start();
 		savedProgress = readingPositionAsLegacy(position, 'audio');

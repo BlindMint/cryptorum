@@ -79,11 +79,13 @@ type CreateBookmarkRequest struct {
 
 // ReadingSession represents a reading session
 type ReadingSession struct {
-	ID         int64  `json:"id"`
-	BookID     int64  `json:"book_id"`
-	ReaderType string `json:"reader_type"`
-	StartedAt  int64  `json:"started_at"`
-	EndedAt    *int64 `json:"ended_at,omitempty"`
+	ID              int64  `json:"id"`
+	BookID          int64  `json:"book_id"`
+	ReaderType      string `json:"reader_type"`
+	StartedAt       int64  `json:"started_at"`
+	EndedAt         *int64 `json:"ended_at,omitempty"`
+	ActiveSeconds   int64  `json:"active_seconds"`
+	ActivityTracked bool   `json:"activity_tracked"`
 }
 
 func closeStaleReadingSessions(cutoff int64) (int64, error) {
@@ -93,7 +95,10 @@ func closeStaleReadingSessions(cutoff int64) (int64, error) {
 
 	result, err := appDB.Exec(`
 		UPDATE reading_session
-		SET ended_at = ?
+		SET ended_at = CASE
+			WHEN activity_tracked = 1 THEN COALESCE(last_active_at, started_at)
+			ELSE ?
+		END
 		WHERE ended_at IS NULL AND started_at <= ?
 	`, cutoff, cutoff)
 	if err != nil {
@@ -775,6 +780,7 @@ func GetReadingHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := appDB.Query(`
 		SELECT rs.id, rs.book_id, rs.started_at, rs.ended_at,
 		       COALESCE(rs.reader_type, 'normal') as reader_type,
+		       COALESCE(rs.active_seconds, 0), COALESCE(rs.activity_tracked, 0),
 		       COALESCE(bm.title, 'Unknown') as title,
 		       COALESCE(bm.cover_path, '') as cover_path,
 		       COALESCE(rp.percent, 0) as percent,
@@ -794,15 +800,17 @@ func GetReadingHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type HistoryItem struct {
-		SessionID  int64   `json:"session_id"`
-		BookID     int64   `json:"book_id"`
-		Title      string  `json:"title"`
-		CoverPath  string  `json:"cover_path"`
-		Percent    float64 `json:"percent"`
-		Status     string  `json:"status"`
-		ReaderType string  `json:"reader_type"`
-		StartedAt  int64   `json:"started_at"`
-		EndedAt    *int64  `json:"ended_at,omitempty"`
+		SessionID       int64   `json:"session_id"`
+		BookID          int64   `json:"book_id"`
+		Title           string  `json:"title"`
+		CoverPath       string  `json:"cover_path"`
+		Percent         float64 `json:"percent"`
+		Status          string  `json:"status"`
+		ReaderType      string  `json:"reader_type"`
+		StartedAt       int64   `json:"started_at"`
+		EndedAt         *int64  `json:"ended_at,omitempty"`
+		ActiveSeconds   int64   `json:"active_seconds"`
+		ActivityTracked bool    `json:"activity_tracked"`
 	}
 
 	history := []HistoryItem{}
@@ -814,6 +822,7 @@ func GetReadingHistoryHandler(w http.ResponseWriter, r *http.Request) {
 		var startedAt int64
 
 		if err := rows.Scan(&h.SessionID, &h.BookID, &startedAt, &endedAt, &readerType,
+			&h.ActiveSeconds, &h.ActivityTracked,
 			&h.Title, &coverPath, &percent, &status); err != nil {
 			continue
 		}
@@ -861,7 +870,8 @@ func GetBookSessionsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := appDB.Query(`
-		SELECT id, book_id, COALESCE(reader_type, 'normal'), started_at, ended_at
+		SELECT id, book_id, COALESCE(reader_type, 'normal'), started_at, ended_at,
+		       COALESCE(active_seconds, 0), COALESCE(activity_tracked, 0)
 		FROM reading_session
 		WHERE book_id = ? AND owner_user_id = ?
 		ORDER BY started_at DESC
@@ -880,7 +890,8 @@ func GetBookSessionsHandler(w http.ResponseWriter, r *http.Request) {
 		var startedAt int64
 		var readerType sql.NullString
 
-		if err := rows.Scan(&s.ID, &s.BookID, &readerType, &startedAt, &endedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.BookID, &readerType, &startedAt, &endedAt,
+			&s.ActiveSeconds, &s.ActivityTracked); err != nil {
 			continue
 		}
 
