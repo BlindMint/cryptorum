@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"cryptorum/internal/coverprefs"
+	"cryptorum/internal/filenameinfo"
 	"cryptorum/internal/seriesnum"
 )
 
@@ -1527,7 +1528,16 @@ func extractEbookMetaCover(filePath string) []byte {
 // extractFromFilename extracts metadata from filename patterns.
 // Default dash convention is "Title - Author".
 func extractFromFilename(filePath string) *BookMetadata {
-	return parseFilenameMetadata(filePath, true)
+	result := parseFilenameMetadata(filePath, true)
+	// Preserve the established series parser, then use the more conservative
+	// shared parser for ordinary title/author filenames.
+	if result.Series != "" {
+		return result
+	}
+	analysis := filenameinfo.Analyze(filePath)
+	result.Title = analysis.Title
+	result.Authors = append([]string{}, analysis.Authors...)
+	return result
 }
 
 // extractFromFilenameAuthorFirst is the historical "Author - Title" parser.
@@ -1657,7 +1667,9 @@ func splitTitleAndAuthor(name string) (string, string, bool) {
 // treated as user- or provider-updated and left unchanged.
 func FilenameOrderCorrection(path, title string, authors []string) (string, []string, bool, bool) {
 	legacy := extractFromFilenameAuthorFirst(path)
-	corrected := extractFromFilename(path)
+	// This migration compares the two historical dash conventions. Keep it
+	// isolated from the newer shared parser used by current imports.
+	corrected := parseFilenameMetadata(path, true)
 
 	updateTitle := false
 	newTitle := ""

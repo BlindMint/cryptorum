@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { appActivity } from '$lib/stores';
+	import { describeCron } from '$lib/utils/cron';
 
 	type BackupItem = {
 		name: string;
@@ -24,6 +25,7 @@
 	let savingBackupSettings = $state(false);
 	let creatingBackup = $state(false);
 	let backupsExpanded = $state(false);
+	let backupCronFeedback = $derived(describeCron(backupSettings.cron));
 
 	function formatTime(value: number) {
 		return new Intl.DateTimeFormat(undefined, {
@@ -77,6 +79,10 @@
 	}
 
 	async function saveBackupSettings() {
+		if (backupSettings.enabled && backupCronFeedback.error) {
+			backupError = backupCronFeedback.error;
+			return;
+		}
 		savingBackupSettings = true;
 		backupError = '';
 		try {
@@ -90,13 +96,14 @@
 				})
 			});
 			if (!res.ok) {
-				throw new Error('Failed to save backup settings');
+				const body = await res.json().catch(() => null);
+				throw new Error(body?.error || 'Failed to save backup settings');
 			}
 			const data = await res.json();
 			backupSettings = data;
 		} catch (error) {
 			console.error('Failed to save backup settings:', error);
-			backupError = 'Unable to save backup settings.';
+			backupError = error instanceof Error ? error.message : 'Unable to save backup settings.';
 		} finally {
 			savingBackupSettings = false;
 		}
@@ -212,8 +219,13 @@
 					type="text"
 					bind:value={backupSettings.cron}
 					placeholder="0 4 * * 1"
-					class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)]"
+					aria-invalid={backupCronFeedback.error ? 'true' : undefined}
+					aria-describedby="backup-cron-feedback"
+					class="w-full rounded-lg border bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] {backupCronFeedback.error ? 'border-red-400' : 'border-[var(--color-surface-border)]'}"
 				>
+				<p id="backup-cron-feedback" class="text-xs {backupCronFeedback.error ? 'text-red-300' : 'text-[var(--color-surface-text-muted)]'}">
+					{backupCronFeedback.error || backupCronFeedback.description || 'Times use the server time zone.'}
+				</p>
 			</label>
 			<label class="flex min-h-[4.25rem] items-center justify-between gap-3">
 				<span class="text-sm font-medium text-[var(--color-surface-text)]">Automatic Backups</span>
@@ -235,7 +247,7 @@
 			</div>
 			<button
 				onclick={saveBackupSettings}
-				disabled={savingBackupSettings}
+				disabled={savingBackupSettings || (backupSettings.enabled && !!backupCronFeedback.error)}
 				class="accent-action rounded-lg px-4 py-2 text-sm font-medium transition-colors"
 			>
 				{savingBackupSettings ? 'Saving...' : 'Save Backup Settings'}

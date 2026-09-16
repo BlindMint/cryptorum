@@ -17,6 +17,7 @@ import (
 
 	"cryptorum/internal/coverprefs"
 	"cryptorum/internal/covers"
+	"cryptorum/internal/filenameinfo"
 	"cryptorum/internal/metadata"
 	"cryptorum/internal/metaprotection"
 )
@@ -142,9 +143,9 @@ func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []stri
 			record.LastModified == file.ModTimeUnix &&
 			record.MissingAt == 0 &&
 			record.HashAlgorithm == fullFileHashAlgorithm {
-			if shouldUseFilenameTitle(record.Title) {
-				if err := s.saveFilenameFallbackTitle(record.BookID, file.Path, ownerUserID); err != nil {
-					slog.Debug("Skipped filename title fallback", "path", file.Path, "error", err)
+			if shouldUseFilenameMetadata(record.Title, record.AuthorsRaw) {
+				if err := s.saveFilenameFallbackMetadataIfWeak(record.BookID, file.Path, ownerUserID); err != nil {
+					slog.Debug("Skipped filename metadata fallback", "path", file.Path, "error", err)
 				}
 			}
 			progress.ScannedFiles++
@@ -261,6 +262,7 @@ type existingFileRecord struct {
 	LastModified  int64
 	MissingAt     int64
 	Title         string
+	AuthorsRaw    string
 }
 
 func collectProcessableFiles(paths []string, shouldCancel ScanCancelFunc) ([]fileInventoryItem, error) {
@@ -313,7 +315,7 @@ func (s *Scanner) loadLibraryFileInventory(libraryID int64) (map[string]existing
 	rows, err := s.db.Query(`
 		SELECT bf.id, bf.book_id, bf.path, bf.size, bf.hash, COALESCE(bf.hash_algorithm, ''),
 		       bf.last_modified, COALESCE(bf.missing_at, 0),
-		       COALESCE(bm.title, '')
+		       COALESCE(bm.title, ''), COALESCE(bm.authors, '[]')
 		FROM book_file bf
 		JOIN book b ON b.id = bf.book_id
 		LEFT JOIN book_metadata bm ON bm.book_id = b.id
@@ -337,6 +339,7 @@ func (s *Scanner) loadLibraryFileInventory(libraryID int64) (map[string]existing
 			&record.LastModified,
 			&record.MissingAt,
 			&record.Title,
+			&record.AuthorsRaw,
 		); err != nil {
 			continue
 		}
@@ -394,7 +397,14 @@ func (s *Scanner) RefreshMissingMetadata(limit int) (int, error) {
 		       COALESCE(l.metadata_protection_enabled, 0) = 0
 		       AND (
 		           (
-		               (bm.title IS NULL OR bm.title = '' OR LOWER(TRIM(bm.title)) = 'untitled')
+		               (
+		                   bm.title IS NULL OR bm.title = ''
+		                   OR LOWER(TRIM(bm.title)) IN ('untitled', 'unknown', 'book', 'document', 'test', 'upload')
+		                   OR LOWER(TRIM(bm.title)) LIKE '%.pdf'
+		                   OR LOWER(TRIM(bm.title)) LIKE '%.epub'
+		                   OR LOWER(TRIM(bm.title)) LIKE '%.doc'
+		                   OR LOWER(TRIM(bm.title)) LIKE '%.docx'
+		               )
 		               AND NOT EXISTS (
 		                   SELECT 1 FROM json_each(COALESCE(bm.locked_fields, '[]'))
 		                   WHERE value = 'title'
@@ -577,8 +587,8 @@ func (s *Scanner) processFileWithInfo(
 				slog.Debug("Skipped metadata repair", "path", file.Path, "error", repairErr)
 			}
 		}
-		if repairErr := s.saveFilenameFallbackTitleIfWeak(existingBookID, file.Path, ownerUserID); repairErr != nil {
-			slog.Debug("Skipped filename title fallback", "path", file.Path, "error", repairErr)
+		if repairErr := s.saveFilenameFallbackMetadataIfWeak(existingBookID, file.Path, ownerUserID); repairErr != nil {
+			slog.Debug("Skipped filename metadata fallback", "path", file.Path, "error", repairErr)
 		}
 		return processFileResult{Status: status}, nil
 	}
@@ -811,8 +821,16 @@ func repairsExtractedMetadata(ext string) bool {
 }
 
 func metadataWithFilenameTitleFallback(meta *metadata.BookMetadata, path string) *metadata.BookMetadata {
+	analysis := filenameinfo.Analyze(path)
+	candidateTitle := analysis.Title
+	candidateAuthors := analysis.Authors
+	legacy := metadata.ExtractFilename(path)
+	if legacy.Series != "" {
+		candidateTitle = legacy.Title
+		candidateAuthors = legacy.Authors
+	}
 	if meta == nil {
-		meta = metadata.ExtractFilename(path)
+		meta = &metadata.BookMetadata{Source: "filename"}
 	}
 	if meta.Authors == nil {
 		meta.Authors = []string{}
@@ -820,49 +838,71 @@ func metadataWithFilenameTitleFallback(meta *metadata.BookMetadata, path string)
 	if meta.Genres == nil {
 		meta.Genres = []string{}
 	}
-	if shouldUseFilenameTitle(meta.Title) {
-		meta.Title = filenameFallbackTitle(path)
+	authorsWeak := filenameinfo.SuspiciousAuthors(meta.Authors, true) ||
+		(len(meta.Authors) == 1 && strings.EqualFold(strings.TrimSpace(meta.Authors[0]), strings.TrimSpace(meta.Title)))
+	titleIncludesAuthor := authorsWeak && analysis.Pattern != "filename title" &&
+		strings.EqualFold(strings.TrimSpace(meta.Title), filenameinfo.Stem(path))
+	if analysis.Confidence != "ambiguous" {
+		if (filenameinfo.SuspiciousTitle(meta.Title) || titleIncludesAuthor) && candidateTitle != "" {
+			meta.Title = candidateTitle
+		}
+		if authorsWeak && len(candidateAuthors) > 0 {
+			meta.Authors = append([]string{}, candidateAuthors...)
+		}
+	} else if meta.Source == "filename" {
+		// Keep the usable title, but do not automatically store an ambiguous author list.
+		meta.Title = analysis.Title
+		meta.Authors = []string{}
 	}
 	return meta
 }
 
-func shouldUseFilenameTitle(title string) bool {
-	title = strings.TrimSpace(title)
-	return title == "" || strings.EqualFold(title, "Untitled")
+func shouldUseFilenameMetadata(title, authorsRaw string) bool {
+	var authors []string
+	valid := json.Unmarshal([]byte(authorsRaw), &authors) == nil
+	return filenameinfo.SuspiciousTitle(title) || filenameinfo.SuspiciousAuthors(authors, valid) ||
+		(len(authors) == 1 && strings.EqualFold(strings.TrimSpace(authors[0]), strings.TrimSpace(title)))
 }
 
-func filenameFallbackTitle(path string) string {
-	generated := metadata.ExtractFilename(path)
-	title := strings.TrimSpace(generated.Title)
-	if title != "" {
-		return title
-	}
-	return strings.TrimSpace(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
-}
-
-func (s *Scanner) saveFilenameFallbackTitleIfWeak(bookID int64, path string, ownerUserID int64) error {
-	var title string
-	err := s.db.QueryRow("SELECT COALESCE(title, '') FROM book_metadata WHERE book_id = ?", bookID).Scan(&title)
+func (s *Scanner) saveFilenameFallbackMetadataIfWeak(bookID int64, path string, ownerUserID int64) error {
+	var title, authorsRaw, lockedRaw string
+	err := s.db.QueryRow(`
+		SELECT COALESCE(title, ''), COALESCE(authors, '[]'), COALESCE(locked_fields, '[]')
+		FROM book_metadata WHERE book_id = ?
+	`, bookID).Scan(&title, &authorsRaw, &lockedRaw)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if err == nil && !shouldUseFilenameTitle(title) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
-	return s.saveFilenameFallbackTitle(bookID, path, ownerUserID)
-}
-
-func (s *Scanner) saveFilenameFallbackTitle(bookID int64, path string, ownerUserID int64) error {
-	title := filenameFallbackTitle(path)
-	if title == "" {
+	var authors []string
+	validAuthors := json.Unmarshal([]byte(authorsRaw), &authors) == nil
+	authorsWeak := filenameinfo.SuspiciousAuthors(authors, validAuthors) ||
+		(len(authors) == 1 && strings.EqualFold(strings.TrimSpace(authors[0]), strings.TrimSpace(title)))
+	titleWeak := filenameinfo.SuspiciousTitle(title)
+	analysis := filenameinfo.Analyze(path)
+	if analysis.Confidence == "ambiguous" {
 		return nil
 	}
-	return s.saveMetadataWithSource(bookID, &metadata.BookMetadata{
-		Title:   title,
-		Authors: []string{},
-		Genres:  []string{},
-		Source:  "filename",
-	}, ownerUserID, "filename_fallback")
+	titleIncludesAuthor := authorsWeak && analysis.Pattern != "filename title" &&
+		strings.EqualFold(strings.TrimSpace(title), filenameinfo.Stem(path))
+	locked := metaprotection.ParseLocked(lockedRaw)
+	titleEdited, authorsEdited, err := s.filenameFieldsEditedByUser(bookID)
+	if err != nil {
+		return err
+	}
+	incoming := &metadata.BookMetadata{Authors: []string{}, Genres: []string{}, Source: "filename"}
+	if (titleWeak || titleIncludesAuthor) && !locked[metaprotection.FieldTitle] && !titleEdited {
+		incoming.Title = analysis.Title
+	}
+	if authorsWeak && len(analysis.Authors) > 0 && !locked[metaprotection.FieldAuthors] && !authorsEdited {
+		incoming.Authors = append([]string{}, analysis.Authors...)
+	}
+	if incoming.Title == "" && len(incoming.Authors) == 0 {
+		return nil
+	}
+	return s.saveMetadataWithSource(bookID, incoming, ownerUserID, "filename_fallback")
 }
 
 // saveMetadata upserts book metadata and saves the cover image to disk
@@ -1103,6 +1143,7 @@ func (s *Scanner) repairWeakExtractedMetadata(bookID int64, path string, ownerUs
 		return err
 	}
 
+	extracted = metadataWithFilenameTitleFallback(extracted, path)
 	if err := s.saveMetadataWithSource(bookID, extracted, ownerUserID, "scan_repair"); err != nil {
 		return err
 	}

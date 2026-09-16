@@ -50,6 +50,62 @@ func TestMetadataWithFilenameTitleFallback(t *testing.T) {
 	}
 }
 
+func TestMetadataWithFilenameFallbackUsesQualityAndConfidence(t *testing.T) {
+	tests := []struct {
+		name        string
+		path        string
+		meta        *metadata.BookMetadata
+		wantTitle   string
+		wantAuthors []string
+	}{
+		{
+			name:      "replaces machine generated embedded metadata",
+			path:      "/books/Mastering Data Science - Daniel Huston.epub",
+			meta:      &metadata.BookMetadata{Title: "B0C46X8YKT", Authors: []string{"Unknown"}},
+			wantTitle: "Mastering Data Science", wantAuthors: []string{"Daniel Huston"},
+		},
+		{
+			name:      "cleans filename-shaped embedded title",
+			path:      "/books/Black Hat Python by Justin Seitz.pdf",
+			meta:      &metadata.BookMetadata{Title: "Black Hat Python by Justin Seitz", Authors: []string{}},
+			wantTitle: "Black Hat Python", wantAuthors: []string{"Justin Seitz"},
+		},
+		{
+			name:      "preserves useful embedded metadata",
+			path:      "/books/Filename Title - Filename Author.epub",
+			meta:      &metadata.BookMetadata{Title: "Published Title", Authors: []string{"Published Author"}},
+			wantTitle: "Published Title", wantAuthors: []string{"Published Author"},
+		},
+		{
+			name:      "withholds ambiguous filename authors",
+			path:      "/books/Particle Physics - Brian Martin, Graham Shaw.pdf",
+			meta:      &metadata.BookMetadata{Title: "Unknown", Authors: []string{}, Source: "filename"},
+			wantTitle: "Particle Physics", wantAuthors: []string{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := metadataWithFilenameTitleFallback(test.meta, test.path)
+			if got.Title != test.wantTitle || !sameMetadataAuthors(got.Authors, test.wantAuthors) {
+				t.Fatalf("metadata = title %q authors %#v, want title %q authors %#v", got.Title, got.Authors, test.wantTitle, test.wantAuthors)
+			}
+		})
+	}
+}
+
+func sameMetadataAuthors(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestScanRelinksMovedBookAcrossLibraries(t *testing.T) {
 	db := setupScannerTestDB(t)
 	scanner := New(db.DB, t.TempDir(), filepath.Join(t.TempDir(), "covers"))
@@ -273,6 +329,59 @@ func TestAutomaticMetadataMergePreservesLockedFieldsAndCustomCover(t *testing.T)
 	}
 	if revisions != 1 {
 		t.Fatalf("revisions = %d, want 1", revisions)
+	}
+}
+
+func TestFilenameFallbackRepairsWeakMetadataAndPreservesManualEdits(t *testing.T) {
+	db := setupScannerTestDB(t)
+	scanner := New(db.DB, t.TempDir(), filepath.Join(t.TempDir(), "covers"))
+	for _, id := range []int{60, 61} {
+		mustScannerExec(t, db.DB, `
+			INSERT INTO book (id, library_id, added_at, last_scanned, owner_user_id)
+			VALUES (?, 1, 100, 100, 1)
+		`, id)
+		mustScannerExec(t, db.DB, `
+			INSERT INTO book_file (id, book_id, path, format, size, hash, hash_algorithm, last_modified, owner_user_id)
+			VALUES (?, ?, ?, 'pdf', 10, ?, 'sha256-full-v1', 100, 1)
+		`, id, id, "/books/Secret History The Story of Cryptology (Craig P. Bauer).pdf", "hash")
+		mustScannerExec(t, db.DB, `
+			INSERT INTO book_metadata (id, book_id, title, authors, genres, tags, locked_fields, owner_user_id)
+			VALUES (?, ?, '509564106', '["Unknown"]', '[]', '[]', '[]', 1)
+		`, id, id)
+	}
+	mustScannerExec(t, db.DB, `
+		INSERT INTO book_metadata_revision (
+			book_id, changed_at, changed_by_user_id, change_source, changed_fields, previous_metadata_json
+		) VALUES (61, 100, 1, 'manual_edit', '["title","authors"]', '{}')
+	`)
+
+	path := "/books/Secret History The Story of Cryptology (Craig P. Bauer).pdf"
+	if err := scanner.saveFilenameFallbackMetadataIfWeak(60, path, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := scanner.saveFilenameFallbackMetadataIfWeak(61, path, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	var title, authors string
+	if err := db.QueryRow(`SELECT title, authors FROM book_metadata WHERE book_id = 60`).Scan(&title, &authors); err != nil {
+		t.Fatal(err)
+	}
+	if title != "Secret History The Story of Cryptology" || authors != `["Craig P. Bauer"]` {
+		t.Fatalf("repaired title=%q authors=%s", title, authors)
+	}
+	var source string
+	if err := db.QueryRow(`SELECT change_source FROM book_metadata_revision WHERE book_id = 60`).Scan(&source); err != nil {
+		t.Fatal(err)
+	}
+	if source != "filename_fallback" {
+		t.Fatalf("revision source=%q", source)
+	}
+	if err := db.QueryRow(`SELECT title, authors FROM book_metadata WHERE book_id = 61`).Scan(&title, &authors); err != nil {
+		t.Fatal(err)
+	}
+	if title != "509564106" || authors != `["Unknown"]` {
+		t.Fatalf("manual metadata changed: title=%q authors=%s", title, authors)
 	}
 }
 

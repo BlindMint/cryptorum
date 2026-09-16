@@ -64,6 +64,16 @@ func updateBackupSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	cronValue := strings.TrimSpace(req.Cron)
 	enabled := req.Enabled
 	keepLast := req.KeepLast
+	if enabled {
+		if cronValue == "" {
+			errorResponse(w, http.StatusBadRequest, "A cron schedule is required when automatic backups are enabled")
+			return
+		}
+		if err := validateBackupCron(cronValue); err != nil {
+			errorResponse(w, http.StatusBadRequest, fmt.Sprintf("Invalid cron schedule: %v", err))
+			return
+		}
+	}
 	if keepLast <= 0 {
 		keepLast = appConfig.Tasks.DatabaseBackup.KeepLast
 		if keepLast <= 0 {
@@ -89,6 +99,14 @@ func updateBackupSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 
 	jsonResponse(w, http.StatusOK, currentBackupSettings())
+}
+
+func validateBackupCron(spec string) error {
+	if len(strings.Fields(spec)) != 5 {
+		return fmt.Errorf("expected five fields: minute hour day month weekday")
+	}
+	_, err := cron.ParseStandard(spec)
+	return err
 }
 
 func startDatabaseBackupSchedule() {
