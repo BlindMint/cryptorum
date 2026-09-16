@@ -24,6 +24,8 @@
 	import ShelfPickerRow from '$lib/components/ShelfPickerRow.svelte';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
 	import { combineSelectionError } from '$lib/utils/combine-books';
+	import BulkAddToQueueButton from '$lib/components/BulkAddToQueueButton.svelte';
+	import { trackBulkActionBar } from '$lib/stores/bulkActionBar';
 
 	type FilterMode = 'AND' | 'OR' | 'NOT';
 	type SearchResponse = {
@@ -1405,7 +1407,7 @@
 </div>
 
 {#if selectedBooks.size > 0}
-	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up">
+	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up" use:trackBulkActionBar>
 		<div class="bg-[var(--color-surface-overlay)] backdrop-blur-lg border-t border-[var(--color-surface-border)] shadow-2xl">
 			<div class="max-w-7xl mx-auto px-4 py-3">
 				<div class="flex items-center justify-between gap-4 flex-wrap">
@@ -1428,7 +1430,8 @@
 							</button>
 						</div>
 					</div>
-					<div class="flex items-center gap-2">
+					<div class="flex flex-wrap items-center gap-2">
+						<BulkAddToQueueButton bookIds={Array.from(selectedBooks)} disabled={actionInProgress} />
 						<div class="relative">
 							<button
 								onclick={() => showMetadataMenu = !showMetadataMenu}

@@ -25,6 +25,8 @@
 	import ShelfPickerRow from '$lib/components/ShelfPickerRow.svelte';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
 	import LibraryModal from '$lib/components/LibraryModal.svelte';
+	import BulkAddToQueueButton from '$lib/components/BulkAddToQueueButton.svelte';
+	import { trackBulkActionBar } from '$lib/stores/bulkActionBar';
 	import { combineSelectionError } from '$lib/utils/combine-books';
 
 		type FilterMode = 'AND' | 'OR' | 'NOT';
@@ -1933,11 +1935,11 @@
 
  <!-- Bulk Actions Panel -->
  {#if showBulkPanel}
-	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up">
+	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up" use:trackBulkActionBar>
 		<div class="bg-[var(--color-surface-overlay)] backdrop-blur-lg border-t border-[var(--color-surface-border)] shadow-2xl">
 			<div class="max-w-7xl mx-auto px-4 py-3">
-				<div class="flex items-center justify-between gap-4">
-					<div class="flex items-center space-x-4">
+				<div class="flex flex-wrap items-center justify-between gap-4">
+					<div class="flex flex-wrap items-center gap-4">
 						<span class="text-[var(--color-surface-text)] font-medium">
 							{getSelectionCount()} selected
 							{#if selectAllMode === 'filtered'}
@@ -1946,7 +1948,7 @@
 								<span class="text-xs text-[var(--color-surface-text-muted)]">({getVisibleSelectedCount()} visible / {getHiddenSelectedCount()} hidden by filters)</span>
 							{/if}
 						</span>
-						<div class="flex items-center space-x-2">
+						<div class="flex flex-wrap items-center gap-2">
 							<button
 								onclick={selectAllPage}
 								class="px-3 py-1.5 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
@@ -1969,7 +1971,12 @@
 							</button>
 						</div>
 					</div>
-					<div class="flex items-center space-x-2">
+					<div class="flex flex-wrap items-center gap-2">
+						<BulkAddToQueueButton
+							bookIds={Array.from(selectedBooks)}
+							disabled={actionInProgress || selectAllMode === 'filtered'}
+							title={selectAllMode === 'filtered' ? 'Deselect “all filtered” and select specific books to add audio to the queue' : 'Add audio from this selection to the queue'}
+						/>
 						<div class="relative">
 							<button
 								onclick={() => showMetadataMenu = !showMetadataMenu}

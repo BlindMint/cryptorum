@@ -28,6 +28,8 @@
 	} from '$lib/utils/metadata-edit-session';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
+	import BulkAddToQueueButton from '$lib/components/BulkAddToQueueButton.svelte';
+	import { trackBulkActionBar } from '$lib/stores/bulkActionBar';
 
 	let shelf = $state<any>(null);
 	let books = $state<any[]>([]);
@@ -973,7 +975,7 @@
 </div>
 
 {#if selectedBooks.size > 0}
-	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up">
+	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up" use:trackBulkActionBar>
 		<div class="bg-[var(--color-surface-overlay)] backdrop-blur-lg border-t border-[var(--color-surface-border)] shadow-2xl">
 			<div class="max-w-7xl mx-auto px-4 py-3">
 				<div class="flex items-center justify-between gap-4 flex-wrap">
@@ -994,7 +996,8 @@
 							</button>
 						</div>
 					</div>
-					<div class="flex items-center gap-2">
+					<div class="flex flex-wrap items-center gap-2">
+						<BulkAddToQueueButton bookIds={Array.from(selectedBooks)} disabled={actionInProgress} />
 						<div class="relative">
 							<button
 								onclick={() => showMetadataMenu = !showMetadataMenu}

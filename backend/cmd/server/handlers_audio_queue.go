@@ -113,6 +113,127 @@ type addAudioQueueItemRequest struct {
 	MakeCurrent bool   `json:"make_current"`
 }
 
+type addAudioQueueItemsBulkRequest struct {
+	BookIDs []int64 `json:"book_ids"`
+}
+
+type audioQueueBulkResponse struct {
+	audioQueueResponse
+	AddedCount   int `json:"added_count"`
+	SkippedCount int `json:"skipped_count"`
+}
+
+func AddAudioQueueItemsBulkHandler(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := audioQueueOwnerID(r)
+	if !ok {
+		errorResponse(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	var request addAudioQueueItemsBulkRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)).Decode(&request); err != nil || len(request.BookIDs) == 0 {
+		errorResponse(w, http.StatusBadRequest, "Select at least one book")
+		return
+	}
+	if len(request.BookIDs) > 1000 {
+		errorResponse(w, http.StatusBadRequest, "Audio queue updates are limited to 1000 books at a time")
+		return
+	}
+
+	tx, err := appDB.Begin()
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+		return
+	}
+	defer tx.Rollback()
+
+	var nextPosition int
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(position), -1) + 1 FROM audio_queue_item WHERE owner_user_id = ?`, ownerID).Scan(&nextPosition); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+		return
+	}
+	addedCount := 0
+	skippedCount := 0
+	firstQueueItemID := int64(0)
+	seen := make(map[int64]bool, len(request.BookIDs))
+	for _, bookID := range request.BookIDs {
+		if bookID <= 0 || seen[bookID] {
+			skippedCount++
+			continue
+		}
+		seen[bookID] = true
+		var fileID int64
+		err := tx.QueryRow(`
+			SELECT bf.id
+			FROM book_file bf JOIN book b ON b.id = bf.book_id
+			WHERE b.id = ? AND b.owner_user_id = ? AND bf.missing_at IS NULL
+			  AND LOWER(bf.format) IN ('mp3', 'm4a', 'm4b', 'flac', 'ogg', 'wav')
+			ORDER BY bf.id LIMIT 1`, bookID, ownerID).Scan(&fileID)
+		if errors.Is(err, sql.ErrNoRows) {
+			skippedCount++
+			continue
+		}
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+			return
+		}
+
+		var itemID int64
+		err = tx.QueryRow(`SELECT id FROM audio_queue_item WHERE owner_user_id = ? AND file_id = ?`, ownerID, fileID).Scan(&itemID)
+		if errors.Is(err, sql.ErrNoRows) {
+			result, execErr := tx.Exec(`INSERT INTO audio_queue_item (owner_user_id, book_id, file_id, position, added_at) VALUES (?, ?, ?, ?, ?)`, ownerID, bookID, fileID, nextPosition, time.Now().Unix())
+			if execErr != nil {
+				errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+				return
+			}
+			itemID, err = result.LastInsertId()
+			if err != nil {
+				errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+				return
+			}
+			nextPosition++
+			addedCount++
+		} else if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+			return
+		} else {
+			skippedCount++
+		}
+		if firstQueueItemID == 0 {
+			firstQueueItemID = itemID
+		}
+	}
+
+	var currentID sql.NullInt64
+	stateErr := tx.QueryRow(`SELECT current_item_id FROM audio_queue_state WHERE owner_user_id = ?`, ownerID).Scan(&currentID)
+	if stateErr != nil && !errors.Is(stateErr, sql.ErrNoRows) {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+		return
+	}
+	if !currentID.Valid && firstQueueItemID != 0 {
+		_, err = tx.Exec(`INSERT INTO audio_queue_state (owner_user_id, current_item_id, updated_at) VALUES (?, ?, ?)
+			ON CONFLICT(owner_user_id) DO UPDATE SET current_item_id = excluded.current_item_id, updated_at = excluded.updated_at`, ownerID, firstQueueItemID, time.Now().Unix())
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+		return
+	}
+	queue, err := loadAudioQueue(ownerID)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to load audio queue")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(audioQueueBulkResponse{
+		audioQueueResponse: queue,
+		AddedCount:         addedCount,
+		SkippedCount:       skippedCount,
+	})
+}
+
 func AddAudioQueueItemHandler(w http.ResponseWriter, r *http.Request) {
 	ownerID, ok := audioQueueOwnerID(r)
 	if !ok {

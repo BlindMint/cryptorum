@@ -429,6 +429,7 @@ func initRoutes(r *chi.Mux) {
 		r.Route("/audio/queue", func(r chi.Router) {
 			r.Get("/", GetAudioQueueHandler)
 			r.Post("/items", AddAudioQueueItemHandler)
+			r.Post("/items/bulk", AddAudioQueueItemsBulkHandler)
 			r.Put("/current", SetAudioQueueCurrentHandler)
 			r.Put("/reorder", ReorderAudioQueueHandler)
 			r.Delete("/items/{itemID}", DeleteAudioQueueItemHandler)

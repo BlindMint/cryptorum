@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { audioPlayer } from '$lib/stores/audioPlayer';
 	import { readerSettings } from '$lib/stores/readerSettings';
+	import { bulkActionBarHeight } from '$lib/stores/bulkActionBar';
 
 	let { readerMode = false } = $props<{ readerMode?: boolean }>();
 	let audioElement: HTMLAudioElement;
@@ -52,8 +53,8 @@
 	onended={() => audioPlayer.handleEnded()}
 ></audio>
 
-{#if $audioPlayer.initialized && $audioPlayer.expanded && !current}
-	<section class="fixed bottom-3 left-1/2 z-[75] w-[min(94vw,36rem)] -translate-x-1/2 rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 shadow-2xl backdrop-blur" aria-label="Audio player">
+{#if $audioPlayer.initialized && $audioPlayer.expanded && !current && !$audioPlayer.dismissed}
+	<section class="audio-player-bottom fixed left-1/2 z-[75] w-[min(94vw,36rem)] -translate-x-1/2 rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${$bulkActionBarHeight}px)`} aria-label="Audio player">
 		<div class="flex items-start justify-between gap-4">
 			<div class="flex min-w-0 items-start gap-3">
 				<div class="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)]">
@@ -64,12 +65,12 @@
 					<p class="mt-1 text-sm leading-5 {$audioPlayer.error ? 'text-red-400' : 'text-[var(--color-surface-text-muted)]'}">{$audioPlayer.error || 'Open an audio book and choose Play Audio or Add to queue.'}</p>
 				</div>
 			</div>
-			<button type="button" class="flex-none rounded-md p-2 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" aria-label="Close audio player" onclick={() => audioPlayer.minimize()}>
+			<button type="button" class="flex-none rounded-md p-2 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" aria-label="Close audio player" onclick={() => audioPlayer.dismiss()}>
 				<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
 			</button>
 		</div>
 	</section>
-{:else if current}
+{:else if current && !$audioPlayer.dismissed}
 	{#if !$audioPlayer.expanded}
 		{#if readerMode}
 			<button
@@ -84,7 +85,7 @@
 				<span class="text-[10px] font-semibold">{Math.round(progressPercent)}%</span>
 			</button>
 		{:else}
-			<div class="fixed bottom-3 left-1/2 z-[75] flex w-[min(94vw,42rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2 shadow-2xl backdrop-blur">
+			<div class="audio-player-bottom fixed left-1/2 z-[75] flex w-[min(94vw,42rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2 shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${$bulkActionBarHeight}px)`}>
 				<button type="button" class="rounded-full bg-[var(--color-primary-500)] p-2 text-white" aria-label={$audioPlayer.isPlaying ? 'Pause' : 'Play'} onclick={() => void audioPlayer.togglePlay()}>
 					{#if $audioPlayer.isPlaying}
 						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
@@ -100,10 +101,13 @@
 				<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]" aria-label="Expand player" onclick={() => audioPlayer.expand()}>
 					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 14 5-5 5 5"/></svg>
 				</button>
+				<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]" aria-label="Close audio player" onclick={() => audioPlayer.dismiss()}>
+					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+				</button>
 			</div>
 		{/if}
 	{:else}
-		<section class="fixed bottom-3 left-1/2 z-[75] w-[min(94vw,64rem)] -translate-x-1/2 overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur" aria-label="Audio player">
+		<section class="audio-player-bottom fixed left-1/2 z-[75] w-[min(94vw,64rem)] -translate-x-1/2 overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${$bulkActionBarHeight}px)`} aria-label="Audio player">
 			<div class="flex items-start gap-3 p-3 sm:items-center sm:gap-4 sm:p-4">
 				<img src={`/api/covers/${current.book_id}/thumb?size=sm`} alt="" class="h-14 w-11 flex-none rounded-md bg-[var(--color-surface-700)] object-cover sm:h-20 sm:w-14" />
 				<div class="min-w-0 flex-1">
@@ -118,6 +122,9 @@
 							</button>
 							<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" title="Minimize" aria-label="Minimize audio player" onclick={() => audioPlayer.minimize()}>
 								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg>
+							</button>
+							<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" title="Close" aria-label="Close audio player" onclick={() => audioPlayer.dismiss()}>
+								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
 							</button>
 						</div>
 					</div>
@@ -192,6 +199,7 @@
 	.player-control:disabled, .queue-control:disabled { opacity: 0.35; }
 	.queue-control { border-radius: 0.375rem; padding: 0.25rem 0.45rem; color: var(--color-surface-text-muted); }
 	.audio-seek { accent-color: var(--color-primary-500); }
+	.audio-player-bottom { transition: bottom 180ms ease; }
 	.audio-reader-tab.is-playing .music-note { animation: audio-pulse 1.2s ease-in-out infinite; }
 	@keyframes audio-pulse { 50% { transform: translateY(-2px) rotate(6deg); } }
 	@media (prefers-reduced-motion: reduce) { .audio-reader-tab.is-playing .music-note { animation: none; } }

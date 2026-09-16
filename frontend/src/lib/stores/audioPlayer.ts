@@ -28,6 +28,7 @@ export interface AudioPlayerState {
 	playbackSpeed: number;
 	expanded: boolean;
 	queueOpen: boolean;
+	dismissed: boolean;
 	initialized: boolean;
 	error: string;
 }
@@ -42,6 +43,7 @@ const initialState: AudioPlayerState = {
 	playbackSpeed: 1,
 	expanded: false,
 	queueOpen: false,
+	dismissed: false,
 	initialized: false,
 	error: ''
 };
@@ -245,10 +247,10 @@ function createAudioPlayerStore() {
 				body: JSON.stringify({ book_id: bookID, file_id: fileID, placement: get({ subscribe }).items.length ? 'next' : 'append', make_current: true })
 			});
 			applyQueue(response);
-			update((state) => ({ ...state, expanded: true }));
+			update((state) => ({ ...state, expanded: true, dismissed: false }));
 			await prepareCurrent(true);
 		} catch (error) {
-			update((state) => ({ ...state, error: error instanceof Error ? error.message : 'Unable to play audio', expanded: true }));
+			update((state) => ({ ...state, error: error instanceof Error ? error.message : 'Unable to play audio', expanded: true, dismissed: false }));
 		}
 	}
 
@@ -260,9 +262,28 @@ function createAudioPlayerStore() {
 				method: 'POST',
 				body: JSON.stringify({ book_id: bookID, file_id: fileID, placement, make_current: false })
 			}));
+			update((state) => ({ ...state, dismissed: false }));
 			if (!hadCurrent) await prepareCurrent(false);
 		} catch (error) {
 			update((state) => ({ ...state, error: error instanceof Error ? error.message : 'Unable to add audio to the queue' }));
+		}
+	}
+
+	async function addBooksToQueue(bookIDs: number[]) {
+		await initialize();
+		if (bookIDs.length === 0) return { addedCount: 0, skippedCount: 0, failed: false };
+		try {
+			const response = await requestQueue('/items/bulk', {
+				method: 'POST',
+				body: JSON.stringify({ book_ids: bookIDs })
+			}) as QueueResponse & { added_count?: number; skipped_count?: number };
+			applyQueue(response);
+			update((state) => ({ ...state, expanded: true, queueOpen: true, dismissed: false, error: '' }));
+			if (audio && !audio.getAttribute('src') && response.current_item_id) await prepareCurrent(false);
+			return { addedCount: response.added_count ?? 0, skippedCount: response.skipped_count ?? 0, failed: false };
+		} catch (error) {
+			update((state) => ({ ...state, error: error instanceof Error ? error.message : 'Unable to add selected audio', expanded: true, dismissed: false }));
+			return { addedCount: 0, skippedCount: bookIDs.length, failed: true };
 		}
 	}
 
@@ -363,7 +384,7 @@ function createAudioPlayerStore() {
 	}
 
 	function expand(queueOpen = false) {
-		update((state) => ({ ...state, expanded: true, queueOpen: queueOpen || state.queueOpen }));
+		update((state) => ({ ...state, expanded: true, queueOpen: queueOpen || state.queueOpen, dismissed: false }));
 	}
 
 	function minimize() {
@@ -371,7 +392,12 @@ function createAudioPlayerStore() {
 	}
 
 	function toggleQueue() {
-		update((state) => ({ ...state, expanded: true, queueOpen: !state.queueOpen }));
+		update((state) => ({ ...state, expanded: true, queueOpen: !state.queueOpen, dismissed: false }));
+	}
+
+	function dismiss() {
+		audio?.pause();
+		update((state) => ({ ...state, expanded: false, queueOpen: false, dismissed: true }));
 	}
 
 	return {
@@ -387,6 +413,7 @@ function createAudioPlayerStore() {
 		handleEnded: () => void handleEnded(),
 		playBook,
 		addToQueue,
+		addBooksToQueue,
 		setCurrent,
 		togglePlay,
 		seek,
@@ -400,6 +427,7 @@ function createAudioPlayerStore() {
 		expand,
 		minimize,
 		toggleQueue,
+		dismiss,
 		reset: () => set(initialState)
 	};
 }
