@@ -23,6 +23,7 @@
 	} from '$lib/utils/metadata-edit-session';
 	import { addMetadataSuggestionsFromPayload, refreshMetadataSuggestions } from '$lib/stores/metadataSuggestions';
 	import { getCoverThumbUrl } from '$lib/utils/covers';
+	import { getPreferredBookFormat } from '$lib/utils/book-formats';
 	import {
 		createPendingCover,
 		discardPendingCover,
@@ -47,6 +48,7 @@
 	let savedCoverSrc = $derived(book?.cover_path ? getCoverThumbUrl(book.id, 'large', book.cover_updated_on) : null);
 	let displayCoverSrc = $derived(pendingCoverDisplaySrc(pendingCover, savedCoverSrc));
 	let displayCoverIsCustom = $derived(pendingCoverIsCustom(pendingCover, book?.cover_source));
+	let coverFormat = $derived(book?.format || book?.resume_format || getPreferredBookFormat(files));
 	let showMetadataLookup = $state(false);
 	let showMetadataProtection = $state(false);
 	let editForm = $state<MetadataEditForm>(createMetadataEditForm(null));
@@ -498,7 +500,7 @@
 		coverPath={book.cover_path}
 		coverUpdatedOn={book.cover_updated_on}
 		previewSrc={displayCoverSrc}
-		format={book.format}
+		format={coverFormat}
 		title={book.title || 'book'}
 		onClose={() => showCoverUpload = false}
 		onSelected={stageSelectedCover}

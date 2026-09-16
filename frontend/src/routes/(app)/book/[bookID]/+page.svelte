@@ -500,7 +500,8 @@
 	const primaryReadFormat = $derived(getPrimaryReadFormat());
 	const primaryReadFile = $derived(getPrimaryReadableFile(files, book?.resume_file_id, book?.resume_format || primaryReadFormat));
 	const primarySpeedReadFormat = $derived(getPrimarySpeedReadFormat());
-	const isAudioItem = $derived(getReaderRouteKind(primaryReadFile?.format || primaryReadFormat || getPreferredBookFormat(files) || book?.format) === 'audio');
+	const coverFormat = $derived(primaryReadFile?.format || primaryReadFormat || getPreferredBookFormat(files) || book?.format || book?.resume_format);
+	const isAudioItem = $derived(getReaderRouteKind(coverFormat) === 'audio');
 	const primaryAudioQueued = $derived(!!primaryReadFile?.id && $audioPlayer.items.some((item) => item.file_id === Number(primaryReadFile.id)));
 
 	function formatSize(bytes: number): string {
@@ -1380,7 +1381,7 @@
 							<BookCoverFrame
 								src={displayCoverSrc}
 								alt={book.title}
-								format={book.format}
+								format={coverFormat}
 								mode="contain"
 								frameClass="aspect-[2/3] w-full"
 								imageClass="transition-transform duration-200 ease-out group-hover:scale-[1.02]"
@@ -2133,7 +2134,7 @@
 		coverPath={book.cover_path}
 		coverUpdatedOn={book.cover_updated_on}
 		previewSrc={displayCoverSrc}
-		format={book.format}
+		format={coverFormat}
 		title={book.title || 'book'}
 		onClose={() => showCoverUpload = false}
 		onSelected={stageSelectedCover}
@@ -2233,7 +2234,7 @@
 					<BookCoverFrame
 						src={pendingCover.previewUrl || (book.cover_path ? `/api/covers/${book.id}` : null)}
 						alt={book.title}
-						format={book.format}
+						format={coverFormat}
 						mode="contain"
 						frameClass="aspect-[2/3] w-full"
 						imageClass="object-contain p-2"

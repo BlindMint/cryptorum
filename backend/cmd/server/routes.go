@@ -1266,6 +1266,7 @@ type BookDetail struct {
 	SpeedReaderFormat   string   `json:"speed_reader_format,omitempty"`
 	ResumeFileID        int64    `json:"resume_file_id,omitempty"`
 	ResumeFormat        string   `json:"resume_format,omitempty"`
+	Format              string   `json:"format,omitempty"`
 	Opened              bool     `json:"opened"`
 	LibraryPaths        []string `json:"library_paths"`
 }
@@ -1308,6 +1309,11 @@ func fetchBookDetail(bookID int64, user *AppUser) (BookDetail, error) {
 		       COALESCE((SELECT speed_bf.format FROM book_file speed_bf WHERE speed_bf.id = rp.speed_file_id AND speed_bf.missing_at IS NULL), '') as speed_reader_format,
 		       COALESCE(rp.file_id, 0) as resume_file_id,
 		       COALESCE((SELECT resume_bf.format FROM book_file resume_bf WHERE resume_bf.id = rp.file_id AND resume_bf.missing_at IS NULL), '') as resume_format,
+		       COALESCE(
+		           (SELECT resume_bf.format FROM book_file resume_bf WHERE resume_bf.id = rp.file_id AND resume_bf.missing_at IS NULL),
+		           (SELECT available_bf.format FROM book_file available_bf WHERE available_bf.book_id = b.id AND available_bf.missing_at IS NULL ORDER BY available_bf.format, available_bf.id LIMIT 1),
+		           ''
+		       ) as format,
 		       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened
 			FROM book b
 			LEFT JOIN library l ON b.library_id = l.id
@@ -1320,7 +1326,7 @@ func fetchBookDetail(bookID int64, user *AppUser) (BookDetail, error) {
 		&book.SeriesNumberDisplay, &book.Publisher, &book.PubDate, &book.Description, &book.CoverPath, &book.CoverSource,
 		&book.CoverUpdatedOn, &lockedFieldsJSON, &book.ExtractedFromHash, &book.MetadataUpdatedAt,
 		&book.Rating, &book.Genres, &book.Tags, &book.ISBN, &book.ASIN, &book.Language, &book.PageCount, &book.ComicSpreadFallback,
-		&book.Status, &book.Percent, &book.SpeedReaderPercent, &book.SpeedReaderFileID, &book.SpeedReaderFormat, &book.ResumeFileID, &book.ResumeFormat, &opened,
+		&book.Status, &book.Percent, &book.SpeedReaderPercent, &book.SpeedReaderFileID, &book.SpeedReaderFormat, &book.ResumeFileID, &book.ResumeFormat, &book.Format, &opened,
 	)
 
 	if err != nil {
