@@ -1079,7 +1079,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				</div>
 				<div class="p-5">
 				<!-- Auto Mode Toggle -->
-				<label for="glowAutoMode" class="mb-4 flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3 {themeState.appearance.glowEnabled ? '' : 'opacity-50'}">
+				<label for="glowAutoMode" class="mb-4 settings-toggle-row settings-toggle-row-description {themeState.appearance.glowEnabled ? '' : 'opacity-50'}">
 					<span>
 						<span class="block text-sm font-medium text-[var(--color-surface-text)]">Automatic</span>
 						<span class="mt-0.5 block text-xs leading-5 text-[var(--color-surface-text-muted)]">Match the glow to the primary color.</span>
@@ -1292,18 +1292,18 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				
 				<div class="p-5 space-y-5">
 					<!-- Appearance -->
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
+					<div class="settings-subsection">
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4 flex items-center">
 							<svg class="w-4 h-4 mr-2 text-[var(--color-surface-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path>
 							</svg>
-							Appearance
+							Theme
 						</h3>
-						<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+						<div class="min-w-0">
 							<!-- Theme -->
 							<div>
 						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Theme</div>
-								<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+								<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
 									{#each epubThemes as theme}
 										<button
 											onclick={() => updateReaderThemeSetting(theme.id)}
@@ -1365,16 +1365,16 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					</div>
 
 					<!-- Typography -->
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
+					<div class="settings-subsection">
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4 flex items-center">
 							<svg class="w-4 h-4 mr-2 text-[var(--color-surface-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
 							</svg>
 							Typography
 						</h3>
-						<div class="reader-control-grid grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4">
+						<div class="settings-field-grid">
 							<!-- Font Family -->
-							<div class="col-span-2 lg:col-span-1">
+							<div class="min-w-0">
 						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Font Family</div>
 								<div class="flex flex-wrap gap-2">
 									{#each fontFamilies as font}
@@ -1399,7 +1399,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							</div>
 
 							<!-- Font Weight -->
-							<div class="col-span-2 lg:col-span-1">
+							<div class="min-w-0">
 								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Font Thickness</div>
 								<div class="flex flex-wrap gap-2">
 									{#each fontWeightOptions as option}
@@ -1449,16 +1449,16 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							<!-- Text Justification -->
 							<div>
 						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Text Alignment</div>
-								<div class="flex space-x-1">
+								<div class="inline-flex flex-wrap gap-1">
 									<button
 										onclick={() => updateEpubSetting('justify', false)}
-										class="flex-1 px-3 py-2 rounded-lg border transition-all {localReaderSettings.epub.justify === false ? 'bg-[var(--color-primary-500)] border-[var(--color-primary-500)] text-white' : 'bg-[var(--color-surface-base)] border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)]'}"
+										aria-pressed={localReaderSettings.epub.justify === false} class="settings-choice"
 									>
 										Left
 									</button>
 									<button
 										onclick={() => updateEpubSetting('justify', true)}
-										class="flex-1 px-3 py-2 rounded-lg border transition-all {localReaderSettings.epub.justify === true ? 'bg-[var(--color-primary-500)] border-[var(--color-primary-500)] text-white' : 'bg-[var(--color-surface-base)] border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)]'}"
+										aria-pressed={localReaderSettings.epub.justify === true} class="settings-choice"
 									>
 										Justified
 									</button>
@@ -1466,34 +1466,34 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							</div>
 
 						</div>
-						<label for="hyphenate" class="mt-4 flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+						<label for="hyphenate" class="mt-4 settings-toggle-row">
 							<span class="text-sm font-medium text-[var(--color-surface-text)]">Enable Hyphenation</span>
 							<input type="checkbox" id="hyphenate" checked={localReaderSettings.epub.hyphenate} onchange={(e) => updateEpubSetting('hyphenate', e.currentTarget.checked)} class="settings-switch">
 						</label>
 					</div>
 
 					<!-- Layout -->
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
+					<div class="settings-subsection">
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4 flex items-center">
 							<svg class="w-4 h-4 mr-2 text-[var(--color-surface-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"></path>
 							</svg>
-							Layout
+							Page Layout
 						</h3>
-						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+						<div class="settings-field-grid">
 							<!-- Flow -->
 							<div>
 						<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Flow</div>
-								<div class="flex space-x-1">
+								<div class="inline-flex flex-wrap gap-1">
 									<button
 										onclick={() => updateEpubSetting('flow', 'paginated')}
-										class="flex-1 px-3 py-2 rounded-lg border transition-all {localReaderSettings.epub.flow === 'paginated' ? 'bg-[var(--color-primary-500)] border-[var(--color-primary-500)] text-white' : 'bg-[var(--color-surface-base)] border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)]'}"
+										aria-pressed={localReaderSettings.epub.flow === 'paginated'} class="settings-choice"
 									>
 										Paginated
 									</button>
 									<button
 										onclick={() => updateEpubSetting('flow', 'scrolled')}
-										class="flex-1 px-3 py-2 rounded-lg border transition-all {localReaderSettings.epub.flow === 'scrolled' ? 'bg-[var(--color-primary-500)] border-[var(--color-primary-500)] text-white' : 'bg-[var(--color-surface-base)] border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)]'}"
+										aria-pressed={localReaderSettings.epub.flow === 'scrolled'} class="settings-choice"
 									>
 										Scrolled
 									</button>
@@ -1541,15 +1541,15 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								>
 							</div>
 						</div>
-						<label for="show-current-section" class="mt-4 flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+					</div>
+
+					<div class="settings-subsection">
+						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Reading Controls</h3>
+						<label for="show-current-section" class="settings-toggle-row">
 							<span class="text-sm font-medium text-[var(--color-surface-text)]">Show Current Section</span>
 							<input type="checkbox" id="show-current-section" checked={localReaderSettings.showCurrentSection} onchange={(e) => localReaderSettings = { ...localReaderSettings, showCurrentSection: e.currentTarget.checked }} class="settings-switch">
 						</label>
-					</div>
-
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
-						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Controls</h3>
-						<label for="epub-auto-hide-controls" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+						<label for="epub-auto-hide-controls" class="settings-toggle-row">
 							<span class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</span>
 							<input type="checkbox" id="epub-auto-hide-controls" checked={localReaderSettings.epub.autoHideControls} onchange={(e) => updateEpubSetting('autoHideControls', e.currentTarget.checked)} class="settings-switch">
 						</label>
@@ -1572,9 +1572,9 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				</div>
 				
 				<div class="p-5 space-y-5">
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
+					<div class="settings-subsection">
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Display</h3>
-						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+						<div class="settings-field-grid">
 							<div>
 								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Theme</div>
 								<select
@@ -1588,12 +1588,12 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								</select>
 							</div>
 
-							<label for="pdfAutoHideControls" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+							<label for="pdfAutoHideControls" class="settings-toggle-row">
 								<span class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</span>
 								<input type="checkbox" id="pdfAutoHideControls" checked={localReaderSettings.pdf.autoHideControls} onchange={(e) => updatePdfSetting('autoHideControls', e.currentTarget.checked)} class="settings-switch">
 							</label>
 
-							<label for="pdfStandardFullscreen" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+							<label for="pdfStandardFullscreen" class="settings-toggle-row">
 								<span class="text-sm font-medium text-[var(--color-surface-text)]">Use Standard Fullscreen</span>
 								<input type="checkbox" id="pdfStandardFullscreen" checked={localReaderSettings.pdf.useStandardFullscreen} onchange={(e) => updatePdfSetting('useStandardFullscreen', e.currentTarget.checked)} class="settings-switch">
 							</label>
@@ -1618,9 +1618,9 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				
 				<div class="p-5 space-y-5">
 					<!-- Display Settings -->
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
+					<div class="settings-subsection">
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Display</h3>
-						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+						<div class="settings-field-grid">
 							<!-- Page Spread -->
 							<div>
 								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Spread</div>
@@ -1695,17 +1695,17 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					</div>
 
 					<!-- Comic-Specific -->
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
-						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Comic-Specific</h3>
-						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+					<div class="settings-subsection">
+						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Reading Behavior</h3>
+						<div class="settings-field-grid">
 							<!-- Manga Mode -->
-							<label for="mangaMode" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+							<label for="mangaMode" class="settings-toggle-row">
 								<span class="text-sm font-medium text-[var(--color-surface-text)]">Manga Mode (RTL)</span>
 								<input type="checkbox" id="mangaMode" checked={localReaderSettings.cbx.mangaMode} onchange={(e) => updateCbxSetting('mangaMode', e.currentTarget.checked)} class="settings-switch">
 							</label>
 
 							<!-- Panel View -->
-							<label for="panelView" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+							<label for="panelView" class="settings-toggle-row">
 								<span class="text-sm font-medium text-[var(--color-surface-text)]">Guided Panel Zoom</span>
 								<input type="checkbox" id="panelView" checked={localReaderSettings.cbx.panelViewEnabled} onchange={(e) => updateCbxSetting('panelViewEnabled', e.currentTarget.checked)} class="settings-switch">
 							</label>
@@ -1725,6 +1725,12 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								</select>
 							</div>
 
+						</div>
+					</div>
+
+					<div class="settings-subsection">
+						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Image Adjustments</h3>
+						<div class="settings-field-grid">
 							<!-- Vibrance -->
 							<div>
 								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Vibrance: {localReaderSettings.cbx.vibrance}%</div>
@@ -1774,7 +1780,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</div>
 					{/if}
 
-					<label for="cbx-auto-hide-controls" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 px-4 py-3">
+					<label for="cbx-auto-hide-controls" class="settings-toggle-row">
 						<span class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</span>
 						<input type="checkbox" id="cbx-auto-hide-controls" checked={localReaderSettings.cbx.autoHideControls} onchange={(e) => updateCbxSetting('autoHideControls', e.currentTarget.checked)} class="settings-switch">
 					</label>
@@ -1796,9 +1802,9 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				</div>
 				
 				<div class="p-5 space-y-5">
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
-						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Reading Pace and Typography</h3>
-						<div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+					<div class="settings-subsection">
+						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Reading Pace</h3>
+						<div class="settings-field-grid">
 						<!-- WPM -->
 						<div>
 							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Words Per Minute</div>
@@ -1815,6 +1821,27 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							</div>
 						</div>
 
+						<!-- Sentence Pause -->
+						<div>
+							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Sentence Pause</div>
+							<div class="flex items-center space-x-2">
+								<button
+									onclick={() => updateSpeedReaderSetting('sentencePause', Math.max(100, localReaderSettings.speedReader.sentencePause - 50))}
+									class="w-8 h-8 rounded bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] flex items-center justify-center"
+								>−</button>
+								<span class="text-[var(--color-surface-text)] w-16 text-center">{localReaderSettings.speedReader.sentencePause}ms</span>
+								<button
+									onclick={() => updateSpeedReaderSetting('sentencePause', Math.min(500, localReaderSettings.speedReader.sentencePause + 50))}
+									class="w-8 h-8 rounded bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] flex items-center justify-center"
+								>+</button>
+							</div>
+						</div>
+						</div>
+					</div>
+
+					<div class="settings-subsection">
+						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Typography</h3>
+						<div class="settings-field-grid">
 						<!-- Word Size -->
 						<div>
 							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Word Size</div>
@@ -1845,6 +1872,12 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							</select>
 						</div>
 
+						</div>
+					</div>
+
+					<div class="settings-subsection">
+						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Focus Cues</h3>
+						<div class="settings-field-grid">
 						<!-- Focal Point -->
 						<div>
 							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Focal Point</div>
@@ -1875,27 +1908,6 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							</select>
 						</div>
 
-						<!-- Sentence Pause -->
-						<div>
-							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Sentence Pause</div>
-							<div class="flex items-center space-x-2">
-								<button
-									onclick={() => updateSpeedReaderSetting('sentencePause', Math.max(100, localReaderSettings.speedReader.sentencePause - 50))}
-									class="w-8 h-8 rounded bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] flex items-center justify-center"
-								>−</button>
-								<span class="text-[var(--color-surface-text)] w-16 text-center">{localReaderSettings.speedReader.sentencePause}ms</span>
-								<button
-									onclick={() => updateSpeedReaderSetting('sentencePause', Math.min(500, localReaderSettings.speedReader.sentencePause + 50))}
-									class="w-8 h-8 rounded bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] flex items-center justify-center"
-								>+</button>
-							</div>
-						</div>
-						</div>
-					</div>
-
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
-						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Focus Cues</h3>
-						<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 						<!-- Accent Color -->
 						<div>
 							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Accent Color</div>
@@ -1911,13 +1923,13 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</div>
 
 						<!-- Accent Enabled -->
-						<label for="accent-enabled" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+						<label for="accent-enabled" class="settings-toggle-row">
 							<span class="text-sm font-medium text-[var(--color-surface-text)]">Enable Accent Character</span>
 							<input type="checkbox" id="accent-enabled" checked={localReaderSettings.speedReader.accentEnabled} onchange={(e) => updateSpeedReaderSetting('accentEnabled', e.currentTarget.checked)} class="settings-switch">
 						</label>
 
 						<!-- Horizontal Bars -->
-						<label for="horizontal-bars" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+						<label for="horizontal-bars" class="settings-toggle-row">
 							<span class="text-sm font-medium text-[var(--color-surface-text)]">Show Horizontal Focus Lines</span>
 							<input type="checkbox" id="horizontal-bars" checked={localReaderSettings.speedReader.horizontalBars} onchange={(e) => updateSpeedReaderSetting('horizontalBars', e.currentTarget.checked)} class="settings-switch">
 						</label>
@@ -1941,9 +1953,9 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				</div>
 				
 				<div class="p-5">
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
+					<div class="settings-subsection">
 						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Playback and Controls</h3>
-						<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+						<div class="settings-field-grid">
 						<!-- Playback Speed -->
 						<div>
 							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Default Playback Speed</div>
@@ -1963,12 +1975,12 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</div>
 
 						<!-- Auto-advance -->
-						<label for="auto-advance" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+						<label for="auto-advance" class="settings-toggle-row">
 							<span class="text-sm font-medium text-[var(--color-surface-text)]">Auto-advance to Next Chapter</span>
 							<input type="checkbox" id="auto-advance" checked={localReaderSettings.audio.autoAdvance} onchange={(e) => updateAudioSetting('autoAdvance', e.currentTarget.checked)} class="settings-switch">
 						</label>
 
-						<label for="audio-auto-hide-controls" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+						<label for="audio-auto-hide-controls" class="settings-toggle-row">
 							<span class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</span>
 							<input type="checkbox" id="audio-auto-hide-controls" checked={localReaderSettings.audio.autoHideControls} onchange={(e) => updateAudioSetting('autoHideControls', e.currentTarget.checked)} class="settings-switch">
 						</label>
@@ -2218,8 +2230,8 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					</div>
 				</div>
 				<div class="p-5 space-y-5">
-					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3">
-						<div class="flex items-center justify-between gap-4">
+					<div class="settings-subsection">
+						<div class="settings-toggle-row settings-toggle-row-description">
 							<div>
 								<div class="text-sm font-medium text-[var(--color-surface-text)]">Preserve Full Cover Art</div>
 								<div class="text-xs text-[var(--color-surface-text-muted)]">Fit the entire cover into a filled frame without trimming.</div>
@@ -2248,7 +2260,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</div>
 						{#if !bookCoverSettings.preserve_full_cover}
 							<div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-								<div class="flex items-center justify-between rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+								<div class="settings-toggle-row settings-toggle-row-description">
 									<div>
 										<div class="text-sm font-medium text-[var(--color-surface-text)]">Vertical Cover Cropping</div>
 										<div class="text-xs text-[var(--color-surface-text-muted)]">Crop very tall covers from the top</div>
@@ -2260,7 +2272,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 										class="settings-switch"
 									>
 								</div>
-								<div class="flex items-center justify-between rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+								<div class="settings-toggle-row settings-toggle-row-description">
 									<div>
 										<div class="text-sm font-medium text-[var(--color-surface-text)]">Horizontal Cover Cropping</div>
 										<div class="text-xs text-[var(--color-surface-text-muted)]">Crop very wide covers from the left</div>
@@ -2297,7 +2309,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 										>
 									</div>
 								</div>
-								<div class="flex items-center justify-between rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+								<div class="settings-toggle-row settings-toggle-row-description">
 									<div>
 										<div class="text-sm font-medium text-[var(--color-surface-text)]">Smart Cropping</div>
 										<div class="text-xs text-[var(--color-surface-text-muted)]">Skip uniform margins when cropping</div>
@@ -2430,10 +2442,6 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		background: var(--color-primary-500);
 		pointer-events: none;
 		transition: transform 160ms ease-out, width 160ms ease-out, opacity 120ms ease-out;
-	}
-
-	.reader-control-grid > div {
-		min-width: 0;
 	}
 
 </style>
