@@ -52,7 +52,24 @@
 	onended={() => audioPlayer.handleEnded()}
 ></audio>
 
-{#if current}
+{#if $audioPlayer.initialized && $audioPlayer.expanded && !current}
+	<section class="fixed bottom-3 left-1/2 z-[75] w-[min(94vw,36rem)] -translate-x-1/2 rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 shadow-2xl backdrop-blur" aria-label="Audio player">
+		<div class="flex items-start justify-between gap-4">
+			<div class="flex min-w-0 items-start gap-3">
+				<div class="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)]">
+					<svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
+				</div>
+				<div class="min-w-0">
+					<h2 class="font-semibold text-[var(--color-surface-text)]">{$audioPlayer.error ? 'Unable to open audio queue' : 'Audio queue is empty'}</h2>
+					<p class="mt-1 text-sm leading-5 {$audioPlayer.error ? 'text-red-400' : 'text-[var(--color-surface-text-muted)]'}">{$audioPlayer.error || 'Open an audio book and choose Play Audio or Add to queue.'}</p>
+				</div>
+			</div>
+			<button type="button" class="flex-none rounded-md p-2 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" aria-label="Close audio player" onclick={() => audioPlayer.minimize()}>
+				<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+			</button>
+		</div>
+	</section>
+{:else if current}
 	{#if !$audioPlayer.expanded}
 		{#if readerMode}
 			<button

@@ -40,7 +40,7 @@ const initialState: AudioPlayerState = {
 	currentTime: 0,
 	duration: 0,
 	playbackSpeed: 1,
-	expanded: true,
+	expanded: false,
 	queueOpen: false,
 	initialized: false,
 	error: ''
