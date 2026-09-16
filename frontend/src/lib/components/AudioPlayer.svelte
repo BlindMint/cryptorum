@@ -204,10 +204,12 @@
 	.audio-seek { accent-color: var(--color-primary-500); }
 	.audio-speed-select {
 		border-color: var(--color-surface-border);
-		background: var(--color-surface-base);
+		background: var(--color-surface-overlay);
 		color: var(--color-surface-text);
 		color-scheme: var(--color-surface-scheme);
 		cursor: pointer;
+		backdrop-filter: blur(12px);
+		box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-surface-text) 8%, transparent);
 	}
 	.audio-speed-select option {
 		background: var(--color-surface-base);
