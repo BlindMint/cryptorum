@@ -453,13 +453,13 @@
 					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-5">
 						<h4 class="text-sm font-semibold text-[var(--color-surface-text)]">Notification Panel</h4>
 						<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Choose which completed activity also appears in the top-bar notification panel.</p>
-						<label class="mt-4 flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+						<label class="mt-4 settings-toggle-row settings-toggle-row-description">
 							<span class="text-sm text-[var(--color-surface-text)]">Show top-bar indicator for new notifications</span>
 							<input type="checkbox" checked={$notificationVisualIndicator} onchange={(event) => notificationVisualIndicator.set(event.currentTarget.checked)} class="settings-switch">
 						</label>
 						<div class="mt-4 space-y-3">
 							{#each notificationPreferenceRows as row}
-								<label class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+								<label class="settings-toggle-row settings-toggle-row-description">
 									<span class="min-w-0">
 										<span class="block text-[var(--color-surface-text)]">{row.label}</span>
 										<span class="mt-0.5 block text-xs leading-5 text-[var(--color-surface-text-muted)]">{row.description}</span>

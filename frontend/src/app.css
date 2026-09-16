@@ -103,6 +103,54 @@ body::before {
 
 /* Persistent on/off settings. Keep native checkbox semantics and events while
    presenting the control as a compact Material-style switch. */
+.settings-subsection + .settings-subsection {
+	border-top: 1px solid var(--color-surface-border);
+	padding-top: 1.25rem;
+}
+
+.settings-field-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 17.5rem), 22.5rem));
+	gap: 1.25rem 2rem;
+	align-items: start;
+}
+
+.settings-field-grid > * { min-width: 0; }
+.settings-field-grid > .settings-toggle-row { grid-column: 1 / -1; }
+
+.settings-toggle-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1.5rem;
+	width: 100%;
+	max-width: 22.5rem;
+	min-height: 3rem;
+	padding-block: 0.5rem;
+}
+
+label.settings-toggle-row { cursor: pointer; }
+.settings-toggle-row-description { max-width: 32rem; }
+
+.settings-choice {
+	min-height: 2.5rem;
+	padding: 0.5rem 1rem;
+	border: 1px solid var(--color-surface-border);
+	border-radius: 0.5rem;
+	font-size: 0.875rem;
+	color: var(--color-surface-text);
+	background: var(--color-surface-base);
+	transition: background-color 150ms ease, border-color 150ms ease;
+}
+.settings-choice:hover, .settings-choice[aria-pressed='true'] {
+	border-color: var(--color-primary-400);
+	background: color-mix(in srgb, var(--color-primary-500) 12%, var(--color-surface-base));
+}
+.settings-choice:focus-visible {
+	outline: 2px solid var(--color-primary-400);
+	outline-offset: 2px;
+}
+
 .settings-switch {
 	position: relative;
 	width: 3rem;
