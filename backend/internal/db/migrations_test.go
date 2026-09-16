@@ -282,3 +282,57 @@ func TestMigration25EnforcesSingleUserWithoutDeletingLegacyData(t *testing.T) {
 		t.Fatal("expected additional app user insert to fail")
 	}
 }
+
+func TestMigration26BackfillsConservativeActiveTime(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "cryptorum.db")
+	conn, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer conn.Close()
+
+	goose.SetBaseFS(embedMigrations)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("set dialect: %v", err)
+	}
+	if err := goose.UpTo(conn, "migrations", 25); err != nil {
+		t.Fatalf("migrate to 25: %v", err)
+	}
+
+	if _, err := conn.Exec(`INSERT INTO library (id, name, owner_user_id) VALUES (1, 'Main', 1)`); err != nil {
+		t.Fatalf("insert library: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO book (id, library_id, added_at, last_scanned, owner_user_id) VALUES (1, 1, 100, 100, 1)`); err != nil {
+		t.Fatalf("insert book: %v", err)
+	}
+	if _, err := conn.Exec(`
+		INSERT INTO reading_session (id, book_id, started_at, ended_at, owner_user_id, reader_mode, last_client_sequence)
+		VALUES (1, 1, 100, 10000, 1, '', 0),
+		       (2, 1, 200, 10000, 1, 'pdf', 3),
+		       (3, 1, 300, 900, 1, 'continuous_text', 1)
+	`); err != nil {
+		t.Fatalf("insert sessions: %v", err)
+	}
+
+	if err := goose.Up(conn, "migrations"); err != nil {
+		t.Fatalf("migrate to latest: %v", err)
+	}
+
+	rows, err := conn.Query(`SELECT id, active_seconds, activity_tracked FROM reading_session ORDER BY id`)
+	if err != nil {
+		t.Fatalf("load migrated sessions: %v", err)
+	}
+	defer rows.Close()
+	want := [][3]int64{{1, 0, 0}, {2, 1800, 1}, {3, 600, 1}}
+	var got [][3]int64
+	for rows.Next() {
+		var row [3]int64
+		if err := rows.Scan(&row[0], &row[1], &row[2]); err != nil {
+			t.Fatalf("scan migrated session: %v", err)
+		}
+		got = append(got, row)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("migrated sessions = %#v, want %#v", got, want)
+	}
+}

@@ -318,6 +318,7 @@
 			onclick={() => showDropdown = !showDropdown}
 			class={`rounded-md text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)] transition-colors ${mobileMenu ? 'flex w-full items-center justify-between gap-3 px-0 py-0' : 'p-2'}`}
 			aria-label="Change theme"
+			title="Theme"
 		>
 			{#if mobileMenu}
 				<span class="flex items-center gap-3">
@@ -339,8 +340,8 @@
 			class={panelOnly
 				? 'w-full p-4'
 				: mobileMenu
-					? 'fixed left-3 right-3 top-[calc(var(--app-topbar-height)+0.75rem)] max-h-[calc(100dvh-var(--app-topbar-height)-1.5rem)] overflow-y-auto bg-[var(--color-surface-overlay)] backdrop-blur-sm border border-[var(--color-surface-border)] rounded-lg shadow-lg z-[95] p-4'
-					: 'absolute right-0 top-full mt-2 w-96 bg-[var(--color-surface-overlay)] backdrop-blur-sm border border-[var(--color-surface-border)] rounded-lg shadow-lg z-50 p-4'}
+					? 'floating-surface fixed left-3 right-3 top-[calc(var(--app-topbar-height)+0.75rem)] max-h-[calc(100dvh-var(--app-topbar-height)-1.5rem)] overflow-y-auto border rounded-lg z-[95] p-4'
+					: 'floating-surface absolute right-0 top-full mt-2 w-96 border rounded-lg z-50 p-4'}
 			use:clickOutside={panelOnly ? ignoreOutsideClick : closeDropdown}
 		>
 			<div class="space-y-4">
@@ -512,18 +513,21 @@
 		<div>
 			<div class="mb-3 flex items-center justify-between">
 				<div class="text-xs font-medium text-[var(--color-surface-text-muted)] uppercase tracking-wider">Primary</div>
-				<button
-					type="button"
-					onclick={resetPrimaryToDefault}
-					class="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
-					title="Reset to default colors"
-					aria-label="Reset primary color to default"
-				>
-					<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12a8 8 0 1 1-2.343-5.657"></path>
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 4v4h-4"></path>
-					</svg>
-				</button>
+				<div class="flex items-center gap-2">
+					<a href="/settings?tab=appearance" onclick={closeDropdown} class="text-xs text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">Appearance</a>
+					<button
+						type="button"
+						onclick={resetPrimaryToDefault}
+						class="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
+						title="Reset primary color"
+						aria-label="Reset primary color to default"
+					>
+						<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12a8 8 0 1 1-2.343-5.657"></path>
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 4v4h-4"></path>
+						</svg>
+					</button>
+				</div>
 			</div>
 				<div class="grid grid-cols-10 gap-2">
 					{#each primaryColors as color}
@@ -544,7 +548,7 @@
 					type="button"
 					onclick={resetSurfaceToDefault}
 					class="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
-					title="Reset to default colors"
+					title="Reset surface color"
 					aria-label="Reset surface color to default"
 				>
 					<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">

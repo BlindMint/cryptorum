@@ -734,7 +734,9 @@
 				<div class="rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5">
 					<div class="text-xs font-medium uppercase tracking-[0.18em] text-[var(--color-surface-text-muted)]">Total Reading Time</div>
 					<div class="mt-2 text-3xl font-semibold text-[var(--color-surface-text)]">{formatMinutes(stats.total_session_minutes)}</div>
-					<div class="mt-1 text-sm text-[var(--color-surface-text-muted)]">Across all recorded sessions</div>
+					<div class="mt-1 text-sm text-[var(--color-surface-text-muted)]">
+						Active reader time{stats.untracked_sessions ? `; ${formatNumber(stats.untracked_sessions)} legacy sessions excluded` : ''}
+					</div>
 				</div>
 				<div class="rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5">
 					<div class="text-xs font-medium uppercase tracking-[0.18em] text-[var(--color-surface-text-muted)]">Current Streak</div>

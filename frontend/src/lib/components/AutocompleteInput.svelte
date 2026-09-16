@@ -178,7 +178,7 @@
 	/>
 
 	{#if showDropdown && filteredSuggestions.length > 0}
-		<div class="absolute left-0 right-0 top-full mt-1 z-50 max-h-60 overflow-y-auto overflow-x-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-lg backdrop-blur-sm">
+		<div class="floating-surface absolute left-0 right-0 top-full z-50 mt-1 max-h-60 overflow-y-auto overflow-x-hidden rounded-lg border">
 			<ul class="px-1 py-1">
 				{#each filteredSuggestions as suggestion, i}
 					<li>

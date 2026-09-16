@@ -42,6 +42,8 @@ interface ReadingProgressOptions {
 	channel: ReadingChannel;
 	readerMode: ReaderMode;
 	onStateChange?: (state: ProgressSyncState) => void;
+	isActivityActive?: () => boolean;
+	idleTimeoutMs?: number | null;
 }
 
 interface OutboxRecord {
@@ -65,6 +67,9 @@ interface ConflictDetail {
 const DB_NAME = 'cryptorum-reading-progress';
 const STORE_NAME = 'checkpoints';
 const DB_VERSION = 1;
+const ACTIVITY_HEARTBEAT_MS = 15_000;
+const MAX_ACTIVITY_SAMPLE_MS = ACTIVITY_HEARTBEAT_MS * 2;
+const DEFAULT_READING_IDLE_TIMEOUT_MS = 5 * 60_000;
 let outboxDatabasePromise: Promise<IDBDatabase | null> | null = null;
 
 function openOutbox(): Promise<IDBDatabase | null> {
@@ -141,12 +146,25 @@ export class ReadingProgressController {
 	private inFlight: Promise<void> | null = null;
 	private paused = false;
 	private ended = false;
+	private permanentlyEnded = false;
+	private visibilityPaused = false;
+	private destroyed = false;
 	private checkpointTimer: ReturnType<typeof setInterval> | null = null;
+	private activityTimer: ReturnType<typeof setInterval> | null = null;
 	private retryTimer: ReturnType<typeof setTimeout> | null = null;
 	private retryAttempt = 0;
+	private activityMilliseconds = 0;
+	private lastActivitySampleAt = 0;
+	private lastActivitySentSeconds = 0;
+	private lastInteractionAt = Date.now();
+	private windowFocused = true;
+	private activityInFlight: Promise<void> | null = null;
+	private lifecycleTransition: Promise<void> = Promise.resolve();
 	private onStateChange?: (state: ProgressSyncState) => void;
+	private isActivityActive: () => boolean;
+	private idleTimeoutMs: number | null;
 	private onlineHandler = () => {
-		if (this.paused) return;
+		if (this.paused || this.visibilityPaused || this.permanentlyEnded) return;
 		if (this.sessionId === null) {
 			void this.start();
 		} else {
@@ -154,7 +172,35 @@ export class ReadingProgressController {
 		}
 	};
 	private focusHandler = () => {
+		this.accrueActivity();
+		this.windowFocused = true;
+		this.lastInteractionAt = Date.now();
 		void this.verifyAuthority();
+	};
+	private blurHandler = () => {
+		this.accrueActivity();
+		this.windowFocused = false;
+	};
+	private interactionHandler = () => this.markActivity();
+	private visibilityHandler = () => {
+		if (document.visibilityState === 'hidden') {
+			this.accrueActivity();
+			this.visibilityPaused = true;
+			this.lifecycleTransition = this.lifecycleTransition
+				.then(() => this.closeCurrentSession(true))
+				.catch(() => undefined);
+			return;
+		}
+		this.visibilityPaused = false;
+		this.windowFocused = true;
+		this.lastActivitySampleAt = Date.now();
+		this.lastInteractionAt = Date.now();
+		this.lifecycleTransition = this.lifecycleTransition
+			.then(async () => {
+				if (this.destroyed || this.permanentlyEnded || this.paused || this.sessionId !== null) return;
+				await this.start();
+			})
+			.catch(() => undefined);
 	};
 
 	constructor(options: ReadingProgressOptions) {
@@ -163,6 +209,10 @@ export class ReadingProgressController {
 		this.channel = options.channel;
 		this.readerMode = options.readerMode;
 		this.onStateChange = options.onStateChange;
+		this.isActivityActive = options.isActivityActive ?? (() => true);
+		this.idleTimeoutMs = options.idleTimeoutMs === undefined
+			? DEFAULT_READING_IDLE_TIMEOUT_MS
+			: options.idleTimeoutMs;
 		this.position = {
 			book_id: options.bookId,
 			file_id: options.file.id,
@@ -178,6 +228,16 @@ export class ReadingProgressController {
 			window.addEventListener('online', this.onlineHandler);
 			window.addEventListener('focus', this.focusHandler);
 			window.addEventListener('pageshow', this.focusHandler);
+			window.addEventListener('blur', this.blurHandler);
+			window.addEventListener('pointerdown', this.interactionHandler, { passive: true });
+			window.addEventListener('keydown', this.interactionHandler);
+			window.addEventListener('wheel', this.interactionHandler, { passive: true });
+			window.addEventListener('touchstart', this.interactionHandler, { passive: true });
+			document.addEventListener('visibilitychange', this.visibilityHandler);
+			this.activityTimer = setInterval(() => {
+				this.accrueActivity();
+				void this.sendActivityHeartbeat();
+			}, ACTIVITY_HEARTBEAT_MS);
 		}
 	}
 
@@ -194,7 +254,66 @@ export class ReadingProgressController {
 		this.onStateChange?.(state);
 	}
 
+	private markActivity() {
+		this.accrueActivity();
+		this.lastInteractionAt = Date.now();
+	}
+
+	private accrueActivity() {
+		const now = Date.now();
+		if (this.lastActivitySampleAt === 0) {
+			this.lastActivitySampleAt = now;
+			return;
+		}
+		const elapsed = Math.max(0, Math.min(MAX_ACTIVITY_SAMPLE_MS, now - this.lastActivitySampleAt));
+		this.lastActivitySampleAt = now;
+		if (
+			this.sessionId === null ||
+			this.ended ||
+			this.visibilityPaused ||
+			this.permanentlyEnded ||
+			!this.windowFocused ||
+			(typeof document !== 'undefined' && document.visibilityState === 'hidden') ||
+			!this.isActivityActive()
+		) return;
+		if (this.idleTimeoutMs !== null && now - this.lastInteractionAt > this.idleTimeoutMs) return;
+		this.activityMilliseconds += elapsed;
+	}
+
+	private resetSessionActivity() {
+		this.activityMilliseconds = 0;
+		this.lastActivitySentSeconds = 0;
+		this.lastActivitySampleAt = Date.now();
+		this.lastInteractionAt = Date.now();
+	}
+
+	private async sendActivityHeartbeat(): Promise<void> {
+		if (this.activityInFlight || this.sessionId === null || this.ended) return;
+		const sessionId = this.sessionId;
+		const activeSeconds = Math.floor(this.activityMilliseconds / 1000);
+		if (activeSeconds <= this.lastActivitySentSeconds) return;
+		this.activityInFlight = (async () => {
+			try {
+				const response = await fetch(`/api/books/${this.bookId}/reading-sessions/${sessionId}/activity`, {
+					method: 'PUT',
+					credentials: 'same-origin',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ active_seconds: activeSeconds })
+				});
+				if (response.ok && this.sessionId === sessionId) {
+					this.lastActivitySentSeconds = Math.max(this.lastActivitySentSeconds, activeSeconds);
+				}
+			} catch {
+				// The next cumulative heartbeat safely retries all active time.
+			}
+		})().finally(() => {
+			this.activityInFlight = null;
+		});
+		return this.activityInFlight;
+	}
+
 	async start(): Promise<ReadingPosition> {
+		if (this.permanentlyEnded || this.destroyed) return this.position;
 		this.setState('restoring');
 		if (browser) {
 			const rawRemote = sessionStorage.getItem(this.remoteReloadKey);
@@ -230,6 +349,7 @@ export class ReadingProgressController {
 			this.clientSequence = 0;
 			this.ended = false;
 			this.paused = false;
+			this.resetSessionActivity();
 			this.position = data.position as ReadingPosition;
 			this.position.locators ||= {};
 			if (local?.checkpoint) {
@@ -411,25 +531,44 @@ export class ReadingProgressController {
 		}
 	}
 
-	async end(keepalive = false): Promise<void> {
-		if (this.ended) return;
+	private async closeCurrentSession(keepalive = false): Promise<void> {
+		if (this.ended || this.sessionId === null) return;
+		this.accrueActivity();
+		const sessionId = this.sessionId;
+		const activeSeconds = Math.floor(this.activityMilliseconds / 1000);
 		this.ended = true;
-		this.stopPeriodicCheckpoint();
 		await this.flush();
-		if (this.sessionId === null) return;
+		this.sessionId = null;
 		try {
-			await fetch(`/api/books/${this.bookId}/reading-sessions/${this.sessionId}`, {
+			await fetch(`/api/books/${this.bookId}/reading-sessions/${sessionId}`, {
 				method: 'PUT',
 				credentials: 'same-origin',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ active_seconds: activeSeconds }),
 				keepalive
 			});
 		} catch {
-			// The durable outbox already contains any unacknowledged checkpoint.
+			// Periodic cumulative heartbeats limit lost time if an exit request fails.
 		}
 	}
 
-	destroy() {
+	async end(keepalive = false): Promise<void> {
+		if (this.permanentlyEnded) return;
+		this.accrueActivity();
+		this.permanentlyEnded = true;
+		this.visibilityPaused = true;
 		this.stopPeriodicCheckpoint();
+		await this.lifecycleTransition.catch(() => undefined);
+		await this.closeCurrentSession(keepalive);
+	}
+
+	destroy() {
+		this.destroyed = true;
+		this.stopPeriodicCheckpoint();
+		if (this.activityTimer) {
+			clearInterval(this.activityTimer);
+			this.activityTimer = null;
+		}
 		if (this.retryTimer) {
 			clearTimeout(this.retryTimer);
 			this.retryTimer = null;
@@ -438,6 +577,12 @@ export class ReadingProgressController {
 			window.removeEventListener('online', this.onlineHandler);
 			window.removeEventListener('focus', this.focusHandler);
 			window.removeEventListener('pageshow', this.focusHandler);
+			window.removeEventListener('blur', this.blurHandler);
+			window.removeEventListener('pointerdown', this.interactionHandler);
+			window.removeEventListener('keydown', this.interactionHandler);
+			window.removeEventListener('wheel', this.interactionHandler);
+			window.removeEventListener('touchstart', this.interactionHandler);
+			document.removeEventListener('visibilitychange', this.visibilityHandler);
 		}
 	}
 }

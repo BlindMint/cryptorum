@@ -167,10 +167,15 @@
 
 <div class="flex min-h-full flex-1 flex-col">
 	<section class="flex min-h-[24rem] flex-1 flex-col rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
-		<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-6 py-4">
-			<div>
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Backups</h3>
-				<p class="text-sm text-[var(--color-surface-text-muted)]">Manual backups, restore actions, and scheduled backup settings</p>
+		<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-5 py-3.5">
+			<div class="flex min-w-0 items-center gap-3">
+				<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-primary-500)]/20">
+					<svg class="h-5 w-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2 3.582 4 8 4s8-2 8-4V7M4 7c0 2 3.582 4 8 4s8-2 8-4M4 7c0-2 3.582-4 8-4s8 2 8 4m0 5c0 2-3.582 4-8 4s-8-2-8-4"></path></svg>
+				</div>
+				<div class="min-w-0 space-y-0.5">
+					<h3 class="text-lg font-semibold leading-6 text-[var(--color-surface-text)]">Backups</h3>
+					<p class="text-sm leading-5 text-[var(--color-surface-text-muted)]">Manual backups, restore actions, and scheduled backup settings</p>
+				</div>
 			</div>
 			<div class="flex flex-wrap items-center gap-2">
 				<button
@@ -210,16 +215,9 @@
 					class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)]"
 				>
 			</label>
-			<label class="space-y-2">
+			<label class="flex min-h-[4.25rem] items-center justify-between gap-3">
 				<span class="text-sm font-medium text-[var(--color-surface-text)]">Automatic Backups</span>
-				<div class="flex items-center gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2">
-					<input
-						type="checkbox"
-						bind:checked={backupSettings.enabled}
-						class="rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
-					>
-					<span class="text-sm text-[var(--color-surface-text)]">Enabled</span>
-				</div>
+				<input type="checkbox" bind:checked={backupSettings.enabled} class="settings-switch">
 			</label>
 			<label class="space-y-2">
 				<span class="text-sm font-medium text-[var(--color-surface-text)]">Keep Last</span>

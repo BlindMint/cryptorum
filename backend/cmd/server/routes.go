@@ -361,6 +361,7 @@ func initRoutes(r *chi.Mux) {
 				r.Post("/reading-sessions", StartReadingPositionSessionHandler)
 				r.Get("/reading-sessions/{sessionID}/position", GetReadingPositionSessionHandler)
 				r.Put("/reading-sessions/{sessionID}/position", SaveReadingPositionHandler)
+				r.Put("/reading-sessions/{sessionID}/activity", UpdateReadingSessionActivityHandler)
 				r.Put("/reading-sessions/{sessionID}", EndReadingPositionSessionHandler)
 				r.Post("/cover/regenerate", RegenerateBookCoverHandler)
 				r.Post("/cover/custom", UploadBookCoverHandler)
@@ -478,6 +479,8 @@ func initRoutes(r *chi.Mux) {
 		r.Get("/settings", getSettingsHandler)
 		r.Get("/settings/reader", getReaderSettingsHandler)
 		r.Put("/settings/reader", updateReaderSettingsHandler)
+		r.Get("/settings/opds", getOPDSSettingsHandler)
+		r.Put("/settings/opds", updateOPDSSettingsHandler)
 		r.Put("/settings/book-covers", updateBookCoverSettingsHandler)
 		r.Post("/settings/book-covers/regenerate", regenerateBookCoversHandler)
 		r.Put("/settings/backups", updateBackupSettingsHandler)
@@ -506,12 +509,29 @@ func initRoutes(r *chi.Mux) {
 		r.Get("/covers/{bookID}/thumb", ServeCoverThumbHandler)
 	})
 
-	// OPDS feed - protected
+	// OPDS 2 catalog. The authentication document is intentionally public so
+	// clients can discover how to authenticate.
+	r.With(opdsEnabledMiddleware, opdsAuthMiddleware).Get("/opds", handleOPDSRootHandler)
 	r.Route("/opds", func(r chi.Router) {
-		r.Use(authMiddleware)
-		r.Get("/", handleOPDSRootHandler)
-		r.Get("/catalog", handleOPDSCatalogHandler)
-		r.Get("/{id}/download", downloadBookHandler)
+		r.Use(opdsEnabledMiddleware)
+		r.Get("/authentication", handleOPDSAuthenticationHandler)
+		r.Group(func(r chi.Router) {
+			r.Use(opdsAuthMiddleware)
+			r.Get("/", handleOPDSRootHandler)
+			r.Get("/catalog", handleOPDSCatalogHandler)
+			r.Get("/publications", handleOPDSPublicationsHandler)
+			r.Get("/publications/{bookID}", handleOPDSPublicationHandler)
+			r.Get("/recent", handleOPDSRecentHandler)
+			r.Get("/libraries", handleOPDSLibrariesHandler)
+			r.Get("/authors", handleOPDSAuthorsHandler)
+			r.Get("/series", handleOPDSSeriesHandler)
+			r.Get("/shelves", handleOPDSShelvesHandler)
+			r.Get("/search", handleOPDSSearchHandler)
+			r.Get("/books/{bookID}/files/{fileID}/download", handleOPDSFileDownloadHandler)
+			r.Get("/books/{bookID}/cover", handleOPDSCoverHandler)
+			r.Get("/books/{bookID}/thumbnail", handleOPDSThumbnailHandler)
+			r.Get("/{id}/download", downloadBookHandler)
+		})
 	})
 
 	// Kobo sync - protected
@@ -4158,6 +4178,7 @@ func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		"metadata":    appConfig.Metadata,
 		"reader":      loadReaderSettingsResponse(),
 		"book_covers": loadBookCoverSettingsResponse(),
+		"opds":        loadOPDSSettingsResponse(),
 	})
 }
 
@@ -4462,134 +4483,6 @@ func handleSSEHandler(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	<-r.Context().Done()
-}
-
-// OPDS handlers
-func handleOPDSRootHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/atom+xml;profile=opds-catalog;kind=navigation")
-	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog">
-  <id>urn:cryptorum:root</id>
-  <title>Cryptorum Catalog</title>
-  <updated>%s</updated>
-  <link rel="self" href="/opds/" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
-  <link rel="start" href="/opds/" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
-  <entry>
-    <id>urn:cryptorum:catalog</id>
-    <title>All Books</title>
-    <link rel="subsection" href="/opds/catalog" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
-  </entry>
-</feed>`, time.Now().UTC().Format(time.RFC3339))
-}
-
-func handleOPDSCatalogHandler(w http.ResponseWriter, r *http.Request) {
-	current := getUserFromContext(r.Context())
-	ownerClause, ownerArgs := userOwnershipClause(current, "l")
-	w.Header().Set("Content-Type", "application/atom+xml;profile=opds-catalog;kind=acquisition")
-
-	rows, err := appDB.Query(`
-		SELECT b.id, COALESCE(bm.title, 'Unknown') as title,
-		       COALESCE(bm.authors, '[]') as authors,
-		       COALESCE(bm.description, '') as description,
-		       COALESCE(bf.format, '') as format
-		FROM book b
-		JOIN library l ON b.library_id = l.id
-		LEFT JOIN book_metadata bm ON b.id = bm.book_id
-		LEFT JOIN (
-			SELECT book_id, MIN(format) AS format
-			FROM book_file
-			GROUP BY book_id
-		) bf ON b.id = bf.book_id
-		WHERE `+ownerClause+`
-		ORDER BY bm.title
-		LIMIT 200
-	`, ownerArgs...)
-	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to generate catalog")
-		return
-	}
-	defer rows.Close()
-
-	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog">
-  <id>urn:cryptorum:catalog</id>
-  <title>All Books</title>
-  <updated>%s</updated>
-  <link rel="self" href="/opds/catalog" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
-`, time.Now().UTC().Format(time.RFC3339))
-
-	mimeTypes := map[string]string{
-		"epub": "application/epub+zip",
-		"pdf":  "application/pdf",
-		"cbz":  "application/vnd.comicbook+zip",
-		"mp3":  "audio/mpeg",
-		"m4b":  "audio/mp4",
-	}
-
-	for rows.Next() {
-		var id int64
-		var title, authors, description, format string
-		if err := rows.Scan(&id, &title, &authors, &description, &format); err != nil {
-			continue
-		}
-		mime := mimeTypes[format]
-		if mime == "" {
-			mime = "application/octet-stream"
-		}
-		fmt.Fprintf(w, `  <entry>
-    <id>urn:cryptorum:book:%d</id>
-    <title>%s</title>
-    <summary>%s</summary>
-    <link rel="http://opds-spec.org/acquisition" href="/opds/%d/download" type="%s"/>
-    <link rel="http://opds-spec.org/image/thumbnail" href="/api/covers/%d/thumb" type="image/webp"/>
-  </entry>
-`, id, xmlEscape(title), xmlEscape(description), id, mime, id)
-	}
-
-	fmt.Fprintf(w, `</feed>`)
-}
-
-func xmlEscape(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	s = strings.ReplaceAll(s, "\"", "&quot;")
-	return s
-}
-
-func downloadBookHandler(w http.ResponseWriter, r *http.Request) {
-	bookID := chi.URLParam(r, "id")
-	current := getUserFromContext(r.Context())
-	if !requirePermission(current, PermissionDownloadBooks) {
-		errorResponse(w, http.StatusForbidden, "Permission denied")
-		return
-	}
-
-	bookIDInt, err := strconv.ParseInt(bookID, 10, 64)
-	if err != nil {
-		errorResponse(w, http.StatusBadRequest, "Invalid book ID")
-		return
-	}
-	allowed, err := canAccessBook(current, bookIDInt)
-	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to verify book access")
-		return
-	}
-	if !allowed {
-		errorResponse(w, http.StatusForbidden, "Permission denied")
-		return
-	}
-
-	var filePath string
-	err = appDB.QueryRow(`
-		SELECT bf.path FROM book_file bf WHERE bf.book_id = ? LIMIT 1
-	`, bookID).Scan(&filePath)
-	if err != nil {
-		errorResponse(w, http.StatusNotFound, "Book not found")
-		return
-	}
-
-	http.ServeFile(w, r, filePath)
 }
 
 // Kobo handlers

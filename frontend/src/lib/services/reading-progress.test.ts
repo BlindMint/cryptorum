@@ -29,6 +29,7 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 afterEach(() => {
+	vi.useRealTimers();
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 });
@@ -192,6 +193,58 @@ describe('ReadingProgressController', () => {
 		await controller.checkpoint({ readerMode: 'speed', percent: 0, locator: { type: 'word_index', word_index: 0, word_count: 11 } });
 		await controller.checkpoint({ readerMode: 'speed', percent: 100, locator: { type: 'word_index', word_index: 10, word_count: 11 }, reachedEnd: true });
 		expect(bodies.map((body) => body.percent)).toEqual([0, 100]);
+		controller.destroy();
+	});
+
+	it('reports cumulative active time without counting inactive intervals', async () => {
+		let now = 100_000;
+		vi.spyOn(Date, 'now').mockImplementation(() => now);
+		let active = true;
+		const activityBodies: any[] = [];
+		let endBody: any = null;
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url.endsWith('/reading-sessions')) {
+				return jsonResponse({ session: { id: 22 }, position: position() }, 201);
+			}
+			if (url.endsWith('/activity')) {
+				activityBodies.push(JSON.parse(String(init?.body)));
+				return jsonResponse({ status: 'ok' });
+			}
+			if (url.endsWith('/reading-sessions/22')) {
+				endBody = JSON.parse(String(init?.body));
+				return jsonResponse({ status: 'ok' });
+			}
+			return jsonResponse({ status: 'ok' });
+		}));
+
+		const controller = new ReadingProgressController({
+			bookId: 1004,
+			file: { id: 10, format: 'pdf', hash: 'hash-one' },
+			channel: 'standard',
+			readerMode: 'pdf',
+			isActivityActive: () => active,
+			idleTimeoutMs: null
+		});
+		await controller.start();
+
+		now = 115_000;
+		(controller as any).accrueActivity.call(controller);
+		await (controller as any).sendActivityHeartbeat.call(controller);
+		active = false;
+		now = 130_000;
+		(controller as any).accrueActivity.call(controller);
+		active = true;
+		now = 145_000;
+		(controller as any).accrueActivity.call(controller);
+		await (controller as any).sendActivityHeartbeat.call(controller);
+		await controller.end();
+
+		expect(activityBodies).toEqual([
+			{ active_seconds: 15 },
+			{ active_seconds: 30 }
+		]);
+		expect(endBody).toEqual({ active_seconds: 30 });
 		controller.destroy();
 	});
 });

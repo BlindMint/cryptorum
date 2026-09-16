@@ -101,6 +101,86 @@ body::before {
 	opacity: 0.5;
 }
 
+/* Persistent on/off settings. Keep native checkbox semantics and events while
+   presenting the control as a compact Material-style switch. */
+.settings-switch {
+	position: relative;
+	width: 3rem;
+	height: 1.5rem;
+	flex: 0 0 auto;
+	cursor: pointer;
+	appearance: none;
+	border: 1px solid var(--color-surface-border);
+	border-radius: 9999px;
+	background: var(--color-surface-border);
+	transition:
+		background-color 170ms cubic-bezier(0.2, 0, 0, 1),
+		border-color 170ms cubic-bezier(0.2, 0, 0, 1),
+		opacity 170ms ease;
+}
+
+.settings-switch::after {
+	content: '';
+	position: absolute;
+	top: 0.1875rem;
+	left: 0.1875rem;
+	width: 1rem;
+	height: 1rem;
+	border-radius: 9999px;
+	background: var(--color-surface-text);
+	box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+	transform: translateX(0);
+	transition:
+		transform 170ms cubic-bezier(0.2, 0, 0, 1),
+		background-color 170ms cubic-bezier(0.2, 0, 0, 1),
+		box-shadow 170ms ease;
+	will-change: transform;
+}
+
+.settings-switch:checked {
+	border-color: var(--color-primary-500);
+	background: var(--color-primary-500);
+}
+
+.settings-switch:checked::after {
+	transform: translateX(1.5rem);
+	background: white;
+}
+
+.settings-switch:indeterminate {
+	border-color: var(--color-primary-400);
+	background: color-mix(in srgb, var(--color-primary-500) 55%, var(--color-surface-overlay));
+}
+
+.settings-switch:indeterminate::after {
+	transform: translateX(0.75rem);
+}
+
+.settings-switch:focus-visible {
+	outline: 2px solid var(--color-primary-400);
+	outline-offset: 2px;
+}
+
+.settings-switch:disabled {
+	cursor: not-allowed;
+	opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.settings-switch,
+	.settings-switch::after {
+		transition-duration: 0.01ms;
+	}
+}
+
+/* Menus and popovers sit above content without adding a modal scrim. */
+.floating-surface {
+	background: color-mix(in srgb, var(--color-surface-overlay) 88%, var(--color-surface-base));
+	border-color: var(--color-surface-border);
+	box-shadow: 0 18px 45px rgb(0 0 0 / 0.38);
+	backdrop-filter: blur(16px) saturate(125%);
+}
+
 .toolbar-action {
 	border-color: var(--color-surface-border);
 	background: var(--color-surface-overlay);

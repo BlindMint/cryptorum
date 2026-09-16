@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"net/http"
 	"strconv"
@@ -50,6 +51,10 @@ type saveReadingPositionRequest struct {
 	Locator        json.RawMessage `json:"locator,omitempty"`
 	SourceHash     string          `json:"source_hash"`
 	ReachedEnd     bool            `json:"reached_end"`
+}
+
+type readingSessionActivityRequest struct {
+	ActiveSeconds int64 `json:"active_seconds"`
 }
 
 type readingPositionQueryer interface {
@@ -329,9 +334,10 @@ func StartReadingPositionSessionHandler(w http.ResponseWriter, r *http.Request) 
 
 	result, err := tx.Exec(`
 		INSERT INTO reading_session (
-			book_id, reader_type, started_at, owner_user_id, file_id, channel, reader_mode
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, bookID, sessionReaderType(mode), now.Unix(), current.ID, req.FileID, channel, mode)
+			book_id, reader_type, started_at, owner_user_id, file_id, channel, reader_mode,
+			activity_tracked, active_seconds, last_active_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?)
+	`, bookID, sessionReaderType(mode), now.Unix(), current.ID, req.FileID, channel, mode, now.Unix())
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to start reading session")
 		return
@@ -393,6 +399,86 @@ func StartReadingPositionSessionHandler(w http.ResponseWriter, r *http.Request) 
 		},
 		"position": position,
 	})
+}
+
+func decodeReadingSessionActivity(r *http.Request) (readingSessionActivityRequest, error) {
+	var req readingSessionActivityRequest
+	if r.Body == nil {
+		return req, nil
+	}
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if errors.Is(err, io.EOF) {
+		return req, nil
+	}
+	if err != nil || req.ActiveSeconds < 0 {
+		return readingSessionActivityRequest{}, errors.New("invalid active reading time")
+	}
+	return req, nil
+}
+
+func clampedSessionActiveSeconds(requested, startedAt, now int64) int64 {
+	if requested <= 0 || now <= startedAt {
+		return 0
+	}
+	if elapsed := now - startedAt; requested > elapsed {
+		return elapsed
+	}
+	return requested
+}
+
+// UpdateReadingSessionActivityHandler stores an idempotent cumulative active
+// duration. Repeating a heartbeat can never count the same time twice.
+func UpdateReadingSessionActivityHandler(w http.ResponseWriter, r *http.Request) {
+	bookID, err := strconv.ParseInt(chi.URLParam(r, "bookID"), 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid book ID")
+		return
+	}
+	sessionID, err := strconv.ParseInt(chi.URLParam(r, "sessionID"), 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid session ID")
+		return
+	}
+	req, err := decodeReadingSessionActivity(r)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	current := getUserFromContext(r.Context())
+	var sessionBookID, startedAt int64
+	var endedAt, supersededAt sql.NullInt64
+	err = appDB.QueryRow(`
+		SELECT book_id, started_at, ended_at, superseded_at
+		FROM reading_session
+		WHERE id = ? AND owner_user_id = ? AND activity_tracked = 1
+	`, sessionID, current.ID).Scan(&sessionBookID, &startedAt, &endedAt, &supersededAt)
+	if errors.Is(err, sql.ErrNoRows) || sessionBookID != bookID {
+		errorResponse(w, http.StatusNotFound, "Reading session not found")
+		return
+	}
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to load reading session")
+		return
+	}
+	if endedAt.Valid || supersededAt.Valid {
+		errorResponse(w, http.StatusConflict, "Reading session is no longer active")
+		return
+	}
+
+	now := time.Now().Unix()
+	activeSeconds := clampedSessionActiveSeconds(req.ActiveSeconds, startedAt, now)
+	_, err = appDB.Exec(`
+		UPDATE reading_session
+		SET active_seconds = MAX(active_seconds, ?),
+		    last_active_at = CASE WHEN ? > active_seconds THEN ? ELSE last_active_at END
+		WHERE id = ? AND owner_user_id = ? AND ended_at IS NULL AND superseded_at IS NULL
+	`, activeSeconds, activeSeconds, now, sessionID, current.ID)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update reading activity")
+		return
+	}
+	jsonResponse(w, http.StatusOK, map[string]any{"status": "ok", "active_seconds": activeSeconds})
 }
 
 func validLocator(locator json.RawMessage) bool {
@@ -676,8 +762,8 @@ func SaveReadingPositionHandler(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, map[string]any{"status": "ok", "position": position})
 }
 
-// EndReadingPositionSessionHandler records analytics duration without touching
-// progress ordering or book status.
+// EndReadingPositionSessionHandler finalizes accumulated active time without
+// touching progress ordering or book status.
 func EndReadingPositionSessionHandler(w http.ResponseWriter, r *http.Request) {
 	sessionID, err := strconv.ParseInt(chi.URLParam(r, "sessionID"), 10, 64)
 	if err != nil {
@@ -685,10 +771,48 @@ func EndReadingPositionSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current := getUserFromContext(r.Context())
-	_, err = appDB.Exec(`
-		UPDATE reading_session SET ended_at = COALESCE(ended_at, ?)
+	req, err := decodeReadingSessionActivity(r)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	now := time.Now().Unix()
+	var startedAt int64
+	var endedAt, supersededAt sql.NullInt64
+	err = appDB.QueryRow(`
+		SELECT started_at, ended_at, superseded_at
+		FROM reading_session
 		WHERE id = ? AND owner_user_id = ?
-	`, time.Now().Unix(), sessionID, current.ID)
+	`, sessionID, current.ID).Scan(&startedAt, &endedAt, &supersededAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to load reading session")
+		return
+	}
+	activityCutoff := now
+	if endedAt.Valid && endedAt.Int64 < activityCutoff {
+		activityCutoff = endedAt.Int64
+	}
+	if supersededAt.Valid && supersededAt.Int64 < activityCutoff {
+		activityCutoff = supersededAt.Int64
+	}
+	activeSeconds := clampedSessionActiveSeconds(req.ActiveSeconds, startedAt, activityCutoff)
+	_, err = appDB.Exec(`
+		UPDATE reading_session
+		SET ended_at = COALESCE(ended_at, ?),
+		    active_seconds = CASE
+		        WHEN activity_tracked = 1 THEN MAX(active_seconds, ?)
+		        ELSE active_seconds
+		    END,
+		    last_active_at = CASE
+		        WHEN activity_tracked = 1 AND ? > active_seconds THEN ?
+		        ELSE last_active_at
+		    END
+		WHERE id = ? AND owner_user_id = ?
+	`, now, activeSeconds, activeSeconds, activityCutoff, sessionID, current.ID)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to end reading session")
 		return

@@ -361,7 +361,7 @@
 				</div>
 
 				<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-5 py-3.5">
-					<label for="library-exclude-suggestions" class="flex items-start justify-between gap-4">
+					<label for="library-exclude-suggestions" class="flex items-center justify-between gap-4">
 						<span class="min-w-0">
 							<span class="block text-sm font-medium text-[var(--color-surface-text)]">Exclude from discovery and recommendations</span>
 							<span class="mt-1 block text-xs leading-5 text-[var(--color-surface-text-muted)]">
@@ -372,7 +372,7 @@
 							id="library-exclude-suggestions"
 							type="checkbox"
 							bind:checked={form.exclude_from_suggestions}
-							class="mt-1 h-4 w-4 shrink-0 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+							class="settings-switch"
 						>
 					</label>
 				</div>
@@ -487,7 +487,7 @@
 							</button>
 						</div>
 						<label
-							class="mt-4 flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3 transition-colors hover:border-[var(--color-primary-500)]/60"
+							class="mt-4 flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3 transition-colors hover:border-[var(--color-primary-500)]/60"
 							class:cursor-wait={isSavingMetadataProtection}
 						>
 							<span>
@@ -501,7 +501,7 @@
 								checked={metadataProtectionEnabled}
 								disabled={isSavingMetadataProtection}
 								onchange={toggleMetadataProtection}
-								class="mt-0.5 h-5 w-5 shrink-0 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+								class="settings-switch"
 							/>
 						</label>
 						{#if metadataProtectionMessage}

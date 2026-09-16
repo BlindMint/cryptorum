@@ -325,13 +325,18 @@
 	{/if}
 
 	<section class="flex min-h-[24rem] flex-1 flex-col rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
-		<div class="space-y-4 border-b border-[var(--color-surface-border)] px-6 py-4">
-			<div class="flex flex-wrap items-start justify-between gap-5">
-				<div>
-					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Activity Log</h3>
-					<p class="text-sm text-[var(--color-surface-text-muted)]">
-						Most recent jobs, notifications, and app events · {unreadCount} active or unread
-					</p>
+		<div class="space-y-4 border-b border-[var(--color-surface-border)] px-5 py-3.5">
+			<div class="flex flex-wrap items-center justify-between gap-3">
+				<div class="flex min-w-0 items-center gap-3">
+					<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-primary-500)]/20">
+						<svg class="h-5 w-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+					</div>
+					<div class="min-w-0 space-y-0.5">
+						<h3 class="text-lg font-semibold leading-6 text-[var(--color-surface-text)]">Activity Log</h3>
+						<p class="text-sm leading-5 text-[var(--color-surface-text-muted)]">
+							Most recent jobs, notifications, and app events · {unreadCount} active or unread
+						</p>
+					</div>
 				</div>
 				<div class="flex flex-wrap items-center gap-2">
 					<div class="inline-flex rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
@@ -402,7 +407,7 @@
 							Export
 						</button>
 						{#if showExportMenu}
-							<div class="absolute right-0 z-20 mt-2 w-44 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-xl">
+							<div class="floating-surface absolute right-0 z-20 mt-2 w-44 overflow-hidden rounded-lg border">
 								<a href={buildActivityUrl('text')} download class="block px-3 py-2 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]" onclick={() => showExportMenu = false}>Export Text</a>
 								<a href={buildActivityUrl('json')} download class="block px-3 py-2 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]" onclick={() => showExportMenu = false}>Export JSON</a>
 							</div>
@@ -448,28 +453,18 @@
 					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-5">
 						<h4 class="text-sm font-semibold text-[var(--color-surface-text)]">Notification Panel</h4>
 						<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Choose which completed activity also appears in the top-bar notification panel.</p>
-						<label class="mt-4 flex items-start gap-3 text-sm text-[var(--color-surface-text-muted)]">
-							<input
-								type="checkbox"
-								checked={$notificationVisualIndicator}
-								onchange={(event) => notificationVisualIndicator.set(event.currentTarget.checked)}
-								class="mt-0.5 h-4 w-4 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)]"
-							>
-							<span>Show top-bar indicator for new notifications</span>
+						<label class="mt-4 flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+							<span class="text-sm text-[var(--color-surface-text)]">Show top-bar indicator for new notifications</span>
+							<input type="checkbox" checked={$notificationVisualIndicator} onchange={(event) => notificationVisualIndicator.set(event.currentTarget.checked)} class="settings-switch">
 						</label>
 						<div class="mt-4 space-y-3">
 							{#each notificationPreferenceRows as row}
-								<label class="flex items-start gap-3 text-sm">
-									<input
-										type="checkbox"
-										checked={$notificationEventPreferences[row.key]}
-										onchange={(event) => { notificationEventPreferences.setKey(row.key, event.currentTarget.checked); void appActivity.refresh(); }}
-										class="mt-0.5 h-4 w-4 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)]"
-									>
-									<span>
+								<label class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+									<span class="min-w-0">
 										<span class="block text-[var(--color-surface-text)]">{row.label}</span>
-										<span class="block text-xs text-[var(--color-surface-text-muted)]">{row.description}</span>
+										<span class="mt-0.5 block text-xs leading-5 text-[var(--color-surface-text-muted)]">{row.description}</span>
 									</span>
+									<input type="checkbox" checked={$notificationEventPreferences[row.key]} onchange={(event) => { notificationEventPreferences.setKey(row.key, event.currentTarget.checked); void appActivity.refresh(); }} class="settings-switch">
 								</label>
 							{/each}
 						</div>
