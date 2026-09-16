@@ -6,6 +6,7 @@
 	import { readerSettings, speedReaderThemes, fontFamilies, fontWeightOptions, resolveFontFamily, type SpeedReaderSetting } from '$lib/stores/readerSettings';
 	import { currentTheme as appThemeStore, resolveThemeColors, addCustomTheme, removeCustomTheme, generateId, type FullTheme } from '$lib/stores/theme';
 	import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
+	import { trackReaderBottomBar } from '$lib/stores/readerBottomBar';
 	import { normalizeBookFormat } from '$lib/utils/book-formats';
 	import { getReaderDisplayTitle } from '$lib/utils/reader-title';
 	import {
@@ -1021,6 +1022,7 @@
 
 	<!-- Bottom Bar -->
 	<footer
+		use:trackReaderBottomBar={showControls}
 		class="speed-footer absolute bottom-0 left-0 right-0 transition-opacity duration-200 {showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}"
 	>
 		<div class="speed-footer-inner">

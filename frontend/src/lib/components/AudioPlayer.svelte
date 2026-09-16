@@ -3,6 +3,7 @@
 	import { audioPlayer } from '$lib/stores/audioPlayer';
 	import { readerSettings } from '$lib/stores/readerSettings';
 	import { bulkActionBarHeight } from '$lib/stores/bulkActionBar';
+	import { readerBottomBarHeight } from '$lib/stores/readerBottomBar';
 
 	let { readerMode = false } = $props<{ readerMode?: boolean }>();
 	let audioElement: HTMLAudioElement;
@@ -10,6 +11,7 @@
 	const current = $derived($audioPlayer.items.find((item) => item.id === $audioPlayer.currentItemId));
 	const currentIndex = $derived($audioPlayer.items.findIndex((item) => item.id === $audioPlayer.currentItemId));
 	const progressPercent = $derived($audioPlayer.duration > 0 ? ($audioPlayer.currentTime / $audioPlayer.duration) * 100 : 0);
+	const bottomBarHeight = $derived(Math.max($bulkActionBarHeight, $readerBottomBarHeight));
 	const speedOptions = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
 	onMount(() => {
@@ -54,7 +56,7 @@
 ></audio>
 
 {#if $audioPlayer.initialized && $audioPlayer.expanded && !current && !$audioPlayer.dismissed}
-	<section class="audio-player-bottom fixed left-1/2 z-[10000] w-[min(94vw,36rem)] -translate-x-1/2 rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${$bulkActionBarHeight}px)`} aria-label="Audio player">
+	<section class="audio-player-bottom fixed left-1/2 z-[10000] w-[min(94vw,36rem)] -translate-x-1/2 rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${bottomBarHeight}px)`} aria-label="Audio player">
 		<div class="flex items-start justify-between gap-4">
 			<div class="flex min-w-0 items-start gap-3">
 				<div class="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)]">
@@ -86,7 +88,7 @@
 				<span class="text-[10px] font-semibold">{Math.round(progressPercent)}%</span>
 			</button>
 		{:else}
-			<div class="audio-player-bottom fixed left-1/2 z-[10000] flex w-[min(94vw,42rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2 shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${$bulkActionBarHeight}px)`}>
+			<div class="audio-player-bottom fixed left-1/2 z-[10000] flex w-[min(94vw,42rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2 shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${bottomBarHeight}px)`}>
 				<button type="button" class="rounded-full bg-[var(--color-primary-500)] p-2 text-white" aria-label={$audioPlayer.isPlaying ? 'Pause' : 'Play'} onclick={() => void audioPlayer.togglePlay()}>
 					{#if $audioPlayer.isPlaying}
 						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
@@ -108,7 +110,7 @@
 			</div>
 		{/if}
 	{:else}
-		<section class="audio-player-bottom fixed left-1/2 z-[10000] w-[min(94vw,64rem)] -translate-x-1/2 overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${$bulkActionBarHeight}px)`} aria-label="Audio player">
+		<section class="audio-player-bottom fixed left-1/2 z-[10000] w-[min(94vw,64rem)] -translate-x-1/2 overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${bottomBarHeight}px)`} aria-label="Audio player">
 			<div class="flex items-start gap-3 p-3 sm:items-center sm:gap-4 sm:p-4">
 				<img src={`/api/covers/${current.book_id}/thumb?size=sm`} alt="" class="h-14 w-11 flex-none rounded-md bg-[var(--color-surface-700)] object-cover sm:h-20 sm:w-14" />
 				<div class="min-w-0 flex-1">

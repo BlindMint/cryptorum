@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { trackReaderBottomBar } from '$lib/stores/readerBottomBar';
+
 	type Variant = 'top' | 'bottom';
 
 	let {
@@ -61,6 +63,7 @@
 {#if interactive}
 	<div
 		bind:this={element}
+		use:trackReaderBottomBar={variant === 'bottom' && visible}
 		class="reader-progress reader-progress-{variant} reader-progress-interactive"
 		class:reader-progress-meta-center={metaAlign === 'center'}
 		class:reader-progress-hidden={!visible}
@@ -99,6 +102,7 @@
 {:else}
 	<div
 		bind:this={element}
+		use:trackReaderBottomBar={variant === 'bottom' && visible}
 		class="reader-progress reader-progress-{variant}"
 		class:reader-progress-meta-center={metaAlign === 'center'}
 		class:reader-progress-hidden={!visible}
