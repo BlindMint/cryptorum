@@ -7,7 +7,12 @@
 
 	let { readerMode = false } = $props<{ readerMode?: boolean }>();
 	let audioElement: HTMLAudioElement;
+	let speedButtonElement = $state<HTMLButtonElement>();
+	let speedMenuElement = $state<HTMLDivElement>();
 	let confirmClear = $state(false);
+	let speedMenuOpen = $state(false);
+	let speedMenuRight = $state(0);
+	let speedMenuBottom = $state(0);
 	const current = $derived($audioPlayer.items.find((item) => item.id === $audioPlayer.currentItemId));
 	const currentIndex = $derived($audioPlayer.items.findIndex((item) => item.id === $audioPlayer.currentItemId));
 	const progressPercent = $derived($audioPlayer.duration > 0 ? ($audioPlayer.currentTime / $audioPlayer.duration) * 100 : 0);
@@ -16,8 +21,32 @@
 
 	onMount(() => {
 		const detach = audioPlayer.attach(audioElement);
+		const handleOutsidePointer = (event: PointerEvent) => {
+			const target = event.target as Node;
+			if (!speedMenuOpen || speedButtonElement?.contains(target) || speedMenuElement?.contains(target)) return;
+			speedMenuOpen = false;
+		};
+		const handleEscape = (event: KeyboardEvent) => {
+			if (event.key !== 'Escape' || !speedMenuOpen) return;
+			event.preventDefault();
+			speedMenuOpen = false;
+			speedButtonElement?.focus();
+		};
+		const closeSpeedMenu = () => speedMenuOpen = false;
+		document.addEventListener('pointerdown', handleOutsidePointer);
+		document.addEventListener('keydown', handleEscape);
+		window.addEventListener('resize', closeSpeedMenu);
 		void audioPlayer.initialize();
-		return detach;
+		return () => {
+			detach();
+			document.removeEventListener('pointerdown', handleOutsidePointer);
+			document.removeEventListener('keydown', handleEscape);
+			window.removeEventListener('resize', closeSpeedMenu);
+		};
+	});
+
+	$effect(() => {
+		if (!$audioPlayer.expanded || $audioPlayer.dismissed) speedMenuOpen = false;
 	});
 
 	function formatTime(value: number) {
@@ -30,6 +59,24 @@
 
 	function handleSeek(event: Event) {
 		audioPlayer.seek(Number((event.currentTarget as HTMLInputElement).value));
+	}
+
+	function toggleSpeedMenu() {
+		if (speedMenuOpen) {
+			speedMenuOpen = false;
+			return;
+		}
+		if (!speedButtonElement) return;
+		const rect = speedButtonElement.getBoundingClientRect();
+		speedMenuRight = Math.max(8, window.innerWidth - rect.right);
+		speedMenuBottom = Math.max(8, window.innerHeight - rect.top + 8);
+		speedMenuOpen = true;
+	}
+
+	function selectSpeed(speed: number) {
+		audioPlayer.setPlaybackSpeed(speed);
+		speedMenuOpen = false;
+		speedButtonElement?.focus();
 	}
 
 	async function clearQueue() {
@@ -152,12 +199,20 @@
 						</button>
 						<button type="button" class="player-control text-xs font-semibold" aria-label="Skip forward" onclick={() => audioPlayer.skip($readerSettings.audio.skipForward)}>+{$readerSettings.audio.skipForward}</button>
 						<button type="button" class="player-control" disabled={currentIndex < 0 || currentIndex >= $audioPlayer.items.length - 1} aria-label="Next queue item" onclick={() => void audioPlayer.next()}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM5 5l10 7-10 7V5z"/></svg></button>
-						<label class="ml-1">
-							<span class="sr-only">Playback speed</span>
-							<select class="audio-speed-select rounded-md border px-2 py-1.5 text-xs font-semibold" value={$audioPlayer.playbackSpeed} onchange={(event) => audioPlayer.setPlaybackSpeed(Number(event.currentTarget.value))}>
-								{#each speedOptions as speed}<option value={speed}>{speed}×</option>{/each}
-							</select>
-						</label>
+						<div class="ml-1">
+							<button
+								bind:this={speedButtonElement}
+								type="button"
+								class="audio-speed-button flex items-center gap-1 rounded-md border px-2 py-1.5 text-xs font-semibold"
+								aria-label={`Playback speed: ${$audioPlayer.playbackSpeed}×`}
+								aria-haspopup="menu"
+								aria-expanded={speedMenuOpen}
+								onclick={toggleSpeedMenu}
+							>
+								<span>{$audioPlayer.playbackSpeed}×</span>
+								<svg class="h-3 w-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m3 4.5 3 3 3-3"/></svg>
+							</button>
+						</div>
 					</div>
 					{#if $audioPlayer.error}<p class="mt-2 text-center text-xs text-red-400" role="alert">{$audioPlayer.error}</p>{/if}
 				</div>
@@ -185,6 +240,30 @@
 				</div>
 			{/if}
 		</section>
+		{#if speedMenuOpen}
+			<div
+				bind:this={speedMenuElement}
+				class="audio-speed-menu fixed z-[10001] grid w-24 gap-1 rounded-xl border p-1.5"
+				style:right={`${speedMenuRight}px`}
+				style:bottom={`${speedMenuBottom}px`}
+				role="menu"
+				aria-label="Playback speed"
+			>
+				{#each speedOptions as speed}
+					<button
+						type="button"
+						class="audio-speed-option flex items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold"
+						class:selected={$audioPlayer.playbackSpeed === speed}
+						role="menuitemradio"
+						aria-checked={$audioPlayer.playbackSpeed === speed}
+						onclick={() => selectSpeed(speed)}
+					>
+						<span>{speed}×</span>
+						{#if $audioPlayer.playbackSpeed === speed}<span aria-hidden="true">✓</span>{/if}
+					</button>
+				{/each}
+			</div>
+		{/if}
 	{/if}
 {/if}
 
@@ -202,24 +281,35 @@
 	.player-control:disabled, .queue-control:disabled { opacity: 0.35; }
 	.queue-control { border-radius: 0.375rem; padding: 0.25rem 0.45rem; color: var(--color-surface-text-muted); }
 	.audio-seek { accent-color: var(--color-primary-500); }
-	.audio-speed-select {
+	.audio-speed-button {
 		border-color: var(--color-surface-border);
 		background: var(--color-surface-overlay);
 		color: var(--color-surface-text);
-		color-scheme: var(--color-surface-scheme);
 		cursor: pointer;
 		backdrop-filter: blur(12px);
 		box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-surface-text) 8%, transparent);
 	}
-	.audio-speed-select option {
-		background: var(--color-surface-base);
-		color: var(--color-surface-text);
-	}
-	.audio-speed-select:focus-visible {
+	.audio-speed-button:hover { border-color: color-mix(in srgb, var(--color-primary-500) 55%, var(--color-surface-border)); }
+	.audio-speed-button:focus-visible {
 		border-color: var(--color-primary-500);
 		outline: 2px solid color-mix(in srgb, var(--color-primary-500) 55%, transparent);
 		outline-offset: 2px;
 	}
+	.audio-speed-menu {
+		border-color: var(--color-surface-border);
+		background: var(--color-surface-overlay);
+		color: var(--color-surface-text);
+		backdrop-filter: blur(18px) saturate(135%);
+		box-shadow: 0 16px 40px rgba(0, 0, 0, 0.38), inset 0 1px 0 color-mix(in srgb, var(--color-surface-text) 10%, transparent);
+	}
+	.audio-speed-option { color: var(--color-surface-text-muted); }
+	.audio-speed-option:hover,
+	.audio-speed-option:focus-visible {
+		background: color-mix(in srgb, var(--color-primary-500) 12%, transparent);
+		color: var(--color-surface-text);
+		outline: none;
+	}
+	.audio-speed-option.selected { background: color-mix(in srgb, var(--color-primary-500) 18%, transparent); color: var(--color-primary-300); }
 	.audio-player-bottom { transition: bottom 180ms ease; }
 	.audio-reader-tab.is-playing .music-note { animation: audio-pulse 1.2s ease-in-out infinite; }
 	@keyframes audio-pulse { 50% { transform: translateY(-2px) rotate(6deg); } }
