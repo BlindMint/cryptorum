@@ -1409,13 +1409,13 @@
 {#if selectedBooks.size > 0}
 	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up" use:trackBulkActionBar>
 		<div class="bg-[var(--color-surface-overlay)] backdrop-blur-lg border-t border-[var(--color-surface-border)] shadow-2xl">
-			<div class="max-w-7xl mx-auto px-4 py-3">
-				<div class="flex items-center justify-between gap-4 flex-wrap">
-					<div class="flex items-center gap-4 flex-wrap">
-						<span class="text-[var(--color-surface-text)] font-medium">
+			<div class="mx-auto max-w-7xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-4">
+				<div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between xl:gap-4">
+					<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4 xl:justify-start">
+						<span class="text-sm font-medium text-[var(--color-surface-text)] sm:text-base">
 							{selectedBooks.size} selected
 						</span>
-						<div class="flex items-center gap-2">
+						<div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
 							<button
 								onclick={selectAllPage}
 								class="px-3 py-1.5 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
@@ -1430,13 +1430,13 @@
 							</button>
 						</div>
 					</div>
-					<div class="flex flex-wrap items-center gap-2">
+					<div class="grid grid-cols-2 gap-2 border-t border-[var(--color-surface-border)] pt-3 sm:flex sm:flex-wrap sm:items-center sm:border-t-0 sm:pt-0 xl:justify-end">
 						<BulkAddToQueueButton bookIds={Array.from(selectedBooks)} disabled={actionInProgress} />
-						<div class="relative">
+						<div class="relative w-full sm:w-auto">
 							<button
 								onclick={() => showMetadataMenu = !showMetadataMenu}
 								disabled={selectedBooks.size === 0}
-								class="px-4 py-2 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none flex items-center gap-2"
+								class="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none sm:w-auto"
 							>
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
