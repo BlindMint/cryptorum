@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import { audioPlayer } from '$lib/stores/audioPlayer';
 	import { readerSettings } from '$lib/stores/readerSettings';
 	import { bulkActionBarHeight } from '$lib/stores/bulkActionBar';
 	import { readerBottomBarHeight } from '$lib/stores/readerBottomBar';
+	import { getCoverThumbUrl } from '$lib/utils/covers';
 
 	let { readerMode = false } = $props<{ readerMode?: boolean }>();
 	let audioElement: HTMLAudioElement;
@@ -175,7 +177,15 @@
 	{:else}
 		<section class="audio-player-bottom fixed left-1/2 z-[10000] w-[min(94vw,64rem)] -translate-x-1/2 overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${bottomBarHeight}px)`} aria-label="Audio player">
 			<div class="flex items-start gap-3 p-3 sm:items-center sm:gap-4 sm:p-4">
-				<img src={`/api/covers/${current.book_id}/thumb?size=sm`} alt="" class="h-14 w-11 flex-none rounded-md bg-[var(--color-surface-700)] object-cover sm:h-20 sm:w-14" />
+				<BookCoverFrame
+					src={getCoverThumbUrl(current.book_id, 'small')}
+					alt={`${current.title} cover`}
+					format={current.format}
+					placeholderKind="audio"
+					placeholderSize="xs"
+					loading="eager"
+					frameClass="h-14 w-11 flex-none rounded-md sm:h-20 sm:w-14"
+				/>
 				<div class="min-w-0 flex-1">
 					<div class="flex items-start justify-between gap-2">
 						<div class="min-w-0">

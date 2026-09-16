@@ -10,7 +10,7 @@
 		mode?: 'cover' | 'contain';
 		frameClass?: string;
 		imageClass?: string;
-		placeholderSize?: 'sm' | 'md' | 'lg';
+		placeholderSize?: 'xs' | 'sm' | 'md' | 'lg';
 		placeholderKind?: BookMediaKind;
 		loading?: 'eager' | 'lazy';
 		decoding?: 'sync' | 'async' | 'auto';

@@ -2,7 +2,7 @@
 	import type { BookMediaKind } from '$lib/utils/book-formats';
 
 	interface Props {
-		size?: 'sm' | 'md' | 'lg';
+		size?: 'xs' | 'sm' | 'md' | 'lg';
 		kind?: BookMediaKind;
 		class?: string;
 	}
@@ -10,6 +10,7 @@
 	let { size = 'md', kind = 'book', class: className = '' }: Props = $props();
 
 	const sizeClasses = {
+		xs: 'w-8 h-8',
 		sm: 'w-12 h-12',
 		md: 'w-16 h-16',
 		lg: 'w-24 h-24'
@@ -36,15 +37,17 @@
 				<path
 					stroke-linecap="round"
 					stroke-linejoin="round"
-					stroke-width="1.9"
-					d="M4 9.5v5h4l5 4v-13l-5 4H4z"
+					stroke-width="1.75"
+					d="M9 17.5V6l11-2v11.5"
 				></path>
 				<path
 					stroke-linecap="round"
 					stroke-linejoin="round"
-					stroke-width="1.9"
-					d="M16 8.5a5 5 0 010 7M18.5 6a8 8 0 010 12"
+					stroke-width="1.75"
+					d="M9 10l11-2"
 				></path>
+				<ellipse cx="5.75" cy="18" rx="3.25" ry="2.5" transform="rotate(-12 5.75 18)" stroke-width="1.75"></ellipse>
+				<ellipse cx="16.75" cy="16" rx="3.25" ry="2.5" transform="rotate(-12 16.75 16)" stroke-width="1.75"></ellipse>
 			</svg>
 		{:else}
 			<svg
