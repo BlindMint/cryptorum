@@ -1068,51 +1068,41 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							<p class="text-sm leading-5 text-[var(--color-surface-text-muted)]">Add a subtle accent glow across the top of the app.</p>
 						</div>
 					</div>
-					<div class="flex items-center space-x-3">
-						<span class="text-sm text-[var(--color-surface-text-muted)]">{themeState.appearance.glowEnabled ? 'On' : 'Off'}</span>
-						<button
-							type="button"
-							onclick={() => updateGlowEnabled(!themeState.appearance.glowEnabled)}
-							class="relative w-12 h-6 rounded-full transition-colors {themeState.appearance.glowEnabled ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-border)]'}"
-							aria-label={themeState.appearance.glowEnabled ? 'Disable top glow' : 'Enable top glow'}
-							title={themeState.appearance.glowEnabled ? 'Disable top glow' : 'Enable top glow'}
-						>
-							<span
-								class="absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform {themeState.appearance.glowEnabled ? 'left-7' : 'left-1'}"
-							></span>
-						</button>
-					</div>
+					<input
+						type="checkbox"
+						checked={themeState.appearance.glowEnabled}
+						onchange={(event) => updateGlowEnabled(event.currentTarget.checked)}
+						class="settings-switch"
+						aria-label={themeState.appearance.glowEnabled ? 'Disable top glow' : 'Enable top glow'}
+						title={themeState.appearance.glowEnabled ? 'Disable top glow' : 'Enable top glow'}
+					>
 				</div>
 				<div class="p-5">
 				<!-- Auto Mode Toggle -->
-				<div class="flex items-center space-x-3 mb-4 {themeState.appearance.glowEnabled ? '' : 'opacity-50 pointer-events-none'}">
-					<input
-						type="checkbox"
-						id="glowAutoMode"
-						checked={themeState.appearance.glowAutoMode}
-						onchange={(e) => updateGlowAutoMode(e.currentTarget.checked)}
-						class="settings-switch"
-					>
-					<label for="glowAutoMode" class="text-sm font-medium text-[var(--color-surface-text)]">Automatic</label>
-					<span class="text-xs text-[var(--color-surface-text-muted)]">(Match primary color)</span>
-				</div>
+				<label for="glowAutoMode" class="mb-4 flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-4 py-3 {themeState.appearance.glowEnabled ? '' : 'opacity-50'}">
+					<span>
+						<span class="block text-sm font-medium text-[var(--color-surface-text)]">Automatic</span>
+						<span class="mt-0.5 block text-xs leading-5 text-[var(--color-surface-text-muted)]">Match the glow to the primary color.</span>
+					</span>
+					<input type="checkbox" id="glowAutoMode" checked={themeState.appearance.glowAutoMode} disabled={!themeState.appearance.glowEnabled} onchange={(e) => updateGlowAutoMode(e.currentTarget.checked)} class="settings-switch">
+				</label>
 
 				<!-- Glow Color (disabled when auto) -->
-				<div class="mb-4">
+				<div class="mb-4 {themeState.appearance.glowEnabled ? '' : 'opacity-50'}">
 					<div class="text-sm font-medium text-[var(--color-surface-text-muted)] mb-2">Custom Glow Color</div>
 					<div class="flex items-center space-x-3">
 						<input
 							type="color"
 							value={themeState.appearance.glowColor}
 							oninput={(e) => updateGlowColor(e.currentTarget.value)}
-							disabled={themeState.appearance.glowAutoMode}
+							disabled={!themeState.appearance.glowEnabled || themeState.appearance.glowAutoMode}
 							class="w-10 h-10 rounded-lg cursor-pointer border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] disabled:opacity-50 disabled:cursor-not-allowed"
 						>
 						<input
 							type="text"
 							value={themeState.appearance.glowColor}
 							oninput={(e) => updateGlowColor(e.currentTarget.value)}
-							disabled={themeState.appearance.glowAutoMode}
+							disabled={!themeState.appearance.glowEnabled || themeState.appearance.glowAutoMode}
 							class="flex-1 px-3 py-2 rounded-lg bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] text-[var(--color-surface-text)] disabled:opacity-50 disabled:cursor-not-allowed"
 							placeholder="#22c55e"
 						>
@@ -1149,20 +1139,14 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 							<p class="text-sm leading-5 text-[var(--color-surface-text-muted)]">Display a custom image behind the app interface.</p>
 						</div>
 					</div>
-					<div class="flex items-center space-x-3">
-						<span class="text-sm text-[var(--color-surface-text-muted)]">{themeState.appearance.bgImageEnabled ? 'On' : 'Off'}</span>
-						<button
-							type="button"
-							onclick={() => updateBgImageEnabled(!themeState.appearance.bgImageEnabled)}
-							class="relative w-12 h-6 rounded-full transition-colors {themeState.appearance.bgImageEnabled ? 'bg-[var(--color-primary-500)]' : 'bg-[var(--color-surface-border)]'}"
-							aria-label={themeState.appearance.bgImageEnabled ? 'Disable background image' : 'Enable background image'}
-							title={themeState.appearance.bgImageEnabled ? 'Disable background image' : 'Enable background image'}
-						>
-							<span
-								class="absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform {themeState.appearance.bgImageEnabled ? 'left-7' : 'left-1'}"
-							></span>
-						</button>
-					</div>
+					<input
+						type="checkbox"
+						checked={themeState.appearance.bgImageEnabled}
+						onchange={(event) => updateBgImageEnabled(event.currentTarget.checked)}
+						class="settings-switch"
+						aria-label={themeState.appearance.bgImageEnabled ? 'Disable background image' : 'Enable background image'}
+						title={themeState.appearance.bgImageEnabled ? 'Disable background image' : 'Enable background image'}
+					>
 				</div>
 				<div class="p-5">
 				<div class="mb-4 {themeState.appearance.bgImageEnabled ? '' : 'opacity-50 pointer-events-none'}">
@@ -1308,7 +1292,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				
 				<div class="p-5 space-y-5">
 					<!-- Appearance -->
-					<div>
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4 flex items-center">
 							<svg class="w-4 h-4 mr-2 text-[var(--color-surface-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path>
@@ -1381,7 +1365,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					</div>
 
 					<!-- Typography -->
-					<div>
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4 flex items-center">
 							<svg class="w-4 h-4 mr-2 text-[var(--color-surface-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
@@ -1481,22 +1465,15 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								</div>
 							</div>
 
-							<!-- Hyphenation -->
-							<div class="flex items-center space-x-3">
-								<input
-									type="checkbox"
-									id="hyphenate"
-									checked={localReaderSettings.epub.hyphenate}
-									onchange={(e) => updateEpubSetting('hyphenate', e.currentTarget.checked)}
-									class="settings-switch"
-								>
-								<label for="hyphenate" class="text-sm font-medium text-[var(--color-surface-text)]">Enable Hyphenation</label>
-							</div>
 						</div>
+						<label for="hyphenate" class="mt-4 flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+							<span class="text-sm font-medium text-[var(--color-surface-text)]">Enable Hyphenation</span>
+							<input type="checkbox" id="hyphenate" checked={localReaderSettings.epub.hyphenate} onchange={(e) => updateEpubSetting('hyphenate', e.currentTarget.checked)} class="settings-switch">
+						</label>
 					</div>
 
 					<!-- Layout -->
-					<div>
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4 flex items-center">
 							<svg class="w-4 h-4 mr-2 text-[var(--color-surface-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"></path>
@@ -1521,18 +1498,6 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 										Scrolled
 									</button>
 								</div>
-							</div>
-
-							<!-- Current Section -->
-							<div class="flex items-center space-x-3">
-								<input
-									type="checkbox"
-									id="show-current-section"
-									checked={localReaderSettings.showCurrentSection}
-									onchange={(e) => localReaderSettings = { ...localReaderSettings, showCurrentSection: e.currentTarget.checked }}
-									class="settings-switch"
-								>
-								<label for="show-current-section" class="text-sm font-medium text-[var(--color-surface-text)]">Show Current Section</label>
 							</div>
 
 							<!-- Column Gap -->
@@ -1576,19 +1541,20 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								>
 							</div>
 						</div>
+						<label for="show-current-section" class="mt-4 flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+							<span class="text-sm font-medium text-[var(--color-surface-text)]">Show Current Section</span>
+							<input type="checkbox" id="show-current-section" checked={localReaderSettings.showCurrentSection} onchange={(e) => localReaderSettings = { ...localReaderSettings, showCurrentSection: e.currentTarget.checked }} class="settings-switch">
+						</label>
+					</div>
+
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
+						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Controls</h3>
+						<label for="epub-auto-hide-controls" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+							<span class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</span>
+							<input type="checkbox" id="epub-auto-hide-controls" checked={localReaderSettings.epub.autoHideControls} onchange={(e) => updateEpubSetting('autoHideControls', e.currentTarget.checked)} class="settings-switch">
+						</label>
 					</div>
 				</div>
-			</div>
-
-			<div class="flex items-center space-x-3">
-				<input
-					type="checkbox"
-					id="epub-auto-hide-controls"
-					checked={localReaderSettings.epub.autoHideControls}
-					onchange={(e) => updateEpubSetting('autoHideControls', e.currentTarget.checked)}
-					class="settings-switch"
-				>
-				<label for="epub-auto-hide-controls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
 			</div>
 
 			<!-- PDF Reader Settings -->
@@ -1606,7 +1572,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				</div>
 				
 				<div class="p-5 space-y-5">
-					<div>
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Display</h3>
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 							<div>
@@ -1622,27 +1588,15 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								</select>
 							</div>
 
-							<div class="flex items-center space-x-3">
-								<input
-									type="checkbox"
-									id="pdfAutoHideControls"
-									checked={localReaderSettings.pdf.autoHideControls}
-									onchange={(e) => updatePdfSetting('autoHideControls', e.currentTarget.checked)}
-									class="settings-switch"
-								>
-								<label for="pdfAutoHideControls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
-							</div>
+							<label for="pdfAutoHideControls" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+								<span class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</span>
+								<input type="checkbox" id="pdfAutoHideControls" checked={localReaderSettings.pdf.autoHideControls} onchange={(e) => updatePdfSetting('autoHideControls', e.currentTarget.checked)} class="settings-switch">
+							</label>
 
-							<div class="flex items-center space-x-3">
-								<input
-									type="checkbox"
-									id="pdfStandardFullscreen"
-									checked={localReaderSettings.pdf.useStandardFullscreen}
-									onchange={(e) => updatePdfSetting('useStandardFullscreen', e.currentTarget.checked)}
-									class="settings-switch"
-								>
-								<label for="pdfStandardFullscreen" class="text-sm font-medium text-[var(--color-surface-text)]">Use Standard Fullscreen</label>
-							</div>
+							<label for="pdfStandardFullscreen" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+								<span class="text-sm font-medium text-[var(--color-surface-text)]">Use Standard Fullscreen</span>
+								<input type="checkbox" id="pdfStandardFullscreen" checked={localReaderSettings.pdf.useStandardFullscreen} onchange={(e) => updatePdfSetting('useStandardFullscreen', e.currentTarget.checked)} class="settings-switch">
+							</label>
 						</div>
 					</div>
 				</div>
@@ -1664,7 +1618,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				
 				<div class="p-5 space-y-5">
 					<!-- Display Settings -->
-					<div>
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Display</h3>
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 							<!-- Page Spread -->
@@ -1741,32 +1695,20 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					</div>
 
 					<!-- Comic-Specific -->
-					<div>
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Comic-Specific</h3>
 						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 							<!-- Manga Mode -->
-							<div class="flex items-center space-x-3">
-								<input
-									type="checkbox"
-									id="mangaMode"
-									checked={localReaderSettings.cbx.mangaMode}
-									onchange={(e) => updateCbxSetting('mangaMode', e.currentTarget.checked)}
-									class="settings-switch"
-								>
-								<label for="mangaMode" class="text-sm font-medium text-[var(--color-surface-text)]">Manga Mode (RTL)</label>
-							</div>
+							<label for="mangaMode" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+								<span class="text-sm font-medium text-[var(--color-surface-text)]">Manga Mode (RTL)</span>
+								<input type="checkbox" id="mangaMode" checked={localReaderSettings.cbx.mangaMode} onchange={(e) => updateCbxSetting('mangaMode', e.currentTarget.checked)} class="settings-switch">
+							</label>
 
 							<!-- Panel View -->
-							<div class="flex items-center space-x-3">
-								<input
-									type="checkbox"
-									id="panelView"
-									checked={localReaderSettings.cbx.panelViewEnabled}
-									onchange={(e) => updateCbxSetting('panelViewEnabled', e.currentTarget.checked)}
-									class="settings-switch"
-								>
-								<label for="panelView" class="text-sm font-medium text-[var(--color-surface-text)]">Guided Panel Zoom</label>
-							</div>
+							<label for="panelView" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+								<span class="text-sm font-medium text-[var(--color-surface-text)]">Guided Panel Zoom</span>
+								<input type="checkbox" id="panelView" checked={localReaderSettings.cbx.panelViewEnabled} onchange={(e) => updateCbxSetting('panelViewEnabled', e.currentTarget.checked)} class="settings-switch">
+							</label>
 
 							<!-- Spread Handling -->
 							<div>
@@ -1832,16 +1774,10 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</div>
 					{/if}
 
-					<div class="flex items-center space-x-3">
-						<input
-							type="checkbox"
-							id="cbx-auto-hide-controls"
-							checked={localReaderSettings.cbx.autoHideControls}
-							onchange={(e) => updateCbxSetting('autoHideControls', e.currentTarget.checked)}
-							class="settings-switch"
-						>
-						<label for="cbx-auto-hide-controls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
-					</div>
+					<label for="cbx-auto-hide-controls" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 px-4 py-3">
+						<span class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</span>
+						<input type="checkbox" id="cbx-auto-hide-controls" checked={localReaderSettings.cbx.autoHideControls} onchange={(e) => updateCbxSetting('autoHideControls', e.currentTarget.checked)} class="settings-switch">
+					</label>
 				</div>
 			</div>
 
@@ -1860,7 +1796,9 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				</div>
 				
 				<div class="p-5 space-y-5">
-					<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
+						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Reading Pace and Typography</h3>
+						<div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
 						<!-- WPM -->
 						<div>
 							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Words Per Minute</div>
@@ -1952,9 +1890,12 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								>+</button>
 							</div>
 						</div>
+						</div>
 					</div>
 
-					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
+						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Focus Cues</h3>
+						<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 						<!-- Accent Color -->
 						<div>
 							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Accent Color</div>
@@ -1970,27 +1911,16 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</div>
 
 						<!-- Accent Enabled -->
-						<div class="flex items-center space-x-3">
-							<input
-								type="checkbox"
-								id="accent-enabled"
-								checked={localReaderSettings.speedReader.accentEnabled}
-								onchange={(e) => updateSpeedReaderSetting('accentEnabled', e.currentTarget.checked)}
-								class="settings-switch"
-							>
-							<label for="accent-enabled" class="text-sm font-medium text-[var(--color-surface-text)]">Enable accent character</label>
-						</div>
+						<label for="accent-enabled" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+							<span class="text-sm font-medium text-[var(--color-surface-text)]">Enable Accent Character</span>
+							<input type="checkbox" id="accent-enabled" checked={localReaderSettings.speedReader.accentEnabled} onchange={(e) => updateSpeedReaderSetting('accentEnabled', e.currentTarget.checked)} class="settings-switch">
+						</label>
 
 						<!-- Horizontal Bars -->
-						<div class="flex items-center space-x-3">
-							<input
-								type="checkbox"
-								id="horizontal-bars"
-								checked={localReaderSettings.speedReader.horizontalBars}
-								onchange={(e) => updateSpeedReaderSetting('horizontalBars', e.currentTarget.checked)}
-								class="settings-switch"
-							>
-							<label for="horizontal-bars" class="text-sm font-medium text-[var(--color-surface-text)]">Show horizontal focus lines</label>
+						<label for="horizontal-bars" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+							<span class="text-sm font-medium text-[var(--color-surface-text)]">Show Horizontal Focus Lines</span>
+							<input type="checkbox" id="horizontal-bars" checked={localReaderSettings.speedReader.horizontalBars} onchange={(e) => updateSpeedReaderSetting('horizontalBars', e.currentTarget.checked)} class="settings-switch">
+						</label>
 						</div>
 					</div>
 				</div>
@@ -2011,46 +1941,37 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				</div>
 				
 				<div class="p-5">
-					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/45 p-4">
+						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Playback and Controls</h3>
+						<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 						<!-- Playback Speed -->
 						<div>
 							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Default Playback Speed</div>
-							<select 
-								value={localReaderSettings.audio.playbackSpeed} 
+							<select
+								value={String(Number(localReaderSettings.audio.playbackSpeed) || 1)}
 								onchange={(e) => updateAudioSetting('playbackSpeed', parseFloat(e.currentTarget.value))}
 								class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 							>
 								<option value="0.5">0.5x</option>
 								<option value="0.75">0.75x</option>
-								<option value="1.0">1.0x (Normal)</option>
+								<option value="1">1.0x (Normal)</option>
 								<option value="1.25">1.25x</option>
 								<option value="1.5">1.5x</option>
 								<option value="1.75">1.75x</option>
-								<option value="2.0">2.0x</option>
+								<option value="2">2.0x</option>
 							</select>
 						</div>
 
 						<!-- Auto-advance -->
-						<div class="flex items-center space-x-3">
-							<input
-								type="checkbox"
-								id="auto-advance"
-								checked={localReaderSettings.audio.autoAdvance}
-								onchange={(e) => updateAudioSetting('autoAdvance', e.currentTarget.checked)}
-								class="settings-switch"
-							>
-							<label for="auto-advance" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-advance to next chapter</label>
-						</div>
+						<label for="auto-advance" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+							<span class="text-sm font-medium text-[var(--color-surface-text)]">Auto-advance to Next Chapter</span>
+							<input type="checkbox" id="auto-advance" checked={localReaderSettings.audio.autoAdvance} onchange={(e) => updateAudioSetting('autoAdvance', e.currentTarget.checked)} class="settings-switch">
+						</label>
 
-						<div class="flex items-center space-x-3">
-							<input
-								type="checkbox"
-								id="audio-auto-hide-controls"
-								checked={localReaderSettings.audio.autoHideControls}
-								onchange={(e) => updateAudioSetting('autoHideControls', e.currentTarget.checked)}
-								class="settings-switch"
-							>
-							<label for="audio-auto-hide-controls" class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</label>
+						<label for="audio-auto-hide-controls" class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-4 py-3">
+							<span class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</span>
+							<input type="checkbox" id="audio-auto-hide-controls" checked={localReaderSettings.audio.autoHideControls} onchange={(e) => updateAudioSetting('autoHideControls', e.currentTarget.checked)} class="settings-switch">
+						</label>
 						</div>
 					</div>
 				</div>
