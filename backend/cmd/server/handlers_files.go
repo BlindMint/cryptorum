@@ -660,7 +660,7 @@ func serveBookFileByID(w http.ResponseWriter, r *http.Request, disposition strin
 	err = appDB.QueryRow(`
 		SELECT path, format
 		FROM book_file
-		WHERE id = ? AND book_id = ?
+		WHERE id = ? AND book_id = ? AND missing_at IS NULL
 	`, fileIDInt, bookIDInt).Scan(&filePath, &format)
 	if err != nil {
 		errorResponse(w, http.StatusNotFound, "Book file not found")

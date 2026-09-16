@@ -9,6 +9,7 @@ A personal digital library application for self-hosting. Organize, read, and man
 - **Built-in Readers**: Read books directly in the app with dedicated readers for ebooks, PDFs, comics, audiobooks, and speed reading
 - **EmbedPDF PDF Reader**: PDF reading is powered by EmbedPDF/PDFium, not PDF.js, with app-integrated progress, resume, search access, auto-hiding chrome, and theme-aware controls
 - **Full-Text Search**: Find books quickly with SQLite FTS5 search
+- **OPDS 2 Catalog**: Browse and download the library from compatible reading apps
 - **Reading Progress**: Track and resume progress across supported readers, with cover progress bars for opened books
 - **Discovery**: Dashboard discovery and similar-book recommendations can exclude selected libraries while keeping those books searchable and readable
 - **Cover Metadata**: Optional file-format chips on covers, including library/dashboard/shelf cards and similar books
@@ -150,6 +151,18 @@ Set `auth.mode` explicitly:
 Cryptorum does not ship default credentials. Generate a password hash during setup and keep `config.yaml` out of source control.
 
 Changing the configured username or password hash revokes existing sessions. When upgrading a database that previously contained additional accounts, Cryptorum preserves those rows and their data for safety, revokes their sessions, and prevents new accounts from being created. The single owner account can access every library.
+
+## OPDS 2
+
+Cryptorum can expose the library as an OPDS 2 catalog. Open **Settings → OPDS** to enable or disable the catalog, choose its title, and copy the catalog URL. The default URL is:
+
+```text
+https://your-cryptorum-host/opds/
+```
+
+The catalog includes all books with available files, recently added books, libraries, authors, series, shelves, and search. Each available file format is offered as a separate acquisition link.
+
+When `auth.mode` is `password`, OPDS clients use the same configured username and password through HTTP Basic authentication. When `auth.mode` is `none`, the catalog is available without authentication. Use HTTPS whenever the catalog is accessed outside a trusted local network; Basic authentication does not encrypt credentials on its own.
 
 ## Development
 

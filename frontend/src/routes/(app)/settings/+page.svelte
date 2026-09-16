@@ -7,6 +7,7 @@
 import ThemePreviewSwatch from '$lib/components/ThemePreviewSwatch.svelte';
 import SystemPanel from './SystemPanel.svelte';
 import JobsPanel from './JobsPanel.svelte';
+import OpdsPanel from './OpdsPanel.svelte';
 import LibraryModal from '$lib/components/LibraryModal.svelte';
 import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	
@@ -38,7 +39,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	let globalMetadataProtectionCheckbox: HTMLInputElement | null = $state(null);
 	let scanPollTimer: number | null = null;
 	let activeLibraryScanJobs = $state<any[]>([]);
-	let activeTab = $state<'general' | 'reader' | 'appearance' | 'jobs' | 'system'>('general');
+	let activeTab = $state<'general' | 'reader' | 'appearance' | 'opds' | 'jobs' | 'system'>('general');
 	let settingsTabContainer: HTMLDivElement | null = $state(null);
 	let settingsTabIndicatorStyle = $state('opacity: 0; transform: translateX(0); width: 0;');
 	let settingsSaved = $state(false);
@@ -818,7 +819,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		}
 	}
 
-	function setActiveTab(tab: 'general' | 'reader' | 'appearance' | 'jobs' | 'system') {
+	function setActiveTab(tab: 'general' | 'reader' | 'appearance' | 'opds' | 'jobs' | 'system') {
 		activeTab = tab;
 		if (typeof window === 'undefined') return;
 		const url = new URL(window.location.href);
@@ -869,7 +870,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 			} else if (tab === 'metadata') {
 				window.location.replace('/library');
 				return;
-			} else if (tab === 'general' || tab === 'reader' || tab === 'appearance' || tab === 'system') {
+			} else if (tab === 'general' || tab === 'reader' || tab === 'appearance' || tab === 'opds' || tab === 'system') {
 				activeTab = tab;
 			}
 		}
@@ -934,6 +935,13 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
   		>
   			Reader
   		</button>
+		<button
+			onclick={() => setActiveTab('opds')}
+			data-tab-active={activeTab === 'opds'}
+			class="settings-tab-button px-3.5 py-2 text-sm font-medium transition-colors {activeTab === 'opds' ? 'text-[var(--color-primary-500)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}"
+		>
+			OPDS
+		</button>
 		<button
 			onclick={() => setActiveTab('jobs')}
 			data-tab-active={activeTab === 'jobs'}
@@ -2411,6 +2419,8 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 				</div>
 			</div>
 		</div>
+	{:else if activeTab === 'opds'}
+		<OpdsPanel />
 	{:else if activeTab === 'jobs'}
 		<JobsPanel />
 	{:else if activeTab === 'system'}
