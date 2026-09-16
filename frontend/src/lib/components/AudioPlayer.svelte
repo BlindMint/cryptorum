@@ -1,0 +1,181 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { audioPlayer } from '$lib/stores/audioPlayer';
+	import { readerSettings } from '$lib/stores/readerSettings';
+
+	let { readerMode = false } = $props<{ readerMode?: boolean }>();
+	let audioElement: HTMLAudioElement;
+	let confirmClear = $state(false);
+	const current = $derived($audioPlayer.items.find((item) => item.id === $audioPlayer.currentItemId));
+	const currentIndex = $derived($audioPlayer.items.findIndex((item) => item.id === $audioPlayer.currentItemId));
+	const progressPercent = $derived($audioPlayer.duration > 0 ? ($audioPlayer.currentTime / $audioPlayer.duration) * 100 : 0);
+	const speedOptions = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+	onMount(() => {
+		const detach = audioPlayer.attach(audioElement);
+		void audioPlayer.initialize();
+		return detach;
+	});
+
+	function formatTime(value: number) {
+		if (!Number.isFinite(value) || value < 0) return '0:00';
+		const hours = Math.floor(value / 3600);
+		const minutes = Math.floor((value % 3600) / 60);
+		const seconds = Math.floor(value % 60).toString().padStart(2, '0');
+		return hours > 0 ? `${hours}:${minutes.toString().padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
+	}
+
+	function handleSeek(event: Event) {
+		audioPlayer.seek(Number((event.currentTarget as HTMLInputElement).value));
+	}
+
+	async function clearQueue() {
+		if (!confirmClear) {
+			confirmClear = true;
+			return;
+		}
+		confirmClear = false;
+		await audioPlayer.clear();
+	}
+</script>
+
+<audio
+	bind:this={audioElement}
+	class="hidden"
+	preload="metadata"
+	onloadedmetadata={() => audioPlayer.handleLoadedMetadata()}
+	ontimeupdate={() => audioPlayer.handleTimeUpdate()}
+	onplaying={() => audioPlayer.handlePlaying()}
+	onpause={() => audioPlayer.handlePause()}
+	onwaiting={() => audioPlayer.handleWaiting()}
+	onerror={() => audioPlayer.handleError()}
+	onended={() => audioPlayer.handleEnded()}
+></audio>
+
+{#if current}
+	{#if !$audioPlayer.expanded}
+		{#if readerMode}
+			<button
+				type="button"
+				class="audio-reader-tab fixed right-0 top-1/2 z-[75] flex -translate-y-1/2 flex-col items-center gap-1 rounded-l-xl border border-r-0 border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-2 py-3 text-[var(--color-surface-text)] shadow-xl backdrop-blur"
+				class:is-playing={$audioPlayer.isPlaying}
+				title="Open audio player"
+				aria-label="Open audio player for {current.title}"
+				onclick={() => audioPlayer.expand()}
+			>
+				<svg class="music-note h-5 w-5 text-[var(--color-primary-400)]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h5V3h-7Z"/></svg>
+				<span class="text-[10px] font-semibold">{Math.round(progressPercent)}%</span>
+			</button>
+		{:else}
+			<div class="fixed bottom-3 left-1/2 z-[75] flex w-[min(94vw,42rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2 shadow-2xl backdrop-blur">
+				<button type="button" class="rounded-full bg-[var(--color-primary-500)] p-2 text-white" aria-label={$audioPlayer.isPlaying ? 'Pause' : 'Play'} onclick={() => void audioPlayer.togglePlay()}>
+					{#if $audioPlayer.isPlaying}
+						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
+					{:else}
+						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5z"/></svg>
+					{/if}
+				</button>
+				<button type="button" class="min-w-0 flex-1 text-left" onclick={() => audioPlayer.expand()}>
+					<span class="block truncate text-sm font-semibold text-[var(--color-surface-text)]">{current.title}</span>
+					<span class="block truncate text-xs text-[var(--color-surface-text-muted)]">{formatTime($audioPlayer.currentTime)} · {Math.round(progressPercent)}%</span>
+				</button>
+				<div class="h-1 w-20 overflow-hidden rounded-full bg-[var(--color-surface-600)]"><div class="h-full bg-[var(--color-primary-500)]" style:width={`${progressPercent}%`}></div></div>
+				<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]" aria-label="Expand player" onclick={() => audioPlayer.expand()}>
+					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 14 5-5 5 5"/></svg>
+				</button>
+			</div>
+		{/if}
+	{:else}
+		<section class="fixed bottom-3 left-1/2 z-[75] w-[min(94vw,64rem)] -translate-x-1/2 overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur" aria-label="Audio player">
+			<div class="flex items-start gap-3 p-3 sm:items-center sm:gap-4 sm:p-4">
+				<img src={`/api/covers/${current.book_id}/thumb?size=sm`} alt="" class="h-14 w-11 flex-none rounded-md bg-[var(--color-surface-700)] object-cover sm:h-20 sm:w-14" />
+				<div class="min-w-0 flex-1">
+					<div class="flex items-start justify-between gap-2">
+						<div class="min-w-0">
+							<a href={`/book/${current.book_id}`} class="block truncate text-sm font-semibold text-[var(--color-surface-text)] hover:text-[var(--color-primary-400)] sm:text-base">{current.title}</a>
+							<p class="truncate text-xs text-[var(--color-surface-text-muted)] sm:text-sm">{current.authors.length ? current.authors.join(', ') : current.filename}</p>
+						</div>
+						<div class="flex flex-none">
+							<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" title="Queue" aria-label="Toggle queue" aria-expanded={$audioPlayer.queueOpen} onclick={() => audioPlayer.toggleQueue()}>
+								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h12M3 12h9M3 18h6"/><path d="m16 15 5 3-5 3v-6Z"/></svg>
+							</button>
+							<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" title="Minimize" aria-label="Minimize audio player" onclick={() => audioPlayer.minimize()}>
+								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg>
+							</button>
+						</div>
+					</div>
+
+					<div class="mt-2 flex items-center gap-2">
+						<span class="w-10 text-right text-[10px] tabular-nums text-[var(--color-surface-text-muted)] sm:w-12 sm:text-xs">{formatTime($audioPlayer.currentTime)}</span>
+						<input class="audio-seek min-w-0 flex-1" type="range" min="0" max={$audioPlayer.duration || 0} step="0.1" value={$audioPlayer.currentTime} aria-label="Audio position" oninput={handleSeek} />
+						<span class="w-10 text-[10px] tabular-nums text-[var(--color-surface-text-muted)] sm:w-12 sm:text-xs">{formatTime($audioPlayer.duration)}</span>
+					</div>
+
+					<div class="mt-2 flex items-center justify-center gap-1 sm:gap-3">
+						<button type="button" class="player-control" disabled={currentIndex <= 0} aria-label="Previous queue item" onclick={() => void audioPlayer.previous()}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zm3 7 10-7v14L9 12z"/></svg></button>
+						<button type="button" class="player-control text-xs font-semibold" aria-label="Skip backward" onclick={() => audioPlayer.skip(-$readerSettings.audio.skipBackward)}>−{$readerSettings.audio.skipBackward}</button>
+						<button type="button" class="accent-action rounded-full p-3 focus-visible:outline-2" disabled={$audioPlayer.isLoading} aria-label={$audioPlayer.isPlaying ? 'Pause' : 'Play'} onclick={() => void audioPlayer.togglePlay()}>
+							{#if $audioPlayer.isLoading}
+								<svg class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3"/><path class="opacity-80" fill="currentColor" d="M12 3a9 9 0 0 1 9 9h-3a6 6 0 0 0-6-6V3Z"/></svg>
+							{:else if $audioPlayer.isPlaying}
+								<svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
+							{:else}
+								<svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5z"/></svg>
+							{/if}
+						</button>
+						<button type="button" class="player-control text-xs font-semibold" aria-label="Skip forward" onclick={() => audioPlayer.skip($readerSettings.audio.skipForward)}>+{$readerSettings.audio.skipForward}</button>
+						<button type="button" class="player-control" disabled={currentIndex < 0 || currentIndex >= $audioPlayer.items.length - 1} aria-label="Next queue item" onclick={() => void audioPlayer.next()}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM5 5l10 7-10 7V5z"/></svg></button>
+						<label class="ml-1">
+							<span class="sr-only">Playback speed</span>
+							<select class="rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-2 py-1.5 text-xs font-semibold text-[var(--color-surface-text)]" value={$audioPlayer.playbackSpeed} onchange={(event) => audioPlayer.setPlaybackSpeed(Number(event.currentTarget.value))}>
+								{#each speedOptions as speed}<option value={speed}>{speed}×</option>{/each}
+							</select>
+						</label>
+					</div>
+					{#if $audioPlayer.error}<p class="mt-2 text-center text-xs text-red-400" role="alert">{$audioPlayer.error}</p>{/if}
+				</div>
+			</div>
+
+			{#if $audioPlayer.queueOpen}
+				<div class="max-h-[42vh] overflow-y-auto border-t border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/75 p-3">
+					<div class="mb-2 flex items-center justify-between">
+						<h2 class="text-sm font-semibold text-[var(--color-surface-text)]">Queue <span class="text-[var(--color-surface-text-muted)]">({$audioPlayer.items.length})</span></h2>
+						<button type="button" class="rounded-md px-2 py-1 text-xs text-[var(--color-surface-text-muted)] hover:bg-red-500/10 hover:text-red-400" onclick={() => void clearQueue()}>{confirmClear ? 'Confirm clear' : 'Clear queue'}</button>
+					</div>
+					<ol class="space-y-1">
+						{#each $audioPlayer.items as item, index (item.id)}
+							<li class="flex items-center gap-2 rounded-lg px-2 py-2 {item.id === $audioPlayer.currentItemId ? 'bg-[var(--color-primary-500)]/12' : 'hover:bg-[var(--color-surface-700)]/70'}">
+								<button type="button" class="min-w-0 flex-1 text-left" aria-label={`Play ${item.title}`} onclick={() => void audioPlayer.setCurrent(item.id)}>
+									<span class="block truncate text-sm font-medium {item.id === $audioPlayer.currentItemId ? 'text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text)]'}">{index + 1}. {item.title}</span>
+									<span class="block truncate text-xs text-[var(--color-surface-text-muted)]">{item.authors.join(', ') || item.filename}</span>
+								</button>
+								<button type="button" class="queue-control" disabled={index === 0} aria-label="Move up" onclick={() => void audioPlayer.move(item.id, -1)}>↑</button>
+								<button type="button" class="queue-control" disabled={index === $audioPlayer.items.length - 1} aria-label="Move down" onclick={() => void audioPlayer.move(item.id, 1)}>↓</button>
+								<button type="button" class="queue-control hover:!text-red-400" aria-label={`Remove ${item.title}`} onclick={() => void audioPlayer.remove(item.id)}>×</button>
+							</li>
+						{/each}
+					</ol>
+				</div>
+			{/if}
+		</section>
+	{/if}
+{/if}
+
+<style>
+	.player-control {
+		display: inline-flex;
+		height: 2.25rem;
+		min-width: 2.25rem;
+		align-items: center;
+		justify-content: center;
+		border-radius: 9999px;
+		color: var(--color-surface-text-muted);
+	}
+	.player-control:hover:not(:disabled), .queue-control:hover:not(:disabled) { background: var(--color-surface-700); color: var(--color-surface-text); }
+	.player-control:disabled, .queue-control:disabled { opacity: 0.35; }
+	.queue-control { border-radius: 0.375rem; padding: 0.25rem 0.45rem; color: var(--color-surface-text-muted); }
+	.audio-seek { accent-color: var(--color-primary-500); }
+	.audio-reader-tab.is-playing .music-note { animation: audio-pulse 1.2s ease-in-out infinite; }
+	@keyframes audio-pulse { 50% { transform: translateY(-2px) rotate(6deg); } }
+	@media (prefers-reduced-motion: reduce) { .audio-reader-tab.is-playing .music-note { animation: none; } }
+</style>

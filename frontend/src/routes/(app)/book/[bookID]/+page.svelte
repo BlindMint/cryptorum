@@ -12,6 +12,7 @@
 	import ShelfPickerRow from '$lib/components/ShelfPickerRow.svelte';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
 	import { showFormatOnCover, showProgressChipOnCover, getFormatColor } from '$lib/stores';
+	import { audioPlayer } from '$lib/stores/audioPlayer';
 	import { addMetadataSuggestionsFromPayload, refreshMetadataSuggestions } from '$lib/stores/metadataSuggestions';
 	import { getCoverThumbUrl } from '$lib/utils/covers';
 	import {
@@ -482,12 +483,25 @@
 		saveError = 'Unable to preserve the unsaved metadata draft on this device. Save or cancel the edits before opening the reader.';
 	}
 
+	function handleReadAction(event: MouseEvent, file: any) {
+		handleReaderLaunch(event);
+		if (event.defaultPrevented || getReaderRouteKind(file?.format) !== 'audio') return;
+		event.preventDefault();
+		void audioPlayer.playBook(Number(book.id), Number(file.id));
+	}
+
+	function addPrimaryAudioToQueue() {
+		if (!book?.id || !primaryReadFile?.id) return;
+		void audioPlayer.addToQueue(Number(book.id), Number(primaryReadFile.id));
+	}
+
 	const readableFormats = $derived(getReadableFormats());
 	const readableFiles = $derived(getReadableFiles());
 	const primaryReadFormat = $derived(getPrimaryReadFormat());
 	const primaryReadFile = $derived(getPrimaryReadableFile(files, book?.resume_file_id, book?.resume_format || primaryReadFormat));
 	const primarySpeedReadFormat = $derived(getPrimarySpeedReadFormat());
 	const isAudioItem = $derived(getReaderRouteKind(primaryReadFile?.format || primaryReadFormat || getPreferredBookFormat(files) || book?.format) === 'audio');
+	const primaryAudioQueued = $derived(!!primaryReadFile?.id && $audioPlayer.items.some((item) => item.file_id === Number(primaryReadFile.id)));
 
 	function formatSize(bytes: number): string {
 		if (bytes < 1024) return bytes + ' B';
@@ -1464,7 +1478,7 @@
 								{#if primaryReadFormat}
 									<a
 									href={getBookReaderHref(book.id, primaryReadFile?.format || book.resume_format || primaryReadFormat, getCurrentBookDetailUrl(), primaryReadFile?.id || book.resume_file_id)}
-										onclick={handleReaderLaunch}
+										onclick={(event) => handleReadAction(event, primaryReadFile)}
 										title={formatHasDuplicateFiles(files, primaryReadFile?.format) ? getFileName(primaryReadFile?.path || '') : undefined}
 												class="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2 text-sm font-medium transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
 										>
@@ -1508,7 +1522,7 @@
 											href={getBookReaderHref(book.id, file.format, getCurrentBookDetailUrl(), file.id)}
 											onclick={(event) => {
 												formatMenuOpen = false;
-												handleReaderLaunch(event);
+												handleReadAction(event, file);
 											}}
 											class="read-file-menu-item flex items-start justify-between gap-3 px-3 py-2 text-sm text-[var(--color-surface-text)] {isCurrent ? 'is-current' : ''}"
 											title={getFileName(file.path || '')}
@@ -1539,6 +1553,17 @@
 								</div>
 							{/if}
 						</div>
+							{#if isAudioItem && primaryReadFile}
+								<button
+									type="button"
+									onclick={addPrimaryAudioToQueue}
+									disabled={primaryAudioQueued}
+									class="group flex w-full items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:cursor-default disabled:opacity-60 disabled:hover:border-[var(--color-surface-border)] disabled:hover:bg-[var(--color-surface-700)] sm:px-4"
+								>
+									<svg class="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h12M3 12h9M3 18h6"/><path d="M18 14v7m-3.5-3.5h7"/></svg>
+									{primaryAudioQueued ? 'In queue' : 'Add to queue'}
+								</button>
+							{/if}
 							{#if primarySpeedReadFormat}
 									<a
 											href={getSpeedReaderHref(book.id, book.speed_reader_format || primarySpeedReadFormat, getCurrentBookDetailUrl(), book.speed_reader_file_id)}

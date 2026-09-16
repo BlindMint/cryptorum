@@ -425,6 +425,16 @@ func initRoutes(r *chi.Mux) {
 		// Search
 		r.Get("/search", searchBooksHandler)
 
+		// Persistent audio player queue
+		r.Route("/audio/queue", func(r chi.Router) {
+			r.Get("/", GetAudioQueueHandler)
+			r.Post("/items", AddAudioQueueItemHandler)
+			r.Put("/current", SetAudioQueueCurrentHandler)
+			r.Put("/reorder", ReorderAudioQueueHandler)
+			r.Delete("/items/{itemID}", DeleteAudioQueueItemHandler)
+			r.Delete("/", ClearAudioQueueHandler)
+		})
+
 		// Authors and Series
 		r.Get("/authors", getAuthorsHandler)
 		r.Get("/series", getSeriesHandler)

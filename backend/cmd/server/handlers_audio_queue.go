@@ -1,0 +1,370 @@
+package main
+
+import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+)
+
+var supportedAudioFormats = map[string]bool{
+	"mp3": true, "m4a": true, "m4b": true,
+	"flac": true, "ogg": true, "wav": true,
+}
+
+type audioQueueItem struct {
+	ID       int64    `json:"id"`
+	BookID   int64    `json:"book_id"`
+	FileID   int64    `json:"file_id"`
+	Title    string   `json:"title"`
+	Authors  []string `json:"authors"`
+	Filename string   `json:"filename"`
+	Format   string   `json:"format"`
+}
+
+type audioQueueResponse struct {
+	Items         []audioQueueItem `json:"items"`
+	CurrentItemID *int64           `json:"current_item_id"`
+}
+
+func audioQueueOwnerID(r *http.Request) (int64, bool) {
+	current := getUserFromContext(r.Context())
+	if current == nil {
+		return 0, false
+	}
+	return userIDForScopedRows(current), true
+}
+
+func loadAudioQueue(ownerID int64) (audioQueueResponse, error) {
+	response := audioQueueResponse{Items: []audioQueueItem{}}
+	rows, err := appDB.Query(`
+		SELECT qi.id, qi.book_id, qi.file_id,
+		       COALESCE(NULLIF(bm.title, ''), bf.path), COALESCE(bm.authors, '[]'),
+		       bf.path, LOWER(bf.format)
+		FROM audio_queue_item qi
+		JOIN book b ON b.id = qi.book_id
+		JOIN book_file bf ON bf.id = qi.file_id AND bf.book_id = qi.book_id
+		LEFT JOIN book_metadata bm ON bm.book_id = qi.book_id
+		WHERE qi.owner_user_id = ? AND bf.missing_at IS NULL
+		ORDER BY qi.position, qi.id`, ownerID)
+	if err != nil {
+		return response, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item audioQueueItem
+		var authorsJSON, path string
+		if err := rows.Scan(&item.ID, &item.BookID, &item.FileID, &item.Title, &authorsJSON, &path, &item.Format); err != nil {
+			return response, err
+		}
+		item.Filename = filepath.Base(path)
+		if item.Title == path {
+			item.Title = strings.TrimSuffix(item.Filename, filepath.Ext(item.Filename))
+		}
+		if err := json.Unmarshal([]byte(authorsJSON), &item.Authors); err != nil {
+			item.Authors = []string{}
+		}
+		response.Items = append(response.Items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return response, err
+	}
+	var currentID sql.NullInt64
+	err = appDB.QueryRow(`SELECT current_item_id FROM audio_queue_state WHERE owner_user_id = ?`, ownerID).Scan(&currentID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return response, err
+	}
+	if currentID.Valid {
+		response.CurrentItemID = &currentID.Int64
+	}
+	return response, nil
+}
+
+func writeAudioQueueResponse(w http.ResponseWriter, ownerID int64, status int) {
+	response, err := loadAudioQueue(ownerID)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to load audio queue")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func GetAudioQueueHandler(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := audioQueueOwnerID(r)
+	if !ok {
+		errorResponse(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	writeAudioQueueResponse(w, ownerID, http.StatusOK)
+}
+
+type addAudioQueueItemRequest struct {
+	BookID      int64  `json:"book_id"`
+	FileID      *int64 `json:"file_id"`
+	Placement   string `json:"placement"`
+	MakeCurrent bool   `json:"make_current"`
+}
+
+func AddAudioQueueItemHandler(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := audioQueueOwnerID(r)
+	if !ok {
+		errorResponse(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	var request addAudioQueueItemRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&request); err != nil || request.BookID <= 0 {
+		errorResponse(w, http.StatusBadRequest, "Invalid queue item")
+		return
+	}
+	if request.Placement == "" {
+		request.Placement = "append"
+	}
+	if request.Placement != "append" && request.Placement != "next" {
+		errorResponse(w, http.StatusBadRequest, "Placement must be append or next")
+		return
+	}
+
+	query := `SELECT bf.id, LOWER(bf.format)
+		FROM book_file bf JOIN book b ON b.id = bf.book_id
+		WHERE bf.book_id = ? AND b.owner_user_id = ? AND bf.missing_at IS NULL`
+	args := []any{request.BookID, ownerID}
+	if request.FileID != nil {
+		query += " AND bf.id = ?"
+		args = append(args, *request.FileID)
+	} else {
+		query += " AND LOWER(bf.format) IN ('mp3', 'm4a', 'm4b', 'flac', 'ogg', 'wav')"
+	}
+	query += " ORDER BY bf.id LIMIT 1"
+	var fileID int64
+	var format string
+	if err := appDB.QueryRow(query, args...).Scan(&fileID, &format); err != nil {
+		errorResponse(w, http.StatusNotFound, "Audio file not found")
+		return
+	}
+	if !supportedAudioFormats[format] {
+		errorResponse(w, http.StatusBadRequest, "Selected file is not a supported audio format")
+		return
+	}
+
+	tx, err := appDB.Begin()
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+		return
+	}
+	defer tx.Rollback()
+	var itemID int64
+	err = tx.QueryRow(`SELECT id FROM audio_queue_item WHERE owner_user_id = ? AND file_id = ?`, ownerID, fileID).Scan(&itemID)
+	if errors.Is(err, sql.ErrNoRows) {
+		var position int
+		if request.Placement == "next" {
+			var currentPosition sql.NullInt64
+			_ = tx.QueryRow(`SELECT qi.position FROM audio_queue_state qs JOIN audio_queue_item qi ON qi.id = qs.current_item_id WHERE qs.owner_user_id = ?`, ownerID).Scan(&currentPosition)
+			if currentPosition.Valid {
+				position = int(currentPosition.Int64) + 1
+				if _, err = tx.Exec(`UPDATE audio_queue_item SET position = position + 1 WHERE owner_user_id = ? AND position >= ?`, ownerID, position); err != nil {
+					errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+					return
+				}
+			} else {
+				request.Placement = "append"
+			}
+		}
+		if request.Placement == "append" {
+			if err = tx.QueryRow(`SELECT COALESCE(MAX(position), -1) + 1 FROM audio_queue_item WHERE owner_user_id = ?`, ownerID).Scan(&position); err != nil {
+				errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+				return
+			}
+		}
+		result, execErr := tx.Exec(`INSERT INTO audio_queue_item (owner_user_id, book_id, file_id, position, added_at) VALUES (?, ?, ?, ?, ?)`, ownerID, request.BookID, fileID, position, time.Now().Unix())
+		if execErr != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+			return
+		}
+		itemID, err = result.LastInsertId()
+	} else if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+		return
+	}
+	var storedCurrent sql.NullInt64
+	currentErr := tx.QueryRow(`SELECT current_item_id FROM audio_queue_state WHERE owner_user_id = ?`, ownerID).Scan(&storedCurrent)
+	if currentErr != nil && !errors.Is(currentErr, sql.ErrNoRows) {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+		return
+	}
+	if request.MakeCurrent || !storedCurrent.Valid {
+		_, err = tx.Exec(`INSERT INTO audio_queue_state (owner_user_id, current_item_id, updated_at) VALUES (?, ?, ?)
+			ON CONFLICT(owner_user_id) DO UPDATE SET current_item_id = excluded.current_item_id, updated_at = excluded.updated_at`, ownerID, itemID, time.Now().Unix())
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+		return
+	}
+	writeAudioQueueResponse(w, ownerID, http.StatusCreated)
+}
+
+type setAudioQueueCurrentRequest struct {
+	ItemID *int64 `json:"item_id"`
+}
+
+func SetAudioQueueCurrentHandler(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := audioQueueOwnerID(r)
+	if !ok {
+		errorResponse(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	var request setAudioQueueCurrentRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request); err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid current queue item")
+		return
+	}
+	if request.ItemID != nil {
+		var exists int
+		if err := appDB.QueryRow(`SELECT 1 FROM audio_queue_item WHERE id = ? AND owner_user_id = ?`, *request.ItemID, ownerID).Scan(&exists); err != nil {
+			errorResponse(w, http.StatusNotFound, "Queue item not found")
+			return
+		}
+	}
+	_, err := appDB.Exec(`INSERT INTO audio_queue_state (owner_user_id, current_item_id, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT(owner_user_id) DO UPDATE SET current_item_id = excluded.current_item_id, updated_at = excluded.updated_at`, ownerID, request.ItemID, time.Now().Unix())
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+		return
+	}
+	writeAudioQueueResponse(w, ownerID, http.StatusOK)
+}
+
+type reorderAudioQueueRequest struct {
+	ItemIDs []int64 `json:"item_ids"`
+}
+
+func ReorderAudioQueueHandler(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := audioQueueOwnerID(r)
+	if !ok {
+		errorResponse(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	var request reorderAudioQueueRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)).Decode(&request); err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid queue order")
+		return
+	}
+	var count int
+	if err := appDB.QueryRow(`SELECT COUNT(*) FROM audio_queue_item WHERE owner_user_id = ?`, ownerID).Scan(&count); err != nil || count != len(request.ItemIDs) {
+		errorResponse(w, http.StatusBadRequest, "Queue order must include every item")
+		return
+	}
+	seen := make(map[int64]bool, len(request.ItemIDs))
+	tx, err := appDB.Begin()
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to reorder audio queue")
+		return
+	}
+	defer tx.Rollback()
+	for position, itemID := range request.ItemIDs {
+		if seen[itemID] {
+			errorResponse(w, http.StatusBadRequest, "Queue order contains duplicates")
+			return
+		}
+		seen[itemID] = true
+		result, execErr := tx.Exec(`UPDATE audio_queue_item SET position = ? WHERE id = ? AND owner_user_id = ?`, position, itemID, ownerID)
+		if execErr != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to reorder audio queue")
+			return
+		}
+		rows, _ := result.RowsAffected()
+		if rows != 1 {
+			errorResponse(w, http.StatusBadRequest, "Queue order contains an unknown item")
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to reorder audio queue")
+		return
+	}
+	writeAudioQueueResponse(w, ownerID, http.StatusOK)
+}
+
+func DeleteAudioQueueItemHandler(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := audioQueueOwnerID(r)
+	if !ok {
+		errorResponse(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	itemID, err := strconv.ParseInt(chi.URLParam(r, "itemID"), 10, 64)
+	if err != nil || itemID <= 0 {
+		errorResponse(w, http.StatusBadRequest, "Invalid queue item")
+		return
+	}
+	tx, err := appDB.Begin()
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+		return
+	}
+	defer tx.Rollback()
+	var wasCurrent bool
+	var removedPosition int
+	if err := tx.QueryRow(`SELECT position FROM audio_queue_item WHERE id = ? AND owner_user_id = ?`, itemID, ownerID).Scan(&removedPosition); err != nil {
+		errorResponse(w, http.StatusNotFound, "Queue item not found")
+		return
+	}
+	_ = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM audio_queue_state WHERE owner_user_id = ? AND current_item_id = ?)`, ownerID, itemID).Scan(&wasCurrent)
+	result, err := tx.Exec(`DELETE FROM audio_queue_item WHERE id = ? AND owner_user_id = ?`, itemID, ownerID)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+		return
+	}
+	rows, _ := result.RowsAffected()
+	if rows != 1 {
+		errorResponse(w, http.StatusNotFound, "Queue item not found")
+		return
+	}
+	if wasCurrent {
+		var nextID sql.NullInt64
+		_ = tx.QueryRow(`SELECT id FROM audio_queue_item WHERE owner_user_id = ? AND position >= ? ORDER BY position, id LIMIT 1`, ownerID, removedPosition).Scan(&nextID)
+		_, err = tx.Exec(`UPDATE audio_queue_state SET current_item_id = ?, updated_at = ? WHERE owner_user_id = ?`, nextID, time.Now().Unix(), ownerID)
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+		return
+	}
+	writeAudioQueueResponse(w, ownerID, http.StatusOK)
+}
+
+func ClearAudioQueueHandler(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := audioQueueOwnerID(r)
+	if !ok {
+		errorResponse(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	tx, err := appDB.Begin()
+	if err == nil {
+		_, err = tx.Exec(`DELETE FROM audio_queue_state WHERE owner_user_id = ?`, ownerID)
+	}
+	if err == nil {
+		_, err = tx.Exec(`DELETE FROM audio_queue_item WHERE owner_user_id = ?`, ownerID)
+	}
+	if err == nil {
+		err = tx.Commit()
+	} else if tx != nil {
+		_ = tx.Rollback()
+	}
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to clear audio queue")
+		return
+	}
+	writeAudioQueueResponse(w, ownerID, http.StatusOK)
+}

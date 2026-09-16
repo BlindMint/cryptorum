@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import TopBar from '$lib/components/TopBar.svelte';
+	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
 	import ProgressConflictBanner from '$lib/components/ProgressConflictBanner.svelte';
 	import { mobileMenuOpen } from '$lib/stores';
 	import { readerSettings } from '$lib/stores/readerSettings';
@@ -184,5 +185,6 @@
 					</main>
 				</div>
 		</div>
+		<AudioPlayer readerMode={isReaderPage} />
 	</div>
  {/if}
