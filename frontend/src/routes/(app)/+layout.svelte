@@ -6,6 +6,7 @@
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
 	import ProgressConflictBanner from '$lib/components/ProgressConflictBanner.svelte';
 	import { mobileMenuOpen } from '$lib/stores';
+	import { audioPlayer } from '$lib/stores/audioPlayer';
 	import { readerSettings } from '$lib/stores/readerSettings';
 
 	let { children } = $props();
@@ -15,6 +16,7 @@
 	let wakeLock: WakeLockSentinel | null = null;
 	let wakeLockRequestInFlight = false;
 	let lastRouteKey = '';
+	let wasReaderPage = false;
 
 	const isReaderPage = $derived($page.url.pathname.includes('/reader/'));
 	const isLibraryPage = $derived($page.url.pathname === '/library');
@@ -90,6 +92,13 @@
 		if (typeof document === 'undefined') return;
 		document.documentElement.classList.toggle('reader-route', isReaderPage);
 		return () => document.documentElement.classList.remove('reader-route');
+	});
+
+	$effect(() => {
+		if (isReaderPage && !wasReaderPage) {
+			audioPlayer.minimize();
+		}
+		wasReaderPage = isReaderPage;
 	});
 
 	$effect(() => {
@@ -185,6 +194,6 @@
 					</main>
 				</div>
 		</div>
-		<AudioPlayer readerMode={isReaderPage} />
 	</div>
+	<AudioPlayer readerMode={isReaderPage} />
  {/if}

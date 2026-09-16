@@ -54,7 +54,7 @@
 ></audio>
 
 {#if $audioPlayer.initialized && $audioPlayer.expanded && !current && !$audioPlayer.dismissed}
-	<section class="audio-player-bottom fixed left-1/2 z-[75] w-[min(94vw,36rem)] -translate-x-1/2 rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${$bulkActionBarHeight}px)`} aria-label="Audio player">
+	<section class="audio-player-bottom fixed left-1/2 z-[250] w-[min(94vw,36rem)] -translate-x-1/2 rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${$bulkActionBarHeight}px)`} aria-label="Audio player">
 		<div class="flex items-start justify-between gap-4">
 			<div class="flex min-w-0 items-start gap-3">
 				<div class="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-[var(--color-primary-500)]/15 text-[var(--color-primary-400)]">
@@ -75,17 +75,18 @@
 		{#if readerMode}
 			<button
 				type="button"
-				class="audio-reader-tab fixed right-0 top-1/2 z-[75] flex -translate-y-1/2 flex-col items-center gap-1 rounded-l-xl border border-r-0 border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-2 py-3 text-[var(--color-surface-text)] shadow-xl backdrop-blur"
+				class="audio-reader-tab fixed right-0 top-1/2 z-[250] flex -translate-y-1/2 flex-col items-center gap-1.5 rounded-l-xl border border-r-0 border-[var(--color-primary-500)]/60 bg-[var(--color-surface-overlay)] px-2.5 py-3 text-[var(--color-surface-text)] shadow-2xl ring-1 ring-black/20 backdrop-blur"
 				class:is-playing={$audioPlayer.isPlaying}
 				title="Open audio player"
 				aria-label="Open audio player for {current.title}"
 				onclick={() => audioPlayer.expand()}
 			>
 				<svg class="music-note h-5 w-5 text-[var(--color-primary-400)]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h5V3h-7Z"/></svg>
+				<span class="text-[9px] font-bold uppercase tracking-wide text-[var(--color-surface-text-muted)] [writing-mode:vertical-rl]">Audio</span>
 				<span class="text-[10px] font-semibold">{Math.round(progressPercent)}%</span>
 			</button>
 		{:else}
-			<div class="audio-player-bottom fixed left-1/2 z-[75] flex w-[min(94vw,42rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2 shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${$bulkActionBarHeight}px)`}>
+			<div class="audio-player-bottom fixed left-1/2 z-[250] flex w-[min(94vw,42rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2 shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${$bulkActionBarHeight}px)`}>
 				<button type="button" class="rounded-full bg-[var(--color-primary-500)] p-2 text-white" aria-label={$audioPlayer.isPlaying ? 'Pause' : 'Play'} onclick={() => void audioPlayer.togglePlay()}>
 					{#if $audioPlayer.isPlaying}
 						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
@@ -107,7 +108,7 @@
 			</div>
 		{/if}
 	{:else}
-		<section class="audio-player-bottom fixed left-1/2 z-[75] w-[min(94vw,64rem)] -translate-x-1/2 overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${$bulkActionBarHeight}px)`} aria-label="Audio player">
+		<section class="audio-player-bottom fixed left-1/2 z-[250] w-[min(94vw,64rem)] -translate-x-1/2 overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${$bulkActionBarHeight}px)`} aria-label="Audio player">
 			<div class="flex items-start gap-3 p-3 sm:items-center sm:gap-4 sm:p-4">
 				<img src={`/api/covers/${current.book_id}/thumb?size=sm`} alt="" class="h-14 w-11 flex-none rounded-md bg-[var(--color-surface-700)] object-cover sm:h-20 sm:w-14" />
 				<div class="min-w-0 flex-1">
