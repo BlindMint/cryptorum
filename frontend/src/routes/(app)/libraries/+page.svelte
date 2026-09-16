@@ -149,7 +149,7 @@
 						</div>
 					</div>
 					{#if libraryStatusLabel(library)}
-						<div class="mt-3 inline-flex rounded-full border border-[var(--color-primary-500)]/35 bg-[var(--color-primary-500)]/10 px-2.5 py-1 text-xs font-medium text-[var(--color-primary-400)]">
+						<div class="passive-status-indicator mt-3">
 							{libraryStatusLabel(library)}
 						</div>
 					{/if}

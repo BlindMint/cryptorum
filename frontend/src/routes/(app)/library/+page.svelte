@@ -1670,8 +1670,8 @@
 						<span class={compactToolbar ? 'hidden' : 'hidden sm:inline'}>Filter</span>
 						{#if getActiveFilters().length > 0}
 							<span class={compactToolbar
-								? 'absolute -right-1 -top-1 min-w-5 rounded-full bg-[var(--color-primary-500)] px-1.5 py-0.5 text-center text-[10px] leading-none text-white'
-								: 'ml-2 px-2 py-0.5 text-xs rounded-full bg-[var(--color-primary-500)] text-white'}
+								? 'passive-count-indicator absolute -right-1 -top-1'
+								: 'passive-count-indicator ml-2'}
 							>
 								{getActiveFilters().length}
 							</span>

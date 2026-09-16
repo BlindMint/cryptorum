@@ -2088,7 +2088,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 											{/if}
 											<h3 class="font-medium text-[var(--color-surface-text)]">{lib.name}</h3>
 											{#if isLibraryScanRunning(lib)}
-												<span class="rounded-full bg-[var(--color-primary-500)]/15 px-2 py-0.5 text-xs font-semibold text-[var(--color-primary-300)]">Scanning</span>
+												<span class="passive-status-indicator">Scanning</span>
 											{:else if isLibraryScanQueued(lib)}
 												<span class="rounded-full bg-[var(--color-surface-base)] px-2 py-0.5 text-xs font-semibold text-[var(--color-surface-text-muted)]">Queued</span>
 											{/if}

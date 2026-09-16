@@ -132,7 +132,7 @@
 											<span class="text-xs text-[var(--color-primary-400)]">
 														{formatSessionDuration(item)}{item.activity_tracked ? ' active' : ''}
 											</span>
-											<span class="px-2 py-0.5 text-[10px] rounded-full bg-[var(--color-primary-500)]/20 text-[var(--color-primary-300)]">
+											<span class="passive-status-indicator">
 												{item.reader_type === 'speed' ? 'Speed Reader' : item.reader_type === 'epub' || item.reader_type === 'normal' ? 'Normal Reader' : item.reader_type}
 											</span>
 										</div>
