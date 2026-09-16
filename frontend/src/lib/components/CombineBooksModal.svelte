@@ -119,10 +119,17 @@
 			saving = false;
 		}
 	}
+
+	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape' && !saving) onClose();
+	}
 </script>
 
-<div class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-	<div class="flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
+<svelte:window onkeydown={handleKeydown} />
+
+<div class="fixed inset-0 z-[60] flex items-center justify-center p-4">
+	<button type="button" class="absolute inset-0 bg-black/60 backdrop-blur-sm" aria-label="Close combine books" onclick={() => { if (!saving) onClose(); }}></button>
+	<div class="relative flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
 		<div class="flex items-start justify-between gap-4 border-b border-[var(--color-surface-border)] px-5 py-4">
 			<div>
 				<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Combine books</h2>

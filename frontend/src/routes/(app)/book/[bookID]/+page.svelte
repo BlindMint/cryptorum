@@ -1294,14 +1294,14 @@
 									<button
 										type="button"
 										onclick={() => showMetadataProtection = true}
-										class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
-										title="Metadata protection"
+										class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] {(book.locked_fields?.length || book.library_metadata_protection_enabled) ? 'text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)]'}"
+										title={(book.locked_fields?.length || book.library_metadata_protection_enabled) ? 'Metadata protection is active' : 'Manage metadata protection'}
+										aria-label={(book.locked_fields?.length || book.library_metadata_protection_enabled) ? 'Metadata protection is active; open protection settings' : 'Open metadata protection settings'}
 									>
-										<svg class="h-4 w-4 text-[var(--color-primary-400)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+										<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 											<rect x="5" y="10" width="14" height="10" rx="2"></rect>
 											<path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
 										</svg>
-										Protection
 									</button>
 									<button
 										type="button"
@@ -1501,7 +1501,7 @@
 								</button>
 							{/if}
 							{#if formatMenuOpen && readableFiles.length > 1}
-								<div class="absolute left-0 top-full z-30 mt-2 w-full min-w-full overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] shadow-xl md:w-80" role="menu">
+								<div class="floating-surface absolute left-0 top-full z-30 mt-2 w-full min-w-full overflow-hidden rounded-lg border md:w-80" role="menu">
 									{#each readableFiles as file}
 										{@const isCurrent = file.id === primaryReadFile?.id}
 										<a
@@ -1959,7 +1959,7 @@
 															Convert
 														</button>
 													{#if convertMenuFileId === file.id}
-														<div class="absolute right-0 mt-2 w-64 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-xl z-20 p-3 space-y-3">
+														<div class="floating-surface absolute right-0 z-20 mt-2 w-64 space-y-3 rounded-lg border p-3">
 															<div>
 																<div class="text-sm font-medium text-[var(--color-surface-text)]">Convert format</div>
 																<div class="text-xs text-[var(--color-surface-text-muted)]">Choose a download format before saving.</div>

@@ -189,8 +189,8 @@
 			class={panelOnly
 				? 'w-full overflow-hidden'
 				: mobileMenu
-					? 'fixed left-3 right-3 top-[calc(var(--app-topbar-height)+0.75rem)] max-h-[calc(100dvh-var(--app-topbar-height)-1.5rem)] rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-sm overflow-hidden z-[95]'
-					: 'absolute right-0 mt-3 w-[28rem] max-w-[calc(100vw-2rem)] rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-sm overflow-hidden z-[80]'}
+					? 'floating-surface fixed left-3 right-3 top-[calc(var(--app-topbar-height)+0.75rem)] max-h-[calc(100dvh-var(--app-topbar-height)-1.5rem)] rounded-xl border overflow-hidden z-[95]'
+					: 'floating-surface absolute right-0 mt-3 w-[28rem] max-w-[calc(100vw-2rem)] rounded-xl border overflow-hidden z-[80]'}
 		>
 			{#if !hideHeader}
 				<div class="px-4 py-3 border-b border-[var(--color-surface-border)] flex items-center justify-between">

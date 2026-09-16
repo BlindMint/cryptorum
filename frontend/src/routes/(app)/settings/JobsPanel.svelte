@@ -325,13 +325,18 @@
 	{/if}
 
 	<section class="flex min-h-[24rem] flex-1 flex-col rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
-		<div class="space-y-4 border-b border-[var(--color-surface-border)] px-6 py-4">
-			<div class="flex flex-wrap items-start justify-between gap-5">
-				<div>
-					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Activity Log</h3>
-					<p class="text-sm text-[var(--color-surface-text-muted)]">
-						Most recent jobs, notifications, and app events · {unreadCount} active or unread
-					</p>
+		<div class="space-y-4 border-b border-[var(--color-surface-border)] px-5 py-3.5">
+			<div class="flex flex-wrap items-center justify-between gap-3">
+				<div class="flex min-w-0 items-center gap-3">
+					<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-primary-500)]/20">
+						<svg class="h-5 w-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+					</div>
+					<div class="min-w-0 space-y-0.5">
+						<h3 class="text-lg font-semibold leading-6 text-[var(--color-surface-text)]">Activity Log</h3>
+						<p class="text-sm leading-5 text-[var(--color-surface-text-muted)]">
+							Most recent jobs, notifications, and app events · {unreadCount} active or unread
+						</p>
+					</div>
 				</div>
 				<div class="flex flex-wrap items-center gap-2">
 					<div class="inline-flex rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
@@ -402,7 +407,7 @@
 							Export
 						</button>
 						{#if showExportMenu}
-							<div class="absolute right-0 z-20 mt-2 w-44 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-xl">
+							<div class="floating-surface absolute right-0 z-20 mt-2 w-44 overflow-hidden rounded-lg border">
 								<a href={buildActivityUrl('text')} download class="block px-3 py-2 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]" onclick={() => showExportMenu = false}>Export Text</a>
 								<a href={buildActivityUrl('json')} download class="block px-3 py-2 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]" onclick={() => showExportMenu = false}>Export JSON</a>
 							</div>

@@ -607,7 +607,7 @@
 							</button>
 						</div>
 						{#if showLibrarySortMenu}
-							<div class="absolute right-0 top-full z-[85] mt-1 w-28 overflow-hidden rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-0.5 shadow-xl" role="menu">
+							<div class="floating-surface absolute right-0 top-full z-[85] mt-1 w-28 overflow-hidden rounded-md border py-0.5" role="menu">
 								<button
 									type="button"
 									class="block w-full px-2.5 py-1.5 text-left text-xs text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-base)] {librarySortMode === 'name' ? 'text-[var(--color-primary-300)]' : ''}"
@@ -821,7 +821,7 @@
 
 {#if activeLibraryMenu}
 	<div
-		class="fixed z-[90] w-[196px] overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-1 shadow-2xl"
+		class="floating-surface fixed z-[90] w-[196px] overflow-hidden rounded-lg border py-1"
 		style:top={`${libraryMenuPosition.top}px`}
 		style:left={`${libraryMenuPosition.left}px`}
 		role="menu"

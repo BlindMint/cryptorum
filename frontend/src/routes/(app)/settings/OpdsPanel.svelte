@@ -100,9 +100,14 @@
 
 <div class="space-y-5">
 	<section class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
-		<div class="border-b border-[var(--color-surface-border)] px-6 py-4">
-			<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">OPDS Catalog</h2>
-			<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">Share your library with reading apps that support OPDS 2.</p>
+		<div class="flex items-center gap-3 border-b border-[var(--color-surface-border)] px-5 py-3.5">
+			<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-primary-500)]/20">
+				<svg class="h-5 w-5 text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+			</div>
+			<div class="min-w-0 space-y-0.5">
+				<h2 class="text-lg font-semibold leading-6 text-[var(--color-surface-text)]">OPDS Catalog</h2>
+				<p class="text-sm leading-5 text-[var(--color-surface-text-muted)]">Share your library with reading apps that support OPDS 2.</p>
+			</div>
 		</div>
 
 		{#if loading}
@@ -111,16 +116,12 @@
 			</div>
 		{:else}
 			<form class="space-y-5 p-6" onsubmit={(event) => { event.preventDefault(); void saveSettings(); }}>
-				<label class="flex items-start gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
-					<input
-						type="checkbox"
-						bind:checked={settings.enabled}
-						class="mt-0.5 rounded border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
-					>
+				<label class="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
 					<span>
 						<span class="block text-sm font-medium text-[var(--color-surface-text)]">Enable OPDS catalog</span>
-						<span class="mt-1 block text-sm text-[var(--color-surface-text-muted)]">When disabled, catalog, cover, and download URLs return not found.</span>
+						<span class="mt-0.5 block text-sm leading-5 text-[var(--color-surface-text-muted)]">When disabled, catalog, cover, and download URLs return not found.</span>
 					</span>
+					<input type="checkbox" bind:checked={settings.enabled} class="settings-switch">
 				</label>
 
 				<label class="block space-y-2">

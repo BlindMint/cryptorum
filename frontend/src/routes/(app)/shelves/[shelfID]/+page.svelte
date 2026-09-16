@@ -677,7 +677,7 @@
 					</svg>
 				</button>
 				{#if showSettingsMenu}
-					<div class="absolute right-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-3 shadow-lg">
+					<div class="floating-surface absolute right-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border py-3">
 						<div class="px-4 pb-3 border-b border-[var(--color-surface-border)]">
 							<div class="mb-2 text-sm font-medium text-[var(--color-surface-text)]">View</div>
 							<div class="grid grid-cols-2 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-1">
@@ -776,7 +776,7 @@
 					</button>
 				</div>
 				{#if showSortMenu}
-					<div class="absolute right-0 top-full z-40 mt-2 w-48 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-1 shadow-lg">
+					<div class="floating-surface absolute right-0 top-full z-40 mt-2 w-48 overflow-hidden rounded-lg border py-1">
 						{#each shelfSortOptions as option}
 							<button
 								type="button"
@@ -1007,7 +1007,7 @@
 								<span>Metadata</span>
 							</button>
 							{#if showMetadataMenu}
-								<div class="absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
+								<div class="floating-surface absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-lg border">
 									<button
 										type="button"
 										class="block w-full px-4 py-3 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
