@@ -13,7 +13,7 @@
 	let speedMenuElement = $state<HTMLDivElement>();
 	let confirmClear = $state(false);
 	let speedMenuOpen = $state(false);
-	let speedMenuRight = $state(0);
+	let speedMenuLeft = $state(0);
 	let speedMenuBottom = $state(0);
 	const current = $derived($audioPlayer.items.find((item) => item.id === $audioPlayer.currentItemId));
 	const currentIndex = $derived($audioPlayer.items.findIndex((item) => item.id === $audioPlayer.currentItemId));
@@ -74,7 +74,13 @@
 		}
 		if (!speedButtonElement) return;
 		const rect = speedButtonElement.getBoundingClientRect();
-		speedMenuRight = Math.max(8, window.innerWidth - rect.right);
+		const menuWidth = 96;
+		const viewportGutter = 8;
+		const centeredLeft = rect.left + (rect.width - menuWidth) / 2;
+		speedMenuLeft = Math.min(
+			Math.max(viewportGutter, centeredLeft),
+			Math.max(viewportGutter, window.innerWidth - menuWidth - viewportGutter)
+		);
 		speedMenuBottom = Math.max(8, window.innerHeight - rect.top + 8);
 		speedMenuOpen = true;
 	}
@@ -270,7 +276,7 @@
 			<div
 				bind:this={speedMenuElement}
 				class="audio-speed-menu fixed z-[10001] grid w-24 gap-1 rounded-xl border p-1.5"
-				style:right={`${speedMenuRight}px`}
+				style:left={`${speedMenuLeft}px`}
 				style:bottom={`${speedMenuBottom}px`}
 				role="menu"
 				aria-label="Playback speed"
