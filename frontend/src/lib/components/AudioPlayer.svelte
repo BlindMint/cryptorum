@@ -154,7 +154,7 @@
 						<button type="button" class="player-control" disabled={currentIndex < 0 || currentIndex >= $audioPlayer.items.length - 1} aria-label="Next queue item" onclick={() => void audioPlayer.next()}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM5 5l10 7-10 7V5z"/></svg></button>
 						<label class="ml-1">
 							<span class="sr-only">Playback speed</span>
-							<select class="rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-2 py-1.5 text-xs font-semibold text-[var(--color-surface-text)]" value={$audioPlayer.playbackSpeed} onchange={(event) => audioPlayer.setPlaybackSpeed(Number(event.currentTarget.value))}>
+							<select class="audio-speed-select rounded-md border px-2 py-1.5 text-xs font-semibold" value={$audioPlayer.playbackSpeed} onchange={(event) => audioPlayer.setPlaybackSpeed(Number(event.currentTarget.value))}>
 								{#each speedOptions as speed}<option value={speed}>{speed}×</option>{/each}
 							</select>
 						</label>
@@ -202,6 +202,22 @@
 	.player-control:disabled, .queue-control:disabled { opacity: 0.35; }
 	.queue-control { border-radius: 0.375rem; padding: 0.25rem 0.45rem; color: var(--color-surface-text-muted); }
 	.audio-seek { accent-color: var(--color-primary-500); }
+	.audio-speed-select {
+		border-color: var(--color-surface-border);
+		background: var(--color-surface-base);
+		color: var(--color-surface-text);
+		color-scheme: var(--color-surface-scheme);
+		cursor: pointer;
+	}
+	.audio-speed-select option {
+		background: var(--color-surface-base);
+		color: var(--color-surface-text);
+	}
+	.audio-speed-select:focus-visible {
+		border-color: var(--color-primary-500);
+		outline: 2px solid color-mix(in srgb, var(--color-primary-500) 55%, transparent);
+		outline-offset: 2px;
+	}
 	.audio-player-bottom { transition: bottom 180ms ease; }
 	.audio-reader-tab.is-playing .music-note { animation: audio-pulse 1.2s ease-in-out infinite; }
 	@keyframes audio-pulse { 50% { transform: translateY(-2px) rotate(6deg); } }

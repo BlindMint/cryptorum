@@ -363,6 +363,7 @@ function updateThemeColors(theme: FullTheme) {
 			root.style.setProperty('--color-surface-border', surface.border);
 			root.style.setProperty('--color-surface-text', surface.text);
 			root.style.setProperty('--color-surface-text-muted', surface.textMuted);
+			root.style.setProperty('--color-surface-scheme', surfaceIsLight ? 'light' : 'dark');
 
 			const placeholderBase = mixHexColors(
 				surface.base,
