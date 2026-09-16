@@ -15,7 +15,11 @@
 	let speedMenuBottom = $state(0);
 	const current = $derived($audioPlayer.items.find((item) => item.id === $audioPlayer.currentItemId));
 	const currentIndex = $derived($audioPlayer.items.findIndex((item) => item.id === $audioPlayer.currentItemId));
-	const progressPercent = $derived($audioPlayer.duration > 0 ? ($audioPlayer.currentTime / $audioPlayer.duration) * 100 : 0);
+	const progressPercent = $derived(
+		$audioPlayer.duration > 0
+			? Math.max(0, Math.min(100, ($audioPlayer.currentTime / $audioPlayer.duration) * 100))
+			: 0
+	);
 	const bottomBarHeight = $derived(Math.max($bulkActionBarHeight, $readerBottomBarHeight));
 	const speedOptions = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
@@ -135,19 +139,31 @@
 				<span class="text-[10px] font-semibold">{Math.round(progressPercent)}%</span>
 			</button>
 		{:else}
-			<div class="audio-player-bottom fixed left-1/2 z-[10000] flex w-[min(94vw,42rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2 shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${bottomBarHeight}px)`}>
-				<button type="button" class="rounded-full bg-[var(--color-primary-500)] p-2 text-white" aria-label={$audioPlayer.isPlaying ? 'Pause' : 'Play'} onclick={() => void audioPlayer.togglePlay()}>
+			<div class="audio-player-bottom fixed left-1/2 z-[10000] flex w-[min(94vw,42rem)] -translate-x-1/2 items-center gap-2 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-2 shadow-2xl backdrop-blur sm:gap-3" style:bottom={`calc(0.75rem + ${bottomBarHeight}px)`}>
+				<button type="button" class="accent-action flex-none rounded-full p-2.5 shadow-lg shadow-black/20 focus-visible:outline-2" aria-label={$audioPlayer.isPlaying ? 'Pause' : 'Play'} onclick={() => void audioPlayer.togglePlay()}>
 					{#if $audioPlayer.isPlaying}
 						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
 					{:else}
 						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5z"/></svg>
 					{/if}
 				</button>
-				<button type="button" class="min-w-0 flex-1 text-left" onclick={() => audioPlayer.expand()}>
-					<span class="block truncate text-sm font-semibold text-[var(--color-surface-text)]">{current.title}</span>
-					<span class="block truncate text-xs text-[var(--color-surface-text-muted)]">{formatTime($audioPlayer.currentTime)} · {Math.round(progressPercent)}%</span>
-				</button>
-				<div class="h-1 w-20 overflow-hidden rounded-full bg-[var(--color-surface-600)]"><div class="h-full bg-[var(--color-primary-500)]" style:width={`${progressPercent}%`}></div></div>
+				<div class="min-w-0 flex-1">
+					<button type="button" class="block w-full truncate text-left text-sm font-semibold text-[var(--color-surface-text)]" onclick={() => audioPlayer.expand()}>{current.title}</button>
+					<div class="mt-1 flex min-w-0 items-center gap-2">
+						<span class="flex-none whitespace-nowrap text-[10px] tabular-nums text-[var(--color-surface-text-muted)] sm:text-xs">{formatTime($audioPlayer.currentTime)} / {formatTime($audioPlayer.duration)}</span>
+						<div
+							class="minimized-audio-progress min-w-12 flex-1 sm:min-w-28"
+							role="progressbar"
+							aria-label="Audio progress"
+							aria-valuemin="0"
+							aria-valuemax="100"
+							aria-valuenow={Math.round(progressPercent)}
+						>
+							<div class="minimized-audio-progress-fill" style:width={`${progressPercent}%`}></div>
+						</div>
+						<span class="w-8 flex-none text-right text-[10px] font-semibold tabular-nums text-[var(--color-primary-300)] sm:text-xs">{Math.round(progressPercent)}%</span>
+					</div>
+				</div>
 				<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]" aria-label="Expand player" onclick={() => audioPlayer.expand()}>
 					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 14 5-5 5 5"/></svg>
 				</button>
@@ -281,6 +297,21 @@
 	.player-control:disabled, .queue-control:disabled { opacity: 0.35; }
 	.queue-control { border-radius: 0.375rem; padding: 0.25rem 0.45rem; color: var(--color-surface-text-muted); }
 	.audio-seek { accent-color: var(--color-primary-500); }
+	.minimized-audio-progress {
+		height: 0.5rem;
+		overflow: hidden;
+		border: 1px solid color-mix(in srgb, var(--color-surface-border) 85%, var(--color-surface-text-muted));
+		border-radius: 9999px;
+		background: color-mix(in srgb, var(--color-surface-base) 80%, transparent);
+		box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.28);
+	}
+	.minimized-audio-progress-fill {
+		height: 100%;
+		border-radius: 0 9999px 9999px 0;
+		background: var(--color-primary-400);
+		box-shadow: 1px 0 4px color-mix(in srgb, var(--color-primary-500) 45%, transparent);
+		transition: width 120ms linear;
+	}
 	.audio-speed-button {
 		border-color: var(--color-surface-border);
 		background: var(--color-surface-overlay);
