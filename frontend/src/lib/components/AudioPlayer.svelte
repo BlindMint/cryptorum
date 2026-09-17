@@ -261,6 +261,7 @@
 								bind:this={speedButtonElement}
 								type="button"
 								class="audio-speed-button flex items-center gap-1 rounded-md border px-2 py-1.5 text-xs font-semibold"
+								class:open={speedMenuOpen}
 								aria-label={`Playback speed: ${$audioPlayer.playbackSpeed}×`}
 								aria-haspopup="menu"
 								aria-expanded={speedMenuOpen}
@@ -376,14 +377,16 @@
 		transition: width 120ms linear;
 	}
 	.audio-speed-button {
-		border-color: var(--color-surface-border);
-		background: var(--color-surface-overlay);
+		border-color: transparent;
+		background: transparent;
 		color: var(--color-surface-text);
 		cursor: pointer;
-		backdrop-filter: blur(12px);
-		box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-surface-text) 8%, transparent);
 	}
-	.audio-speed-button:hover { border-color: color-mix(in srgb, var(--color-primary-500) 55%, var(--color-surface-border)); }
+	.audio-speed-button:hover,
+	.audio-speed-button.open {
+		border-color: color-mix(in srgb, var(--color-primary-500) 35%, transparent);
+		background: color-mix(in srgb, var(--color-primary-500) 10%, transparent);
+	}
 	.audio-speed-button:focus-visible {
 		border-color: var(--color-primary-500);
 		outline: 2px solid color-mix(in srgb, var(--color-primary-500) 55%, transparent);
