@@ -16,6 +16,7 @@
 		book_count: number;
 		exclude_from_suggestions?: boolean;
 		comic_spread_fallback?: string;
+		audio_default_category?: 'audiobook' | 'music' | 'podcast';
 		is_importing?: boolean;
 		sort_order?: number;
 		paths?: string[];
@@ -50,6 +51,7 @@
 	let shelfDropTargetId = $state<number | null>(null);
 	let shelfDropPosition = $state<'before' | 'after'>('before');
 	let showShelfModal = $state(false);
+	let audioSectionExpanded = $state(true);
 
 	// Library modal state
 	let showLibraryModal = $state(false);
@@ -59,6 +61,7 @@
 	const SIDEBAR_STORAGE_KEY = 'sidebarWidth';
 	const LIBRARY_NAME_CACHE_KEY = 'cryptorumLibraryNames';
 	const SHELF_SUMMARY_CACHE_KEY = 'cryptorumShelfSummaries';
+	const AUDIO_SECTION_STORAGE_KEY = 'cryptorumAudioSectionExpanded';
 
 	function clampSidebarWidth(width: number): number {
 		return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -134,6 +137,15 @@
 			return currentPath.startsWith('/shelves/') && currentPath === href;
 		}
 
+		if (href === '/audio') {
+			return currentPath === '/audio' && !currentParams.has('tab');
+		}
+
+		if (href.startsWith('/audio?tab=')) {
+			const expectedTab = new URLSearchParams(href.split('?')[1] || '').get('tab');
+			return currentPath === '/audio' && currentParams.get('tab') === expectedTab;
+		}
+
 		return currentPath === href;
 	}
 
@@ -165,6 +177,8 @@
 				setSidebarWidth(parsedWidth);
 			}
 		}
+		const storedAudioSection = localStorage.getItem(AUDIO_SECTION_STORAGE_KEY);
+		if (storedAudioSection !== null) audioSectionExpanded = storedAudioSection !== 'false';
 
 		appActivity.init();
 		await loadData();
@@ -193,6 +207,11 @@
 
 	function openShelfModal() {
 		showShelfModal = true;
+	}
+
+	function toggleAudioSection() {
+		audioSectionExpanded = !audioSectionExpanded;
+		localStorage.setItem(AUDIO_SECTION_STORAGE_KEY, String(audioSectionExpanded));
 	}
 
 	async function handleShelfSaved() {
@@ -796,6 +815,51 @@
 					</span>
 				</div>
 			{/each}
+		</div>
+
+		<div>
+			<div class="flex items-center justify-between px-2.5 py-1.5">
+				<a
+					href="/audio"
+					onclick={closeMobileNavigation}
+					class="flex items-center gap-1.5 rounded-md text-xs font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
+					aria-label="View all audio"
+				>
+					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 18V5l11-2v12M9 18c0 1.1-1.34 2-3 2s-3-.9-3-2 1.34-2 3-2 3 .9 3 2Zm11-3c0 1.1-1.34 2-3 2s-3-.9-3-2 1.34-2 3-2 3 .9 3 2Z"/></svg>
+					<span>Audio</span>
+				</a>
+				<button
+					type="button"
+					onclick={toggleAudioSection}
+					class="rounded p-1 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-500)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
+					title={audioSectionExpanded ? 'Collapse Audio' : 'Expand Audio'}
+					aria-label={audioSectionExpanded ? 'Collapse Audio section' : 'Expand Audio section'}
+					aria-expanded={audioSectionExpanded}
+				>
+					<svg class="h-4 w-4 transition-transform duration-200 {audioSectionExpanded ? 'rotate-90' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m9 5 7 7-7 7"/></svg>
+				</button>
+			</div>
+
+			{#if audioSectionExpanded}
+				<div class="space-y-0.5" aria-label="Audio collections">
+					<a href="/audio?tab=audiobook" onclick={closeMobileNavigation} class="flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/audio?tab=audiobook') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:translate-x-0.5 hover:bg-[var(--color-surface-base)] hover:shadow-sm'}">
+						<svg class="h-[1.125rem] w-[1.125rem] flex-none text-[var(--color-primary-400)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 13a8 8 0 0 1 16 0M4 13v5a2 2 0 0 0 2 2h2v-8H4Zm16 0v5a2 2 0 0 1-2 2h-2v-8h4Z"/></svg>
+						<span>Audiobooks</span>
+					</a>
+					<a href="/audio?tab=music" onclick={closeMobileNavigation} class="flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/audio?tab=music') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:translate-x-0.5 hover:bg-[var(--color-surface-base)] hover:shadow-sm'}">
+						<svg class="h-[1.125rem] w-[1.125rem] flex-none text-[var(--color-primary-400)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 18V5l11-2v12M9 18c0 1.1-1.34 2-3 2s-3-.9-3-2 1.34-2 3-2 3 .9 3 2Zm11-3c0 1.1-1.34 2-3 2s-3-.9-3-2 1.34-2 3-2 3 .9 3 2Z"/></svg>
+						<span>Music</span>
+					</a>
+					<a href="/audio?tab=podcast" onclick={closeMobileNavigation} class="flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/audio?tab=podcast') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:translate-x-0.5 hover:bg-[var(--color-surface-base)] hover:shadow-sm'}">
+						<svg class="h-[1.125rem] w-[1.125rem] flex-none text-[var(--color-primary-400)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path stroke-linecap="round" d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.5 5.5a9 9 0 0 0 0 13M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+						<span>Podcasts</span>
+					</a>
+					<a href="/audio?tab=playlists" onclick={closeMobileNavigation} class="flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/audio?tab=playlists') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:translate-x-0.5 hover:bg-[var(--color-surface-base)] hover:shadow-sm'}">
+						<svg class="h-[1.125rem] w-[1.125rem] flex-none text-[var(--color-primary-400)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="M4 6h10M4 11h10M4 16h6"/><path stroke-linecap="round" stroke-linejoin="round" d="M17 9v8.5a2.5 2.5 0 1 1-2-2.45V11l5-1v5.5"/></svg>
+						<span>Playlists</span>
+					</a>
+				</div>
+			{/if}
 		</div>
 	</nav>
 

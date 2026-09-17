@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { afterNavigate, goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import { audioPlayer } from '$lib/stores/audioPlayer';
@@ -70,7 +69,6 @@
 		const url = new URL($page.url);
 		url.searchParams.set('tab', tab);
 		await goto(`${url.pathname}${url.search}`, { replaceState: true, noScroll: true, keepFocus: true });
-		await load();
 	}
 
 	async function load() {
@@ -205,12 +203,12 @@
 		const next = [...current]; [next[index], next[target]] = [next[target], next[index]]; void savePlaylistOrder(playlistID, next);
 	}
 
-	onMount(() => {
+	afterNavigate(() => {
 		const tab = $page.url.searchParams.get('tab');
-		if (tab === 'music' || tab === 'podcast' || tab === 'playlists') {
-			activeTab = tab;
-			if (tab === 'podcast') sort = 'published';
-		}
+		activeTab = tab === 'music' || tab === 'podcast' || tab === 'playlists' ? tab : 'audiobook';
+		if (activeTab === 'podcast' && sort === 'title') sort = 'published';
+		else if (activeTab !== 'podcast' && sort === 'published') sort = 'title';
+		selectedIDs = [];
 		void load();
 	});
 </script>
