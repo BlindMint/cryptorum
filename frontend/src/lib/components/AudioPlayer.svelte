@@ -17,6 +17,7 @@
 	let speedMenuBottom = $state(0);
 	const current = $derived($audioPlayer.items.find((item) => item.id === $audioPlayer.currentItemId));
 	const currentIndex = $derived($audioPlayer.items.findIndex((item) => item.id === $audioPlayer.currentItemId));
+	const currentBookTrackCount = $derived(current ? $audioPlayer.items.filter((item) => item.book_id === current.book_id).length : 0);
 	const progressPercent = $derived(
 		$audioPlayer.duration > 0
 			? Math.max(0, Math.min(100, ($audioPlayer.currentTime / $audioPlayer.duration) * 100))
@@ -65,6 +66,30 @@
 
 	function handleSeek(event: Event) {
 		audioPlayer.seek(Number((event.currentTarget as HTMLInputElement).value));
+	}
+
+	function handleVolume(event: Event) {
+		audioPlayer.setVolume(Number((event.currentTarget as HTMLInputElement).value));
+	}
+
+	function formatSleepTimer(value: number | null) {
+		if (!value) return 'Sleep';
+		const minutes = Math.ceil(value / 60);
+		return `${minutes}m`;
+	}
+
+	function cycleSleepTimer() {
+		const minutes = $audioPlayer.sleepTimerMinutes;
+		if (minutes === null) audioPlayer.setSleepTimer(15);
+		else if (minutes === 15) audioPlayer.setSleepTimer(30);
+		else if (minutes === 30) audioPlayer.setSleepTimer(60);
+		else audioPlayer.setSleepTimer(null);
+	}
+
+	function trackSubtitle(item: typeof current) {
+		if (!item) return '';
+		const author = item.authors.join(', ');
+		return currentBookTrackCount > 1 ? [item.filename, author].filter(Boolean).join(' · ') : author || item.filename;
 	}
 
 	function toggleSpeedMenu() {
@@ -196,7 +221,7 @@
 					<div class="flex items-start justify-between gap-2">
 						<div class="min-w-0">
 							<a href={`/book/${current.book_id}`} class="block truncate text-sm font-semibold text-[var(--color-surface-text)] hover:text-[var(--color-primary-400)] sm:text-base">{current.title}</a>
-							<p class="truncate text-xs text-[var(--color-surface-text-muted)] sm:text-sm">{current.authors.length ? current.authors.join(', ') : current.filename}</p>
+							<p class="truncate text-xs text-[var(--color-surface-text-muted)] sm:text-sm">{trackSubtitle(current)}</p>
 						</div>
 						<div class="flex flex-none">
 							<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" title="Queue" aria-label="Toggle queue" aria-expanded={$audioPlayer.queueOpen} onclick={() => audioPlayer.toggleQueue()}>
@@ -217,7 +242,7 @@
 						<span class="w-10 text-[10px] tabular-nums text-[var(--color-surface-text-muted)] sm:w-12 sm:text-xs">{formatTime($audioPlayer.duration)}</span>
 					</div>
 
-					<div class="mt-2 flex items-center justify-center gap-1 sm:gap-3">
+					<div class="mt-2 flex flex-wrap items-center justify-center gap-1 sm:gap-2">
 						<button type="button" class="player-control" disabled={currentIndex <= 0} aria-label="Previous queue item" onclick={() => void audioPlayer.previous()}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zm3 7 10-7v14L9 12z"/></svg></button>
 						<button type="button" class="player-control text-xs font-semibold" aria-label="Skip backward" onclick={() => audioPlayer.skip(-$readerSettings.audio.skipBackward)}>−{$readerSettings.audio.skipBackward}</button>
 						<button type="button" class="accent-action rounded-full p-3 focus-visible:outline-2" disabled={$audioPlayer.isLoading} aria-label={$audioPlayer.isPlaying ? 'Pause' : 'Play'} onclick={() => void audioPlayer.togglePlay()}>
@@ -245,8 +270,27 @@
 								<svg class="h-3 w-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m3 4.5 3 3 3-3"/></svg>
 							</button>
 						</div>
+						<div class="ml-1 flex items-center gap-1.5">
+							<button type="button" class="player-control" aria-label={$audioPlayer.muted || $audioPlayer.volume === 0 ? 'Unmute' : 'Mute'} title={$audioPlayer.muted || $audioPlayer.volume === 0 ? 'Unmute' : 'Mute'} onclick={() => audioPlayer.toggleMute()}>
+								{#if $audioPlayer.muted || $audioPlayer.volume === 0}
+									<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="m22 9-6 6m0-6 6 6"/></svg>
+								{:else}
+									<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8 8 0 0 1 0 12"/></svg>
+								{/if}
+							</button>
+							<input class="audio-volume w-16 sm:w-20" type="range" min="0" max="1" step="0.05" value={$audioPlayer.muted ? 0 : $audioPlayer.volume} aria-label="Volume" oninput={handleVolume} />
+						</div>
+						<button type="button" class="audio-sleep-button rounded-md px-2 py-1.5 text-xs font-semibold" class:active={$audioPlayer.sleepTimerRemaining !== null} aria-label={`Sleep timer: ${formatSleepTimer($audioPlayer.sleepTimerRemaining)}. Activate to change.`} title="Sleep timer: click for 15, 30, 60 minutes, then off" onclick={cycleSleepTimer}>
+							<svg class="mr-1 inline h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>{formatSleepTimer($audioPlayer.sleepTimerRemaining)}
+						</button>
 					</div>
-					{#if $audioPlayer.error}<p class="mt-2 text-center text-xs text-red-400" role="alert">{$audioPlayer.error}</p>{/if}
+					{#if $audioPlayer.error}
+						<div class="mt-2 flex items-center justify-center gap-2 text-xs" role="alert">
+							<span class="text-red-400">{$audioPlayer.error}</span>
+							<button type="button" class="rounded-md border border-[var(--color-surface-border)] px-2 py-1 text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)]" onclick={() => void audioPlayer.retryCurrent()}>Retry</button>
+							{#if currentIndex >= 0 && currentIndex < $audioPlayer.items.length - 1}<button type="button" class="rounded-md border border-[var(--color-surface-border)] px-2 py-1 text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)]" onclick={() => void audioPlayer.next()}>Skip</button>{/if}
+						</div>
+					{/if}
 				</div>
 			</div>
 
@@ -261,7 +305,7 @@
 							<li class="flex items-center gap-2 rounded-lg px-2 py-2 {item.id === $audioPlayer.currentItemId ? 'bg-[var(--color-primary-500)]/12' : 'hover:bg-[var(--color-surface-700)]/70'}">
 								<button type="button" class="min-w-0 flex-1 text-left" aria-label={`Play ${item.title}`} onclick={() => void audioPlayer.setCurrent(item.id)}>
 									<span class="block truncate text-sm font-medium {item.id === $audioPlayer.currentItemId ? 'text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text)]'}">{index + 1}. {item.title}</span>
-									<span class="block truncate text-xs text-[var(--color-surface-text-muted)]">{item.authors.join(', ') || item.filename}</span>
+									<span class="block truncate text-xs text-[var(--color-surface-text-muted)]">{$audioPlayer.items.filter((queued) => queued.book_id === item.book_id).length > 1 ? `${item.filename}${item.authors.length ? ` · ${item.authors.join(', ')}` : ''}` : item.authors.join(', ') || item.filename}</span>
 								</button>
 								<button type="button" class="queue-control" disabled={index === 0} aria-label="Move up" onclick={() => void audioPlayer.move(item.id, -1)}>↑</button>
 								<button type="button" class="queue-control" disabled={index === $audioPlayer.items.length - 1} aria-label="Move down" onclick={() => void audioPlayer.move(item.id, 1)}>↓</button>
@@ -312,7 +356,10 @@
 	.player-control:hover:not(:disabled), .queue-control:hover:not(:disabled) { background: var(--color-surface-700); color: var(--color-surface-text); }
 	.player-control:disabled, .queue-control:disabled { opacity: 0.35; }
 	.queue-control { border-radius: 0.375rem; padding: 0.25rem 0.45rem; color: var(--color-surface-text-muted); }
-	.audio-seek { accent-color: var(--color-primary-500); }
+	.audio-seek, .audio-volume { accent-color: var(--color-primary-500); }
+	.audio-sleep-button { color: var(--color-surface-text-muted); }
+	.audio-sleep-button:hover { background: var(--color-surface-700); color: var(--color-surface-text); }
+	.audio-sleep-button.active { background: color-mix(in srgb, var(--color-primary-500) 16%, transparent); color: var(--color-primary-300); }
 	.minimized-audio-progress {
 		height: 0.5rem;
 		overflow: hidden;

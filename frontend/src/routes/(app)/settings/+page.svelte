@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount, tick } from 'svelte';
-	import { readerSettings, epubThemes, fontFamilies, fontWeightOptions, cbxFitModes, cbxScrollModes, skipIntervalOptions, sleepTimerOptions, waveformStyles, type ReaderSettings } from '$lib/stores/readerSettings';
+	import { readerSettings, epubThemes, fontFamilies, fontWeightOptions, cbxFitModes, cbxScrollModes, skipIntervalOptions, type ReaderSettings } from '$lib/stores/readerSettings';
 	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, updateCustomTheme, removeCustomTheme, resetPrimaryToDefault, resetSurfaceToDefault, generateId, updateGlowEnabled, updateGlowAutoMode, updateGlowColor, updateGlowIntensity, updateBgImageEnabled, updateBgImageTransparency, updateBgImageDisplay, updateSelectedBgImage, addBackgroundImage, removeBackgroundImage, DEFAULT_THEME_PRIMARY, DEFAULT_THEME_SURFACE } from '$lib/stores/theme';
 	import { appActivity } from '$lib/stores';
 	import type { BackgroundImageDisplay } from '$lib/stores/theme';
@@ -28,7 +28,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		epub: { fontFamily: 'serif', fontSize: 18, fontWeight: 400, fontStyle: 'normal' as const, lineHeight: 1.6, letterSpacing: 0, paragraphSpacing: 0, paragraphIndent: 0, justify: true, hyphenate: false, hyphenationLanguage: 'en', maxColumnCount: 1, gap: 5, theme: 'catppuccin', isDark: true, flow: 'paginated' as const, maxInlineSize: 680, maxBlockSize: 1440, margin: 5, continuousMaxWidth: 720, brightness: 100, contrast: 100, pageAnimation: 'slide' as const, autoAdvance: false, autoAdvanceTimer: 0, fullscreenLock: false, useStandardFullscreen: false, autoHideControls: true, customCss: '', showTextLayer: true, originalLayout: false, continuousMode: true, showImages: true, imageSize: 'fit-width' as const, imageGrayscale: false },
 		pdf: { autoHideControls: true, viewMode: 'dark' as const, useStandardFullscreen: false },
 		cbx: { pageSpread: 'auto' as const, pageLayout: 'single' as const, fitMode: 'fit-width' as const, scrollMode: 'paginated' as const, backgroundColor: '#111111', readingDirection: 'ltr' as const, stripMaxWidthPercent: 100, mangaMode: false, panelViewEnabled: false, spreadHandling: 'auto' as const, pageTransitionSound: false, autoHideControls: true, useStandardFullscreen: false, vibrance: 100, saturation: 100 },
-		audio: { playbackSpeed: 1.0, skipForward: 15, skipBackward: 15, autoAdvance: false, autoHideControls: true, gaplessPlayback: true, sleepTimer: 'off' as const, sleepTimerCustom: 30, theme: 'cover-focused' as const, waveformStyle: 'line' as const, backgroundStyle: 'cover-blur' as const, voiceBoost: false, equalizerLow: 50, equalizerMid: 50, equalizerHigh: 50 },
+		audio: { playbackSpeed: 1.0, volume: 1, muted: false, skipForward: 15, skipBackward: 15, autoAdvance: true, autoHideControls: true, gaplessPlayback: true, sleepTimer: 'off' as const, sleepTimerCustom: 30, theme: 'cover-focused' as const, waveformStyle: 'line' as const, backgroundStyle: 'cover-blur' as const, voiceBoost: false, equalizerLow: 50, equalizerMid: 50, equalizerHigh: 50 },
 		speedReader: { wpm: 300, wordSize: 48, fontFamily: 'serif', fontWeight: 400, focalPoint: 0.38, centerWord: false, accentEnabled: true, accentColor: '#ef4444', accentOpacity: 1.0, focusIndicator: 'lines' as const, focusIndicatorDistance: 20, horizontalBars: true, horizontalBarsColor: '#666666', horizontalBarsOpacity: 1.0, verticalIndicator: 'off' as const, sentencePause: 350, autoSentencePause: true, keepScreenOn: true, theme: 'catppuccin', letterSpacing: 0, focusIndicatorLength: 20, showWordCount: false }
 	});
 	let loading = $state(true);
@@ -1971,18 +1971,31 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								<option value="1.5">1.5x</option>
 								<option value="1.75">1.75x</option>
 								<option value="2">2.0x</option>
+								<option value="2.5">2.5x</option>
+								<option value="3">3.0x</option>
 							</select>
 						</div>
 
-						<!-- Auto-advance -->
-						<label for="auto-advance" class="settings-toggle-row">
-							<span class="text-sm font-medium text-[var(--color-surface-text)]">Auto-advance to Next Chapter</span>
-							<input type="checkbox" id="auto-advance" checked={localReaderSettings.audio.autoAdvance} onchange={(e) => updateAudioSetting('autoAdvance', e.currentTarget.checked)} class="settings-switch">
-						</label>
+						<div>
+							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Skip Backward</div>
+							<select value={String(localReaderSettings.audio.skipBackward)} onchange={(e) => updateAudioSetting('skipBackward', Number(e.currentTarget.value))} class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]">
+								{#each skipIntervalOptions as option}<option value={option.value}>{option.label}</option>{/each}
+							</select>
+						</div>
 
-						<label for="audio-auto-hide-controls" class="settings-toggle-row">
-							<span class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</span>
-							<input type="checkbox" id="audio-auto-hide-controls" checked={localReaderSettings.audio.autoHideControls} onchange={(e) => updateAudioSetting('autoHideControls', e.currentTarget.checked)} class="settings-switch">
+						<div>
+							<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Skip Forward</div>
+							<select value={String(localReaderSettings.audio.skipForward)} onchange={(e) => updateAudioSetting('skipForward', Number(e.currentTarget.value))} class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]">
+								{#each skipIntervalOptions as option}<option value={option.value}>{option.label}</option>{/each}
+							</select>
+						</div>
+
+						<label for="auto-advance" class="settings-toggle-row">
+							<span>
+								<span class="block text-sm font-medium text-[var(--color-surface-text)]">Continue Through Queue</span>
+								<span class="mt-0.5 block text-xs text-[var(--color-surface-text-muted)]">Start the next queued track when the current track ends.</span>
+							</span>
+							<input type="checkbox" id="auto-advance" checked={localReaderSettings.audio.autoAdvance} onchange={(e) => updateAudioSetting('autoAdvance', e.currentTarget.checked)} class="settings-switch">
 						</label>
 						</div>
 					</div>

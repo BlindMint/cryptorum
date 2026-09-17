@@ -72,6 +72,8 @@ export interface CbxReaderSetting {
 
 export interface AudioReaderSetting {
 	playbackSpeed: number;
+	volume: number;
+	muted: boolean;
 	skipForward: number;
 	skipBackward: number;
 	autoAdvance: boolean;
@@ -193,9 +195,11 @@ export const defaultReaderSettings: ReaderSettings = {
 	},
 	audio: {
 		playbackSpeed: 1.0,
+		volume: 1,
+		muted: false,
 		skipForward: 15,
 		skipBackward: 15,
-		autoAdvance: false,
+		autoAdvance: true,
 		autoHideControls: true,
 		gaplessPlayback: true,
 		sleepTimer: 'off',

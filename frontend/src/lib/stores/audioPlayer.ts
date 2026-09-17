@@ -26,6 +26,10 @@ export interface AudioPlayerState {
 	currentTime: number;
 	duration: number;
 	playbackSpeed: number;
+	volume: number;
+	muted: boolean;
+	sleepTimerRemaining: number | null;
+	sleepTimerMinutes: number | null;
 	expanded: boolean;
 	queueOpen: boolean;
 	dismissed: boolean;
@@ -41,6 +45,10 @@ const initialState: AudioPlayerState = {
 	currentTime: 0,
 	duration: 0,
 	playbackSpeed: 1,
+	volume: 1,
+	muted: false,
+	sleepTimerRemaining: null,
+	sleepTimerMinutes: null,
 	expanded: false,
 	queueOpen: false,
 	dismissed: false,
@@ -55,9 +63,79 @@ function createAudioPlayerStore() {
 	let unsubscribeSettings: (() => void) | null = null;
 	let pendingSeek: number | null = null;
 	let initializedPromise: Promise<void> | null = null;
+	let sleepTimerInterval: ReturnType<typeof setInterval> | null = null;
+	let lastMediaPositionSecond = -1;
+	let volumeBeforeMute = 1;
 
 	function currentItem(state = get({ subscribe })): AudioQueueItem | null {
 		return state.items.find((item) => item.id === state.currentItemId) ?? null;
+	}
+
+	function setMediaSessionAction(action: MediaSessionAction, handler: MediaSessionActionHandler | null) {
+		if (!browser || !('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return;
+		try {
+			navigator.mediaSession.setActionHandler(action, handler);
+		} catch {
+			// Some browsers expose Media Session but omit individual actions.
+		}
+	}
+
+	function updateMediaSessionMetadata(item: AudioQueueItem | null) {
+		if (!browser || !('mediaSession' in navigator)) return;
+		if (!item) {
+			navigator.mediaSession.metadata = null;
+			return;
+		}
+		navigator.mediaSession.metadata = new MediaMetadata({
+			title: item.title,
+			artist: item.authors.join(', '),
+			album: item.filename,
+			artwork: [{ src: new URL(`/api/covers/${item.book_id}/thumb?size=medium`, window.location.origin).href }]
+		});
+	}
+
+	function syncMediaSessionPosition(force = false) {
+		if (!audio || !browser || !('mediaSession' in navigator) || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+		const second = Math.floor(audio.currentTime);
+		if (!force && second === lastMediaPositionSecond) return;
+		lastMediaPositionSecond = second;
+		try {
+			navigator.mediaSession.setPositionState({
+				duration: audio.duration,
+				position: Math.max(0, Math.min(audio.duration, audio.currentTime)),
+				playbackRate: audio.playbackRate
+			});
+		} catch {
+			// Ignore transient metadata and duration races.
+		}
+	}
+
+	function clearSleepTimer() {
+		if (sleepTimerInterval) clearInterval(sleepTimerInterval);
+		sleepTimerInterval = null;
+		update((state) => ({ ...state, sleepTimerRemaining: null, sleepTimerMinutes: null }));
+	}
+
+	function setSleepTimer(minutes: number | null) {
+		if (sleepTimerInterval) clearInterval(sleepTimerInterval);
+		sleepTimerInterval = null;
+		if (!minutes || minutes <= 0) {
+			update((state) => ({ ...state, sleepTimerRemaining: null, sleepTimerMinutes: null }));
+			return;
+		}
+		const endsAt = Date.now() + minutes * 60_000;
+		update((state) => ({ ...state, sleepTimerMinutes: minutes }));
+		const tick = () => {
+			const remaining = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+			if (remaining <= 0) {
+				audio?.pause();
+				clearSleepTimer();
+				return;
+			}
+			update((state) => ({ ...state, sleepTimerRemaining: remaining }));
+		};
+		tick();
+		sleepTimerInterval = setInterval(tick, 1000);
 	}
 
 	function applyQueue(response: QueueResponse) {
@@ -127,6 +205,8 @@ function createAudioPlayerStore() {
 		await endProgress();
 		if (!keepPrimedPlayback) audio.pause();
 		pendingSeek = null;
+		lastMediaPositionSecond = -1;
+		updateMediaSessionMetadata(item);
 		update((state) => ({ ...state, isPlaying: false, isLoading: !!item, currentTime: 0, duration: 0, error: '' }));
 		if (!item) {
 			audio.removeAttribute('src');
@@ -175,12 +255,31 @@ function createAudioPlayerStore() {
 		audio = element;
 		unsubscribeSettings?.();
 		unsubscribeSettings = readerSettings.subscribe((settings) => {
-			if (audio) audio.playbackRate = settings.audio.playbackSpeed;
-			update((state) => ({ ...state, playbackSpeed: settings.audio.playbackSpeed }));
+			const volume = Math.max(0, Math.min(1, Number(settings.audio.volume ?? 1)));
+			const muted = Boolean(settings.audio.muted);
+			if (volume > 0) volumeBeforeMute = volume;
+			if (audio) {
+				audio.playbackRate = settings.audio.playbackSpeed;
+				audio.volume = volume;
+				audio.muted = muted;
+			}
+			update((state) => ({ ...state, playbackSpeed: settings.audio.playbackSpeed, volume, muted }));
+		});
+		setMediaSessionAction('play', () => void togglePlay());
+		setMediaSessionAction('pause', () => audio?.pause());
+		setMediaSessionAction('previoustrack', () => void previous());
+		setMediaSessionAction('nexttrack', () => void next());
+		setMediaSessionAction('seekbackward', (details) => skip(-(details.seekOffset || get(readerSettings).audio.skipBackward)));
+		setMediaSessionAction('seekforward', (details) => skip(details.seekOffset || get(readerSettings).audio.skipForward));
+		setMediaSessionAction('seekto', (details) => {
+			if (details.seekTime !== undefined) seek(details.seekTime);
 		});
 		return () => {
 			unsubscribeSettings?.();
 			unsubscribeSettings = null;
+			for (const action of ['play', 'pause', 'previoustrack', 'nexttrack', 'seekbackward', 'seekforward', 'seekto'] as MediaSessionAction[]) {
+				setMediaSessionAction(action, null);
+			}
 			if (audio === element) audio = null;
 		};
 	}
@@ -190,19 +289,23 @@ function createAudioPlayerStore() {
 		if (pendingSeek !== null && pendingSeek > 0 && pendingSeek < audio.duration) audio.currentTime = pendingSeek;
 		pendingSeek = null;
 		update((state) => ({ ...state, duration: Number.isFinite(audio?.duration) ? audio!.duration : 0, currentTime: audio?.currentTime ?? 0, isLoading: false }));
+		syncMediaSessionPosition(true);
 	}
 
 	function handleTimeUpdate() {
 		if (!audio) return;
 		update((state) => ({ ...state, currentTime: audio?.currentTime ?? 0, duration: Number.isFinite(audio?.duration) ? audio!.duration : state.duration }));
+		syncMediaSessionPosition();
 	}
 
 	function handlePlaying() {
 		update((state) => ({ ...state, isPlaying: true, isLoading: false, error: '' }));
+		if (browser && 'mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
 	}
 
 	function handlePause() {
 		update((state) => ({ ...state, isPlaying: false }));
+		if (browser && 'mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
 		if (progress && audio && Number.isFinite(audio.duration) && audio.duration > 0) {
 			void progress.checkpoint({
 				readerMode: 'audio',
@@ -324,11 +427,16 @@ function createAudioPlayerStore() {
 		await endProgress(true);
 		const state = get({ subscribe });
 		const index = state.items.findIndex((item) => item.id === state.currentItemId);
-		if (index >= 0 && index < state.items.length - 1) {
+		if (get(readerSettings).audio.autoAdvance && index >= 0 && index < state.items.length - 1) {
 			await setCurrent(state.items[index + 1].id);
 		} else {
 			update((value) => ({ ...value, isPlaying: false, currentTime: value.duration }));
 		}
+	}
+
+	async function retryCurrent() {
+		if (!currentItem()) return;
+		await prepareCurrent(true);
 	}
 
 	async function previous() {
@@ -381,6 +489,35 @@ function createAudioPlayerStore() {
 		if (audio) audio.playbackRate = normalized;
 		readerSettings.updateAudio({ playbackSpeed: normalized });
 		update((state) => ({ ...state, playbackSpeed: normalized }));
+		syncMediaSessionPosition(true);
+	}
+
+	function setVolume(volume: number) {
+		const normalized = Math.max(0, Math.min(1, volume));
+		if (normalized > 0) volumeBeforeMute = normalized;
+		if (audio) {
+			audio.volume = normalized;
+			if (normalized > 0 && audio.muted) audio.muted = false;
+		}
+		readerSettings.updateAudio({ volume: normalized, muted: normalized > 0 ? false : get(readerSettings).audio.muted });
+		update((state) => ({ ...state, volume: normalized, muted: normalized > 0 ? false : state.muted }));
+	}
+
+	function toggleMute() {
+		const state = get({ subscribe });
+		if (state.muted || state.volume === 0) {
+			const volume = state.volume > 0 ? state.volume : volumeBeforeMute;
+			if (audio) {
+				audio.volume = volume;
+				audio.muted = false;
+			}
+			readerSettings.updateAudio({ volume, muted: false });
+			update((value) => ({ ...value, volume, muted: false }));
+			return;
+		}
+		if (audio) audio.muted = true;
+		readerSettings.updateAudio({ muted: true });
+		update((value) => ({ ...value, muted: true }));
 	}
 
 	function expand(queueOpen = false) {
@@ -424,11 +561,19 @@ function createAudioPlayerStore() {
 		clear,
 		move,
 		setPlaybackSpeed,
+		setVolume,
+		toggleMute,
+		setSleepTimer,
+		retryCurrent,
 		expand,
 		minimize,
 		toggleQueue,
 		dismiss,
-		reset: () => set(initialState)
+		reset: () => {
+			clearSleepTimer();
+			updateMediaSessionMetadata(null);
+			set(initialState);
+		}
 	};
 }
 

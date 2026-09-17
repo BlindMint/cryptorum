@@ -161,45 +161,61 @@ func AddAudioQueueItemsBulkHandler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		seen[bookID] = true
-		var fileID int64
-		err := tx.QueryRow(`
+		fileRows, queryErr := tx.Query(`
 			SELECT bf.id
 			FROM book_file bf JOIN book b ON b.id = bf.book_id
 			WHERE b.id = ? AND b.owner_user_id = ? AND bf.missing_at IS NULL
 			  AND LOWER(bf.format) IN ('mp3', 'm4a', 'm4b', 'flac', 'ogg', 'wav')
-			ORDER BY bf.id LIMIT 1`, bookID, ownerID).Scan(&fileID)
-		if errors.Is(err, sql.ErrNoRows) {
+			ORDER BY bf.path COLLATE NOCASE, bf.id`, bookID, ownerID)
+		if queryErr != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+			return
+		}
+		fileIDs := []int64{}
+		for fileRows.Next() {
+			var fileID int64
+			if scanErr := fileRows.Scan(&fileID); scanErr != nil {
+				_ = fileRows.Close()
+				errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+				return
+			}
+			fileIDs = append(fileIDs, fileID)
+		}
+		rowsErr := fileRows.Err()
+		_ = fileRows.Close()
+		if rowsErr != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+			return
+		}
+		if len(fileIDs) == 0 {
 			skippedCount++
 			continue
 		}
-		if err != nil {
-			errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
-			return
-		}
-
-		var itemID int64
-		err = tx.QueryRow(`SELECT id FROM audio_queue_item WHERE owner_user_id = ? AND file_id = ?`, ownerID, fileID).Scan(&itemID)
-		if errors.Is(err, sql.ErrNoRows) {
-			result, execErr := tx.Exec(`INSERT INTO audio_queue_item (owner_user_id, book_id, file_id, position, added_at) VALUES (?, ?, ?, ?, ?)`, ownerID, bookID, fileID, nextPosition, time.Now().Unix())
-			if execErr != nil {
+		for _, fileID := range fileIDs {
+			var itemID int64
+			err = tx.QueryRow(`SELECT id FROM audio_queue_item WHERE owner_user_id = ? AND file_id = ?`, ownerID, fileID).Scan(&itemID)
+			if errors.Is(err, sql.ErrNoRows) {
+				result, execErr := tx.Exec(`INSERT INTO audio_queue_item (owner_user_id, book_id, file_id, position, added_at) VALUES (?, ?, ?, ?, ?)`, ownerID, bookID, fileID, nextPosition, time.Now().Unix())
+				if execErr != nil {
+					errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+					return
+				}
+				itemID, err = result.LastInsertId()
+				if err != nil {
+					errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
+					return
+				}
+				nextPosition++
+				addedCount++
+			} else if err != nil {
 				errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
 				return
+			} else {
+				skippedCount++
 			}
-			itemID, err = result.LastInsertId()
-			if err != nil {
-				errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
-				return
+			if firstQueueItemID == 0 {
+				firstQueueItemID = itemID
 			}
-			nextPosition++
-			addedCount++
-		} else if err != nil {
-			errorResponse(w, http.StatusInternalServerError, "Failed to update audio queue")
-			return
-		} else {
-			skippedCount++
-		}
-		if firstQueueItemID == 0 {
-			firstQueueItemID = itemID
 		}
 	}
 

@@ -70,6 +70,7 @@
 		getReadableBookFiles,
 		getReaderRouteKind,
 		getSpeedReaderHref,
+		isAudioFormat,
 		isReadableBookFile,
 		normalizeBookFormat,
 		uniqueBookFormats
@@ -491,8 +492,8 @@
 	}
 
 	function addPrimaryAudioToQueue() {
-		if (!book?.id || !primaryReadFile?.id) return;
-		void audioPlayer.addToQueue(Number(book.id), Number(primaryReadFile.id));
+		if (!book?.id || audioFiles.length === 0) return;
+		void audioPlayer.addBooksToQueue([Number(book.id)]);
 	}
 
 	const readableFormats = $derived(getReadableFormats());
@@ -502,7 +503,9 @@
 	const primarySpeedReadFormat = $derived(getPrimarySpeedReadFormat());
 	const coverFormat = $derived(primaryReadFile?.format || primaryReadFormat || getPreferredBookFormat(files) || book?.format || book?.resume_format);
 	const isAudioItem = $derived(getReaderRouteKind(coverFormat) === 'audio');
-	const primaryAudioQueued = $derived(!!primaryReadFile?.id && $audioPlayer.items.some((item) => item.file_id === Number(primaryReadFile.id)));
+	const audioFiles = $derived.by(() => files.filter((file) => isAudioFormat(file.format)).sort((left, right) => String(left.path || '').localeCompare(String(right.path || ''), undefined, { numeric: true, sensitivity: 'base' })));
+	const queuedAudioFileCount = $derived(audioFiles.filter((file) => $audioPlayer.items.some((item) => item.file_id === Number(file.id))).length);
+	const allAudioFilesQueued = $derived(audioFiles.length > 0 && queuedAudioFileCount === audioFiles.length);
 
 	function formatSize(bytes: number): string {
 		if (bytes < 1024) return bytes + ' B';
@@ -1558,11 +1561,11 @@
 								<button
 									type="button"
 									onclick={addPrimaryAudioToQueue}
-									disabled={primaryAudioQueued}
+									disabled={allAudioFilesQueued}
 									class="group flex w-full items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:cursor-default disabled:opacity-60 disabled:hover:border-[var(--color-surface-border)] disabled:hover:bg-[var(--color-surface-700)] sm:px-4"
 								>
 									<svg class="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h12M3 12h9M3 18h6"/><path d="M18 14v7m-3.5-3.5h7"/></svg>
-									{primaryAudioQueued ? 'In queue' : 'Add to queue'}
+									{allAudioFilesQueued ? 'In queue' : audioFiles.length > 1 ? `Add ${audioFiles.length - queuedAudioFileCount} ${audioFiles.length - queuedAudioFileCount === 1 ? 'track' : 'tracks'} to queue` : 'Add to queue'}
 								</button>
 							{/if}
 							{#if primarySpeedReadFormat}

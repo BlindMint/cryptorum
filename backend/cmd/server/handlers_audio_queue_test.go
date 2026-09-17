@@ -114,7 +114,7 @@ func TestAudioQueueBulkAddSkipsNonAudioAndDuplicates(t *testing.T) {
 	setupAudioQueueTestDB(t)
 	mustExec(t, `INSERT INTO book (id, library_id, added_at, last_scanned, owner_user_id) VALUES (2, 1, 100, 100, 1), (3, 1, 100, 100, 1)`)
 	mustExec(t, `INSERT INTO book_metadata (book_id, title, authors, owner_user_id) VALUES (2, 'Second Audio', '[]', 1), (3, 'Text Book', '[]', 1)`)
-	mustExec(t, `INSERT INTO book_file (id, book_id, path, format, size, hash, last_modified, owner_user_id) VALUES (20, 2, '/library/second.m4b', 'm4b', 1000, 'audio-two', 100, 1), (30, 3, '/library/text.epub', 'epub', 1000, 'text-three', 100, 1)`)
+	mustExec(t, `INSERT INTO book_file (id, book_id, path, format, size, hash, last_modified, owner_user_id) VALUES (13, 1, '/library/test2.mp3', 'mp3', 1000, 'audio-one-part-two', 100, 1), (20, 2, '/library/second.m4b', 'm4b', 1000, 'audio-two', 100, 1), (30, 3, '/library/text.epub', 'epub', 1000, 'text-three', 100, 1)`)
 
 	recorder := httptest.NewRecorder()
 	AddAudioQueueItemsBulkHandler(recorder, readingPositionRequest(http.MethodPost, "/api/audio/queue/items/bulk", `{"book_ids":[1,2,3,2]}`, nil))
@@ -125,8 +125,11 @@ func TestAudioQueueBulkAddSkipsNonAudioAndDuplicates(t *testing.T) {
 	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
 		t.Fatalf("decode bulk response: %v", err)
 	}
-	if response.AddedCount != 2 || response.SkippedCount != 2 || len(response.Items) != 2 {
+	if response.AddedCount != 3 || response.SkippedCount != 2 || len(response.Items) != 3 {
 		t.Fatalf("unexpected bulk response: %+v", response)
+	}
+	if response.Items[0].FileID != 12 || response.Items[1].FileID != 13 || response.Items[2].FileID != 20 {
+		t.Fatalf("multi-file audio order = %+v", response.Items)
 	}
 	if response.CurrentItemID == nil || *response.CurrentItemID != response.Items[0].ID {
 		t.Fatalf("bulk add did not select the first audio item: %+v", response)
