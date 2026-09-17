@@ -11,12 +11,20 @@
 	let audioElement: HTMLAudioElement;
 	let speedButtonElement = $state<HTMLButtonElement>();
 	let speedMenuElement = $state<HTMLDivElement>();
+	let sleepButtonElement = $state<HTMLButtonElement>();
+	let sleepMenuElement = $state<HTMLDivElement>();
 	let confirmClear = $state(false);
+	let queueMessage = $state('');
 	let speedMenuOpen = $state(false);
 	let speedMenuLeft = $state(0);
 	let speedMenuBottom = $state(0);
+	let sleepMenuOpen = $state(false);
+	let sleepMenuLeft = $state(0);
+	let sleepMenuBottom = $state(0);
 	const current = $derived($audioPlayer.items.find((item) => item.id === $audioPlayer.currentItemId));
 	const currentIndex = $derived($audioPlayer.items.findIndex((item) => item.id === $audioPlayer.currentItemId));
+	const hasPrevious = $derived(currentIndex > 0 && $audioPlayer.items.slice(0, currentIndex).some((item) => !item.unavailable));
+	const hasNext = $derived(currentIndex >= 0 && $audioPlayer.items.slice(currentIndex + 1).some((item) => !item.unavailable));
 	const currentBookTrackCount = $derived(current ? $audioPlayer.items.filter((item) => item.book_id === current.book_id).length : 0);
 	const progressPercent = $derived(
 		$audioPlayer.duration > 0
@@ -30,30 +38,30 @@
 		const detach = audioPlayer.attach(audioElement);
 		const handleOutsidePointer = (event: PointerEvent) => {
 			const target = event.target as Node;
-			if (!speedMenuOpen || speedButtonElement?.contains(target) || speedMenuElement?.contains(target)) return;
-			speedMenuOpen = false;
+			if (speedMenuOpen && !speedButtonElement?.contains(target) && !speedMenuElement?.contains(target)) speedMenuOpen = false;
+			if (sleepMenuOpen && !sleepButtonElement?.contains(target) && !sleepMenuElement?.contains(target)) sleepMenuOpen = false;
 		};
 		const handleEscape = (event: KeyboardEvent) => {
-			if (event.key !== 'Escape' || !speedMenuOpen) return;
+			if (event.key !== 'Escape' || (!speedMenuOpen && !sleepMenuOpen)) return;
 			event.preventDefault();
-			speedMenuOpen = false;
-			speedButtonElement?.focus();
+			if (speedMenuOpen) { speedMenuOpen = false; speedButtonElement?.focus(); }
+			if (sleepMenuOpen) { sleepMenuOpen = false; sleepButtonElement?.focus(); }
 		};
-		const closeSpeedMenu = () => speedMenuOpen = false;
+		const closeMenus = () => { speedMenuOpen = false; sleepMenuOpen = false; };
 		document.addEventListener('pointerdown', handleOutsidePointer);
 		document.addEventListener('keydown', handleEscape);
-		window.addEventListener('resize', closeSpeedMenu);
+		window.addEventListener('resize', closeMenus);
 		void audioPlayer.initialize();
 		return () => {
 			detach();
 			document.removeEventListener('pointerdown', handleOutsidePointer);
 			document.removeEventListener('keydown', handleEscape);
-			window.removeEventListener('resize', closeSpeedMenu);
+			window.removeEventListener('resize', closeMenus);
 		};
 	});
 
 	$effect(() => {
-		if (!$audioPlayer.expanded || $audioPlayer.dismissed) speedMenuOpen = false;
+		if (!$audioPlayer.expanded || $audioPlayer.dismissed) { speedMenuOpen = false; sleepMenuOpen = false; }
 	});
 
 	function formatTime(value: number) {
@@ -78,17 +86,23 @@
 		return `${minutes}m`;
 	}
 
-	function cycleSleepTimer() {
-		const minutes = $audioPlayer.sleepTimerMinutes;
-		if (minutes === null) audioPlayer.setSleepTimer(15);
-		else if (minutes === 15) audioPlayer.setSleepTimer(30);
-		else if (minutes === 30) audioPlayer.setSleepTimer(60);
-		else audioPlayer.setSleepTimer(null);
+	function toggleSleepMenu() {
+		if (sleepMenuOpen) { sleepMenuOpen = false; return; }
+		if (!sleepButtonElement) return;
+		const rect = sleepButtonElement.getBoundingClientRect();
+		const menuWidth = 176;
+		sleepMenuLeft = Math.min(Math.max(8, rect.left + (rect.width - menuWidth) / 2), Math.max(8, window.innerWidth - menuWidth - 8));
+		sleepMenuBottom = Math.max(8, window.innerHeight - rect.top + 8);
+		sleepMenuOpen = true;
 	}
+
+	function chooseSleep(mode: 'off' | 'timer' | 'track' | 'chapter', minutes?: number) { audioPlayer.setSleepMode(mode, minutes); sleepMenuOpen = false; sleepButtonElement?.focus(); }
 
 	function trackSubtitle(item: typeof current) {
 		if (!item) return '';
 		const author = item.authors.join(', ');
+		if (item.category === 'music') return [author, item.album].filter(Boolean).join(' · ') || item.filename;
+		if (item.category === 'podcast') return item.show_title || author || item.filename;
 		return currentBookTrackCount > 1 ? [item.filename, author].filter(Boolean).join(' · ') : author || item.filename;
 	}
 
@@ -123,6 +137,18 @@
 		}
 		confirmClear = false;
 		await audioPlayer.clear();
+	}
+
+	async function saveQueueAsPlaylist() {
+		const audioIDs = $audioPlayer.items.flatMap((item) => item.audio_id ? [item.audio_id] : []);
+		if (!audioIDs.length) { queueMessage = 'Scan these files before saving this queue.'; return; }
+		const name = prompt('Playlist name')?.trim();
+		if (!name) return;
+		const response = await fetch('/api/audio/playlists', {
+			method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ name, audio_ids: audioIDs })
+		});
+		queueMessage = response.ok ? `Saved as “${name}”.` : 'Unable to save this queue.';
 	}
 </script>
 
@@ -220,13 +246,15 @@
 				<div class="min-w-0 flex-1">
 					<div class="flex items-start justify-between gap-2">
 						<div class="min-w-0">
-							<a href={`/book/${current.book_id}`} class="block truncate text-sm font-semibold text-[var(--color-surface-text)] hover:text-[var(--color-primary-400)] sm:text-base">{current.title}</a>
+							<a href={current.category === 'audiobook' || !current.category ? `/book/${current.book_id}` : `/audio?tab=${current.category}`} class="block truncate text-sm font-semibold text-[var(--color-surface-text)] hover:text-[var(--color-primary-400)] sm:text-base">{current.title}</a>
 							<p class="truncate text-xs text-[var(--color-surface-text-muted)] sm:text-sm">{trackSubtitle(current)}</p>
 						</div>
 						<div class="flex flex-none">
-							<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" title="Queue" aria-label="Toggle queue" aria-expanded={$audioPlayer.queueOpen} onclick={() => audioPlayer.toggleQueue()}>
+							<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" class:panel-active={$audioPlayer.activePanel === 'queue' && $audioPlayer.queueOpen} title="Queue" aria-label="Toggle queue" aria-expanded={$audioPlayer.queueOpen} onclick={() => audioPlayer.toggleQueue()}>
 								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h12M3 12h9M3 18h6"/><path d="m16 15 5 3-5 3v-6Z"/></svg>
 							</button>
+							{#if current.audio_id && (current.chapter_count || $audioPlayer.chapters.length)}<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" class:panel-active={$audioPlayer.activePanel === 'chapters'} title="Chapters" aria-label="Open chapters" onclick={() => audioPlayer.openPanel('chapters')}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h3v3H4zM10 6h10M4 11h3v3H4zM10 12h10M4 17h3v3H4zM10 18h10"/></svg></button>{/if}
+							{#if current.audio_id}<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" class:panel-active={$audioPlayer.activePanel === 'bookmarks'} title="Bookmarks" aria-label="Open audio bookmarks" onclick={() => audioPlayer.openPanel('bookmarks')}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4h12v17l-6-4-6 4V4z"/></svg></button>{/if}
 							<button type="button" class="rounded-md p-2 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" title="Minimize" aria-label="Minimize audio player" onclick={() => audioPlayer.minimize()}>
 								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg>
 							</button>
@@ -243,7 +271,7 @@
 					</div>
 
 					<div class="mt-2 flex flex-wrap items-center justify-center gap-1 sm:gap-2">
-						<button type="button" class="player-control" disabled={currentIndex <= 0} aria-label="Previous queue item" onclick={() => void audioPlayer.previous()}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zm3 7 10-7v14L9 12z"/></svg></button>
+						<button type="button" class="player-control" disabled={!hasPrevious} aria-label="Previous queue item" onclick={() => void audioPlayer.previous()}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zm3 7 10-7v14L9 12z"/></svg></button>
 						<button type="button" class="player-control text-xs font-semibold" aria-label="Skip backward" onclick={() => audioPlayer.skip(-$readerSettings.audio.skipBackward)}>−{$readerSettings.audio.skipBackward}</button>
 						<button type="button" class="accent-action rounded-full p-3 focus-visible:outline-2" disabled={$audioPlayer.isLoading} aria-label={$audioPlayer.isPlaying ? 'Pause' : 'Play'} onclick={() => void audioPlayer.togglePlay()}>
 							{#if $audioPlayer.isLoading}
@@ -255,7 +283,7 @@
 							{/if}
 						</button>
 						<button type="button" class="player-control text-xs font-semibold" aria-label="Skip forward" onclick={() => audioPlayer.skip($readerSettings.audio.skipForward)}>+{$readerSettings.audio.skipForward}</button>
-						<button type="button" class="player-control" disabled={currentIndex < 0 || currentIndex >= $audioPlayer.items.length - 1} aria-label="Next queue item" onclick={() => void audioPlayer.next()}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM5 5l10 7-10 7V5z"/></svg></button>
+						<button type="button" class="player-control" disabled={!hasNext} aria-label="Next queue item" onclick={() => void audioPlayer.next()}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM5 5l10 7-10 7V5z"/></svg></button>
 						<div class="ml-1">
 							<button
 								bind:this={speedButtonElement}
@@ -281,32 +309,33 @@
 							</button>
 							<input class="audio-volume w-16 sm:w-20" type="range" min="0" max="1" step="0.05" value={$audioPlayer.muted ? 0 : $audioPlayer.volume} aria-label="Volume" oninput={handleVolume} />
 						</div>
-						<button type="button" class="audio-sleep-button rounded-md px-2 py-1.5 text-xs font-semibold" class:active={$audioPlayer.sleepTimerRemaining !== null} aria-label={`Sleep timer: ${formatSleepTimer($audioPlayer.sleepTimerRemaining)}. Activate to change.`} title="Sleep timer: click for 15, 30, 60 minutes, then off" onclick={cycleSleepTimer}>
-							<svg class="mr-1 inline h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>{formatSleepTimer($audioPlayer.sleepTimerRemaining)}
+						<button bind:this={sleepButtonElement} type="button" class="audio-sleep-button rounded-md px-2 py-1.5 text-xs font-semibold" class:active={$audioPlayer.sleepMode !== 'off'} aria-label={`Sleep setting: ${$audioPlayer.sleepMode === 'timer' ? formatSleepTimer($audioPlayer.sleepTimerRemaining) : $audioPlayer.sleepMode}. Activate to change.`} aria-haspopup="menu" aria-expanded={sleepMenuOpen} title="Sleep settings" onclick={toggleSleepMenu}>
+							<svg class="mr-1 inline h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>{$audioPlayer.sleepMode === 'timer' ? formatSleepTimer($audioPlayer.sleepTimerRemaining) : $audioPlayer.sleepMode === 'track' ? 'Track' : $audioPlayer.sleepMode === 'chapter' ? 'Chapter' : 'Sleep'}
 						</button>
 					</div>
 					{#if $audioPlayer.error}
 						<div class="mt-2 flex items-center justify-center gap-2 text-xs" role="alert">
 							<span class="text-red-400">{$audioPlayer.error}</span>
 							<button type="button" class="rounded-md border border-[var(--color-surface-border)] px-2 py-1 text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)]" onclick={() => void audioPlayer.retryCurrent()}>Retry</button>
-							{#if currentIndex >= 0 && currentIndex < $audioPlayer.items.length - 1}<button type="button" class="rounded-md border border-[var(--color-surface-border)] px-2 py-1 text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)]" onclick={() => void audioPlayer.next()}>Skip</button>{/if}
+							{#if hasNext}<button type="button" class="rounded-md border border-[var(--color-surface-border)] px-2 py-1 text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)]" onclick={() => void audioPlayer.next()}>Skip</button>{/if}
 						</div>
 					{/if}
 				</div>
 			</div>
 
-			{#if $audioPlayer.queueOpen}
+			{#if $audioPlayer.queueOpen && $audioPlayer.activePanel === 'queue'}
 				<div class="max-h-[42vh] overflow-y-auto border-t border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/75 p-3">
-					<div class="mb-2 flex items-center justify-between">
+					<div class="mb-2 flex items-center justify-between gap-2">
 						<h2 class="text-sm font-semibold text-[var(--color-surface-text)]">Queue <span class="text-[var(--color-surface-text-muted)]">({$audioPlayer.items.length})</span></h2>
-						<button type="button" class="rounded-md px-2 py-1 text-xs text-[var(--color-surface-text-muted)] hover:bg-red-500/10 hover:text-red-400" onclick={() => void clearQueue()}>{confirmClear ? 'Confirm clear' : 'Clear queue'}</button>
+						<div class="flex items-center gap-1"><button type="button" class="rounded-md px-2 py-1 text-xs text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" onclick={() => void saveQueueAsPlaylist()}>Save playlist</button><button type="button" class="rounded-md px-2 py-1 text-xs text-[var(--color-surface-text-muted)] hover:bg-red-500/10 hover:text-red-400" onclick={() => void clearQueue()}>{confirmClear ? 'Confirm clear' : 'Clear queue'}</button></div>
 					</div>
+					{#if queueMessage}<p class="mb-2 text-xs text-[var(--color-surface-text-muted)]" aria-live="polite">{queueMessage}</p>{/if}
 					<ol class="space-y-1">
 						{#each $audioPlayer.items as item, index (item.id)}
 							<li class="flex items-center gap-2 rounded-lg px-2 py-2 {item.id === $audioPlayer.currentItemId ? 'bg-[var(--color-primary-500)]/12' : 'hover:bg-[var(--color-surface-700)]/70'}">
-								<button type="button" class="min-w-0 flex-1 text-left" aria-label={`Play ${item.title}`} onclick={() => void audioPlayer.setCurrent(item.id)}>
+								<button type="button" class="min-w-0 flex-1 text-left disabled:opacity-55" disabled={item.unavailable} aria-label={`Play ${item.title}`} onclick={() => void audioPlayer.setCurrent(item.id)}>
 									<span class="block truncate text-sm font-medium {item.id === $audioPlayer.currentItemId ? 'text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text)]'}">{index + 1}. {item.title}</span>
-									<span class="block truncate text-xs text-[var(--color-surface-text-muted)]">{$audioPlayer.items.filter((queued) => queued.book_id === item.book_id).length > 1 ? `${item.filename}${item.authors.length ? ` · ${item.authors.join(', ')}` : ''}` : item.authors.join(', ') || item.filename}</span>
+									<span class="block truncate text-xs text-[var(--color-surface-text-muted)]">{item.unavailable ? 'File unavailable' : $audioPlayer.items.filter((queued) => queued.book_id === item.book_id).length > 1 ? `${item.filename}${item.authors.length ? ` · ${item.authors.join(', ')}` : ''}` : item.authors.join(', ') || item.filename}</span>
 								</button>
 								<button type="button" class="queue-control" disabled={index === 0} aria-label="Move up" onclick={() => void audioPlayer.move(item.id, -1)}>↑</button>
 								<button type="button" class="queue-control" disabled={index === $audioPlayer.items.length - 1} aria-label="Move down" onclick={() => void audioPlayer.move(item.id, 1)}>↓</button>
@@ -314,6 +343,20 @@
 							</li>
 						{/each}
 					</ol>
+				</div>
+			{:else if $audioPlayer.activePanel === 'chapters'}
+				<div class="max-h-[42vh] overflow-y-auto border-t border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/75 p-3">
+					<h2 class="mb-2 text-sm font-semibold text-[var(--color-surface-text)]">Chapters <span class="text-[var(--color-surface-text-muted)]">({$audioPlayer.chapters.length})</span></h2>
+					{#if $audioPlayer.contextLoading}<p class="py-4 text-center text-xs text-[var(--color-surface-text-muted)]">Loading chapters…</p>
+					{:else if !$audioPlayer.chapters.length}<p class="py-4 text-center text-xs text-[var(--color-surface-text-muted)]">This file has no embedded chapters.</p>
+					{:else}<ol class="space-y-1">{#each $audioPlayer.chapters as chapter, index}<li><button type="button" class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-[var(--color-surface-700)]" onclick={() => audioPlayer.seek(chapter.start_seconds)}><span class="w-6 text-right text-xs text-[var(--color-surface-text-muted)]">{index + 1}</span><span class="min-w-0 flex-1 truncate text-sm text-[var(--color-surface-text)]">{chapter.title}</span><span class="text-xs tabular-nums text-[var(--color-surface-text-muted)]">{formatTime(chapter.start_seconds)}</span></button></li>{/each}</ol>{/if}
+				</div>
+			{:else if $audioPlayer.activePanel === 'bookmarks'}
+				<div class="max-h-[42vh] overflow-y-auto border-t border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/75 p-3">
+					<div class="mb-2 flex items-center justify-between gap-2"><h2 class="text-sm font-semibold text-[var(--color-surface-text)]">Bookmarks <span class="text-[var(--color-surface-text-muted)]">({$audioPlayer.bookmarks.length})</span></h2><button type="button" class="accent-action rounded-lg px-2.5 py-1.5 text-xs" onclick={() => { const label = prompt('Bookmark label (optional)') ?? ''; void audioPlayer.addBookmark(label); }}>Bookmark {formatTime($audioPlayer.currentTime)}</button></div>
+					{#if $audioPlayer.contextLoading}<p class="py-4 text-center text-xs text-[var(--color-surface-text-muted)]">Loading bookmarks…</p>
+					{:else if !$audioPlayer.bookmarks.length}<p class="py-4 text-center text-xs text-[var(--color-surface-text-muted)]">No bookmarks for this audio yet.</p>
+					{:else}<ol class="space-y-1">{#each $audioPlayer.bookmarks as bookmark}<li class="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-[var(--color-surface-700)]"><button type="button" class="min-w-0 flex-1 text-left" onclick={() => audioPlayer.seek(bookmark.seconds)}><span class="block truncate text-sm text-[var(--color-surface-text)]">{bookmark.label || `Bookmark at ${formatTime(bookmark.seconds)}`}</span><span class="text-xs tabular-nums text-[var(--color-surface-text-muted)]">{formatTime(bookmark.seconds)}</span></button><button type="button" class="queue-control" aria-label="Rename bookmark" onclick={() => { const label = prompt('Bookmark label', bookmark.label) ?? bookmark.label; void audioPlayer.renameBookmark(bookmark.id, label); }}>✎</button><button type="button" class="queue-control hover:!text-red-400" aria-label="Remove bookmark" onclick={() => void audioPlayer.deleteBookmark(bookmark.id)}>×</button></li>{/each}</ol>{/if}
 				</div>
 			{/if}
 		</section>
@@ -341,6 +384,14 @@
 				{/each}
 			</div>
 		{/if}
+		{#if sleepMenuOpen}
+			<div bind:this={sleepMenuElement} class="audio-speed-menu fixed z-[10001] grid w-44 gap-1 rounded-xl border p-1.5" style:left={`${sleepMenuLeft}px`} style:bottom={`${sleepMenuBottom}px`} role="menu" aria-label="Sleep settings">
+				<button type="button" class="audio-speed-option rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold" class:selected={$audioPlayer.sleepMode === 'off'} onclick={() => chooseSleep('off')}>Off</button>
+				{#each [15, 30, 60] as minutes}<button type="button" class="audio-speed-option rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold" class:selected={$audioPlayer.sleepMode === 'timer' && $audioPlayer.sleepTimerMinutes === minutes} onclick={() => chooseSleep('timer', minutes)}>{minutes} minutes</button>{/each}
+				<button type="button" class="audio-speed-option rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold" class:selected={$audioPlayer.sleepMode === 'track'} onclick={() => chooseSleep('track')}>End of track</button>
+				{#if $audioPlayer.chapters.length}<button type="button" class="audio-speed-option rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold" class:selected={$audioPlayer.sleepMode === 'chapter'} onclick={() => chooseSleep('chapter')}>End of chapter</button>{/if}
+			</div>
+		{/if}
 	{/if}
 {/if}
 
@@ -361,6 +412,7 @@
 	.audio-sleep-button { color: var(--color-surface-text-muted); }
 	.audio-sleep-button:hover { background: var(--color-surface-700); color: var(--color-surface-text); }
 	.audio-sleep-button.active { background: color-mix(in srgb, var(--color-primary-500) 16%, transparent); color: var(--color-primary-300); }
+	.panel-active { background: color-mix(in srgb, var(--color-primary-500) 14%, transparent); color: var(--color-primary-300); }
 	.minimized-audio-progress {
 		height: 0.5rem;
 		overflow: hidden;

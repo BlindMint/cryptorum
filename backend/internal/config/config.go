@@ -37,8 +37,9 @@ type AuthConfig struct {
 
 // LibraryConfig holds library configuration
 type LibraryConfig struct {
-	Name  string   `mapstructure:"name"`
-	Paths []string `mapstructure:"paths"`
+	Name                 string   `mapstructure:"name"`
+	Paths                []string `mapstructure:"paths"`
+	AudioDefaultCategory string   `mapstructure:"audio_default_category"`
 }
 
 // BookdropConfig holds BookDrop configuration

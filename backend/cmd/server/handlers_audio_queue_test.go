@@ -136,6 +136,31 @@ func TestAudioQueueBulkAddSkipsNonAudioAndDuplicates(t *testing.T) {
 	}
 }
 
+func TestAudioQueuePlayNextMovesExistingItem(t *testing.T) {
+	setupAudioQueueTestDB(t)
+	mustExec(t, `INSERT INTO book (id, library_id, added_at, last_scanned, owner_user_id) VALUES (2, 1, 100, 100, 1), (3, 1, 100, 100, 1)`)
+	mustExec(t, `INSERT INTO book_metadata (book_id, title, authors, owner_user_id) VALUES (2, 'Second Audio', '[]', 1), (3, 'Third Audio', '[]', 1)`)
+	mustExec(t, `INSERT INTO book_file (id, book_id, path, format, size, hash, last_modified, owner_user_id) VALUES (20, 2, '/library/second.mp3', 'mp3', 1000, 'audio-two', 100, 1), (30, 3, '/library/third.mp3', 'mp3', 1000, 'audio-three', 100, 1)`)
+
+	for index, body := range []string{`{"book_id":1,"file_id":12,"make_current":true}`, `{"book_id":2,"file_id":20}`, `{"book_id":3,"file_id":30}`} {
+		recorder := httptest.NewRecorder()
+		AddAudioQueueItemHandler(recorder, readingPositionRequest(http.MethodPost, "/api/audio/queue/items", body, nil))
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("add %d status = %d: %s", index, recorder.Code, recorder.Body.String())
+		}
+	}
+
+	move := httptest.NewRecorder()
+	AddAudioQueueItemHandler(move, readingPositionRequest(http.MethodPost, "/api/audio/queue/items", `{"book_id":3,"file_id":30,"placement":"next"}`, nil))
+	if move.Code != http.StatusCreated {
+		t.Fatalf("move status = %d: %s", move.Code, move.Body.String())
+	}
+	queue := decodeAudioQueueResponse(t, move)
+	if len(queue.Items) != 3 || queue.Items[0].BookID != 1 || queue.Items[1].BookID != 3 || queue.Items[2].BookID != 2 {
+		t.Fatalf("play-next order = %+v", queue.Items)
+	}
+}
+
 func jsonNumber(value int64) string {
 	return strconv.FormatInt(value, 10)
 }

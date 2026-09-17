@@ -564,6 +564,15 @@
 			</svg>
 			<span>Series</span>
 		</a>
+
+		<a
+			href="/audio"
+			onclick={closeMobileNavigation}
+			class="flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/audio') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
+		>
+			<svg class="h-[1.125rem] w-[1.125rem] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18V5l11-2v12M9 18c0 1.1-1.34 2-3 2s-3-.9-3-2 1.34-2 3-2 3 .9 3 2Zm11-3c0 1.1-1.34 2-3 2s-3-.9-3-2 1.34-2 3-2 3 .9 3 2Z"/></svg>
+			<span>Audio</span>
+		</a>
 	</div>
 
 	<div class="mx-2.5 h-px bg-[var(--color-surface-border)]"></div>

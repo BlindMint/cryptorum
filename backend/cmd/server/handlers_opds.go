@@ -420,7 +420,7 @@ func writeOPDSBookFeed(w http.ResponseWriter, r *http.Request, title string, boo
 
 func loadOPDSBooks(current *AppUser, scope opdsBookScope) ([]opdsBook, error) {
 	ownerClause, ownerArgs := userOwnershipClause(current, "l")
-	conditions := []string{ownerClause, `EXISTS (SELECT 1 FROM book_file active_bf WHERE active_bf.book_id = b.id AND active_bf.missing_at IS NULL)`}
+	conditions := []string{ownerClause, `EXISTS (SELECT 1 FROM book_file active_bf WHERE active_bf.book_id = b.id AND active_bf.missing_at IS NULL)`, bookCatalogAudioVisibilitySQL}
 	args := append([]interface{}{userIDForScopedRows(current)}, ownerArgs...)
 	if scope.BookID != "" {
 		conditions = append(conditions, "b.id = ?")
@@ -663,7 +663,7 @@ func opdsImageMIMEType(path string) string {
 func handleOPDSLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 	current := getUserFromContext(r.Context())
 	ownerClause, args := userOwnershipClause(current, "l")
-	rows, err := appDB.Query(`SELECT l.id, l.name, COUNT(DISTINCT b.id) FROM library l LEFT JOIN book b ON b.library_id = l.id AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL) WHERE `+ownerClause+` GROUP BY l.id, l.name ORDER BY l.name COLLATE NOCASE`, args...)
+	rows, err := appDB.Query(`SELECT l.id, l.name, COUNT(DISTINCT b.id) FROM library l LEFT JOIN book b ON b.library_id = l.id AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL) AND `+bookCatalogAudioVisibilitySQL+` WHERE `+ownerClause+` GROUP BY l.id, l.name ORDER BY l.name COLLATE NOCASE`, args...)
 	if err != nil {
 		opdsError(w, http.StatusInternalServerError, "Failed to load libraries")
 		return
@@ -684,7 +684,7 @@ func handleOPDSLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 func handleOPDSAuthorsHandler(w http.ResponseWriter, r *http.Request) {
 	current := getUserFromContext(r.Context())
 	ownerClause, args := userOwnershipClause(current, "l")
-	rows, err := appDB.Query(`SELECT CAST(j.value AS TEXT), COUNT(DISTINCT b.id) FROM book b JOIN library l ON l.id = b.library_id JOIN book_metadata bm ON bm.book_id = b.id JOIN json_each(COALESCE(bm.authors, '[]')) j WHERE `+ownerClause+` AND TRIM(CAST(j.value AS TEXT)) != '' AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL) GROUP BY `+normalizedAuthorSQLExpression("j.value")+` ORDER BY CAST(j.value AS TEXT) COLLATE NOCASE`, args...)
+	rows, err := appDB.Query(`SELECT CAST(j.value AS TEXT), COUNT(DISTINCT b.id) FROM book b JOIN library l ON l.id = b.library_id JOIN book_metadata bm ON bm.book_id = b.id JOIN json_each(COALESCE(bm.authors, '[]')) j WHERE `+ownerClause+` AND TRIM(CAST(j.value AS TEXT)) != '' AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL) AND `+bookCatalogAudioVisibilitySQL+` GROUP BY `+normalizedAuthorSQLExpression("j.value")+` ORDER BY CAST(j.value AS TEXT) COLLATE NOCASE`, args...)
 	if err != nil {
 		opdsError(w, http.StatusInternalServerError, "Failed to load authors")
 		return
@@ -705,7 +705,7 @@ func handleOPDSAuthorsHandler(w http.ResponseWriter, r *http.Request) {
 func handleOPDSSeriesHandler(w http.ResponseWriter, r *http.Request) {
 	current := getUserFromContext(r.Context())
 	ownerClause, args := userOwnershipClause(current, "l")
-	rows, err := appDB.Query(`SELECT bm.series, COUNT(DISTINCT b.id) FROM book b JOIN library l ON l.id = b.library_id JOIN book_metadata bm ON bm.book_id = b.id WHERE `+ownerClause+` AND TRIM(COALESCE(bm.series, '')) != '' AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL) GROUP BY bm.series ORDER BY bm.series COLLATE NOCASE`, args...)
+	rows, err := appDB.Query(`SELECT bm.series, COUNT(DISTINCT b.id) FROM book b JOIN library l ON l.id = b.library_id JOIN book_metadata bm ON bm.book_id = b.id WHERE `+ownerClause+` AND TRIM(COALESCE(bm.series, '')) != '' AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL) AND `+bookCatalogAudioVisibilitySQL+` GROUP BY bm.series ORDER BY bm.series COLLATE NOCASE`, args...)
 	if err != nil {
 		opdsError(w, http.StatusInternalServerError, "Failed to load series")
 		return
@@ -725,7 +725,7 @@ func handleOPDSSeriesHandler(w http.ResponseWriter, r *http.Request) {
 func handleOPDSShelvesHandler(w http.ResponseWriter, r *http.Request) {
 	current := getUserFromContext(r.Context())
 	ownerClause, args := userOwnershipClause(current, "s")
-	rows, err := appDB.Query(`SELECT s.id, s.name, s.is_magic, COALESCE(s.rules_json, ''), COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL THEN b.id END) FROM shelf s LEFT JOIN book_shelf bs ON bs.shelf_id = s.id LEFT JOIN book b ON b.id = bs.book_id LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL WHERE `+ownerClause+` GROUP BY s.id, s.name, s.is_magic, s.rules_json, s.sort_order ORDER BY CASE WHEN s.sort_order = 0 THEN 1 ELSE 0 END, s.sort_order, s.name COLLATE NOCASE`, args...)
+	rows, err := appDB.Query(`SELECT s.id, s.name, s.is_magic, COALESCE(s.rules_json, ''), COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL AND `+bookCatalogAudioVisibilitySQL+` THEN b.id END) FROM shelf s LEFT JOIN book_shelf bs ON bs.shelf_id = s.id LEFT JOIN book b ON b.id = bs.book_id LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL WHERE `+ownerClause+` GROUP BY s.id, s.name, s.is_magic, s.rules_json, s.sort_order ORDER BY CASE WHEN s.sort_order = 0 THEN 1 ELSE 0 END, s.sort_order, s.name COLLATE NOCASE`, args...)
 	if err != nil {
 		opdsError(w, http.StatusInternalServerError, "Failed to load shelves")
 		return

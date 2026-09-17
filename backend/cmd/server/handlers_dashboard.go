@@ -60,6 +60,7 @@ func getDashboardSummaryHandler(w http.ResponseWriter, r *http.Request) {
 			SELECT 1 FROM book_file bf
 			WHERE bf.book_id = b.id AND bf.missing_at IS NULL
 		  )
+		  AND `+bookCatalogAudioVisibilitySQL+`
 	`, ownerArgs...).Scan(&summary.TotalBooks)
 
 	_ = appDB.QueryRow(`
@@ -80,6 +81,7 @@ func getDashboardSummaryHandler(w http.ResponseWriter, r *http.Request) {
 			SELECT 1 FROM book_file bf
 			WHERE bf.book_id = b.id AND bf.missing_at IS NULL
 		  )
+		  AND `+bookCatalogAudioVisibilitySQL+`
 	`, progressArgs...).Scan(&summary.Reading, &summary.Finished)
 
 	jsonResponse(w, http.StatusOK, summary)
@@ -106,7 +108,8 @@ func getDiscoverBooksHandler(w http.ResponseWriter, r *http.Request) {
 		AND EXISTS (
 			SELECT 1 FROM book_file active_bf
 			WHERE active_bf.book_id = b.id AND active_bf.missing_at IS NULL
-		)`
+		)
+		AND ` + bookCatalogAudioVisibilitySQL
 
 	var maxID int64
 	if err := appDB.QueryRow(`SELECT COALESCE(MAX(b.id), 0) FROM book b JOIN library l ON b.library_id = l.id`+baseWhere, ownerArgs...).Scan(&maxID); err != nil {

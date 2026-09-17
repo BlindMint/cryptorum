@@ -180,6 +180,10 @@ func performInitialScan() {
 	slog.Info("Starting initial library scan")
 
 	for _, lib := range appConfig.Libraries {
+		audioDefaultCategory := lib.AudioDefaultCategory
+		if !validAudioCategory(audioDefaultCategory) {
+			audioDefaultCategory = "audiobook"
+		}
 		// Get or create library
 		var libraryID int64
 		err := appDB.QueryRow("SELECT id FROM library WHERE name = ? AND owner_user_id = ?", lib.Name, 1).Scan(&libraryID)
@@ -189,7 +193,7 @@ func performInitialScan() {
 				slog.Error("Failed to find available library ID", "name", lib.Name, "error", err)
 				continue
 			}
-			_, err = appDB.Exec("INSERT INTO library (id, name, owner_user_id) VALUES (?, ?, ?)", libraryID, lib.Name, 1)
+			_, err = appDB.Exec("INSERT INTO library (id, name, owner_user_id, audio_default_category) VALUES (?, ?, ?, ?)", libraryID, lib.Name, 1, audioDefaultCategory)
 			if err != nil {
 				slog.Error("Failed to create library", "name", lib.Name, "error", err)
 				continue

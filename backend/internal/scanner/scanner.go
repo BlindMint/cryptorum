@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"cryptorum/internal/audiometa"
 	"cryptorum/internal/coverprefs"
 	"cryptorum/internal/covers"
 	"cryptorum/internal/filenameinfo"
@@ -590,6 +591,9 @@ func (s *Scanner) processFileWithInfo(
 		if repairErr := s.saveFilenameFallbackMetadataIfWeak(existingBookID, file.Path, ownerUserID); repairErr != nil {
 			slog.Debug("Skipped filename metadata fallback", "path", file.Path, "error", repairErr)
 		}
+		if audioErr := audiometa.SyncFile(s.db, ownerUserID, existingBookID, existingFileID, file.Path, file.Format, hashes.Full); audioErr != nil {
+			slog.Warn("Failed to index audio metadata", "path", file.Path, "error", audioErr)
+		}
 		return processFileResult{Status: status}, nil
 	}
 
@@ -630,7 +634,7 @@ func (s *Scanner) processFileWithInfo(
 		return processFileResult{}, fmt.Errorf("failed to get book ID: %w", err)
 	}
 
-	_, err = s.db.Exec(`
+	fileResult, err := s.db.Exec(`
 		INSERT INTO book_file (book_id, path, format, size, hash, hash_algorithm, last_modified, owner_user_id, scan_seen_at, missing_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 	`, bookID, file.Path, file.Format, file.Size, hashes.Full, fullFileHashAlgorithm, file.ModTimeUnix, ownerUserID, scanSeenAt)
@@ -646,6 +650,12 @@ func (s *Scanner) processFileWithInfo(
 	meta = metadataWithFilenameTitleFallback(meta, file.Path)
 	if saveErr := s.saveMetadata(bookID, meta, ownerUserID); saveErr != nil {
 		slog.Warn("Failed to save metadata", "path", file.Path, "error", saveErr)
+	}
+	fileID, fileIDErr := fileResult.LastInsertId()
+	if fileIDErr == nil {
+		if audioErr := audiometa.SyncFile(s.db, ownerUserID, bookID, fileID, file.Path, file.Format, hashes.Full); audioErr != nil {
+			slog.Warn("Failed to index audio metadata", "path", file.Path, "error", audioErr)
+		}
 	}
 
 	slog.Info("Imported new book", "path", file.Path, "bookID", bookID)

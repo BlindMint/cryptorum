@@ -35,7 +35,7 @@ func getShelvesHandler(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(s.sort_by, '') as sort_by,
 		       COALESCE(s.sort_dir, '') as sort_dir,
 		       COALESCE(s.sort_order, 0) as sort_order,
-		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL AND `+libraryOwnerClause+` THEN b.id END) as book_count
+		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL AND `+libraryOwnerClause+` AND `+bookCatalogAudioVisibilitySQL+` THEN b.id END) as book_count
 		FROM shelf s
 		LEFT JOIN book_shelf bs ON s.id = bs.shelf_id
 		LEFT JOIN book b ON bs.book_id = b.id
@@ -259,8 +259,9 @@ func evaluateMagicShelfRules(rulesJSON string, sortBy string, sortDir string, us
 			) bf ON b.id = bf.book_id
 			WHERE (%s) AND %s
 			  AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL)
+			  AND %s
 			ORDER BY %s
-		`, whereClause, ownerClause, orderBy)
+		`, whereClause, ownerClause, bookCatalogAudioVisibilitySQL, orderBy)
 
 	queryArgs := append([]interface{}{userIDForScopedRows(user)}, args...)
 	queryArgs = append(queryArgs, ownerArgs...)
@@ -282,7 +283,8 @@ func countMagicShelfBooks(rulesJSON string, user *AppUser) (int64, error) {
 		LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
 		WHERE (%s) AND %s
 		  AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL)
-	`, whereClause, ownerClause)
+		  AND %s
+	`, whereClause, ownerClause, bookCatalogAudioVisibilitySQL)
 
 	queryArgs := append([]interface{}{userIDForScopedRows(user)}, args...)
 	queryArgs = append(queryArgs, ownerArgs...)
@@ -356,7 +358,7 @@ func getShelfHandler(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(s.sort_by, '') as sort_by,
 		       COALESCE(s.sort_dir, '') as sort_dir,
 		       COALESCE(s.sort_order, 0) as sort_order,
-		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL AND `+libraryOwnerClause+` THEN b.id END) as book_count
+		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL AND `+libraryOwnerClause+` AND `+bookCatalogAudioVisibilitySQL+` THEN b.id END) as book_count
 		FROM shelf s
 		LEFT JOIN book_shelf bs ON s.id = bs.shelf_id
 		LEFT JOIN book b ON bs.book_id = b.id
@@ -547,6 +549,7 @@ func getShelfBooksHandler(w http.ResponseWriter, r *http.Request) {
 				) bf ON b.id = bf.book_id
 				WHERE bs.shelf_id = ? AND ` + ownerClause + `
 				  AND EXISTS (SELECT 1 FROM book_file bf WHERE bf.book_id = b.id AND bf.missing_at IS NULL)
+				  AND ` + bookCatalogAudioVisibilitySQL + `
 				ORDER BY ` + bookListOrderBy(sortBy, sortDir)
 		rows, err = appDB.Query(query, append([]interface{}{userIDForScopedRows(current), shelfID}, ownerArgs...)...)
 	}

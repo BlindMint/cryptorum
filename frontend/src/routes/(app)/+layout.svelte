@@ -24,6 +24,7 @@
 		isLibraryPage ||
 		$page.url.pathname === '/authors' ||
 		$page.url.pathname === '/series' ||
+		$page.url.pathname === '/audio' ||
 		$page.url.pathname === '/libraries' ||
 		$page.url.pathname === '/shelves' ||
 		/^\/shelves\/\d+$/.test($page.url.pathname)

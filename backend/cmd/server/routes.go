@@ -237,6 +237,7 @@ func buildBulkFilterQuery(user *AppUser, req bulkFilterRequest) (string, []inter
 		args = append(args, user.ID)
 	}
 	conditions = append(conditions, "EXISTS (SELECT 1 FROM book_file active_bf WHERE active_bf.book_id = b.id AND active_bf.missing_at IS NULL)")
+	conditions = append(conditions, bookCatalogAudioVisibilitySQL)
 	addFilterGroup(func(add func(string, ...interface{})) {
 		for _, value := range req.Author {
 			addAuthorFilterCondition(add, "bm.authors", value)
@@ -425,15 +426,41 @@ func initRoutes(r *chi.Mux) {
 		// Search
 		r.Get("/search", searchBooksHandler)
 
-		// Persistent audio player queue
-		r.Route("/audio/queue", func(r chi.Router) {
-			r.Get("/", GetAudioQueueHandler)
-			r.Post("/items", AddAudioQueueItemHandler)
-			r.Post("/items/bulk", AddAudioQueueItemsBulkHandler)
-			r.Put("/current", SetAudioQueueCurrentHandler)
-			r.Put("/reorder", ReorderAudioQueueHandler)
-			r.Delete("/items/{itemID}", DeleteAudioQueueItemHandler)
-			r.Delete("/", ClearAudioQueueHandler)
+		// Local audio library and persistent player queue
+		r.Route("/audio", func(r chi.Router) {
+			r.Get("/items", listAudioItemsHandler)
+			r.Post("/items/classify", bulkClassifyAudioHandler)
+			r.Route("/items/{audioID}", func(r chi.Router) {
+				r.Get("/", getAudioItemHandler)
+				r.Put("/", updateAudioItemHandler)
+				r.Get("/chapters", getAudioChaptersHandler)
+				r.Get("/bookmarks", getAudioBookmarksHandler)
+				r.Post("/bookmarks", createAudioBookmarkHandler)
+				r.Put("/bookmarks/{bookmarkID}", updateAudioBookmarkHandler)
+				r.Delete("/bookmarks/{bookmarkID}", deleteAudioBookmarkHandler)
+				r.Put("/listening", updateAudioListeningHandler)
+				r.Put("/speed", updateAudioPlaybackSpeedHandler)
+			})
+			r.Route("/playlists", func(r chi.Router) {
+				r.Get("/", listAudioPlaylistsHandler)
+				r.Post("/", createAudioPlaylistHandler)
+				r.Route("/{playlistID}", func(r chi.Router) {
+					r.Put("/", updateAudioPlaylistHandler)
+					r.Delete("/", deleteAudioPlaylistHandler)
+					r.Get("/items", getAudioPlaylistItemsHandler)
+					r.Put("/items", setAudioPlaylistItemsHandler)
+				})
+			})
+			r.Route("/queue", func(r chi.Router) {
+				r.Get("/", GetAudioQueueHandler)
+				r.Post("/items", AddAudioQueueItemHandler)
+				r.Post("/items/bulk", AddAudioQueueItemsBulkHandler)
+				r.Put("/replace", ReplaceAudioQueueHandler)
+				r.Put("/current", SetAudioQueueCurrentHandler)
+				r.Put("/reorder", ReorderAudioQueueHandler)
+				r.Delete("/items/{itemID}", DeleteAudioQueueItemHandler)
+				r.Delete("/", ClearAudioQueueHandler)
+			})
 		})
 
 		// Authors and Series
@@ -731,6 +758,7 @@ func getBooksHandler(w http.ResponseWriter, r *http.Request) {
 		args = append(args, current.ID)
 	}
 	conditions = append(conditions, "EXISTS (SELECT 1 FROM book_file active_bf WHERE active_bf.book_id = b.id AND active_bf.missing_at IS NULL)")
+	conditions = append(conditions, bookCatalogAudioVisibilitySQL)
 	if discoveryOnly {
 		conditions = append(conditions, "COALESCE(l.exclude_from_suggestions, 0) = 0")
 	}
@@ -1977,6 +2005,7 @@ func getSimilarBooksHandler(w http.ResponseWriter, r *http.Request) {
 		JOIN book_metadata bm ON b.id = bm.book_id
 		WHERE b.id != ?
 		  AND COALESCE(l.exclude_from_suggestions, 0) = 0
+		  AND `+bookCatalogAudioVisibilitySQL+`
 		  AND `+func() string { clause, _ := userOwnershipClause(current, "l"); return clause }()+`
 	`, append([]interface{}{bookID}, func() []interface{} { _, args := userOwnershipClause(current, "l"); return args }()...)...)
 	if err != nil {
@@ -2254,6 +2283,7 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(l.exclude_from_suggestions, 0) as exclude_from_suggestions,
 		       COALESCE(l.comic_spread_fallback, 'inherit') as comic_spread_fallback,
 		       COALESCE(l.metadata_protection_enabled, 0) as metadata_protection_enabled,
+		       COALESCE(l.audio_default_category, 'audiobook') as audio_default_category,
 		       COALESCE(l.sort_order, 0) as sort_order,
 		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL THEN b.id END) as book_count
 		FROM library l
@@ -2261,7 +2291,7 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
 		WHERE `+ownerClause+`
 		GROUP BY l.id, l.name, l.icon, l.exclude_from_suggestions, l.comic_spread_fallback,
-		         l.metadata_protection_enabled, l.sort_order
+		         l.metadata_protection_enabled, l.audio_default_category, l.sort_order
 		ORDER BY CASE WHEN COALESCE(l.sort_order, 0) = 0 THEN 1 ELSE 0 END, l.sort_order, l.name
 	`, ownerArgs...)
 	if err != nil {
@@ -2277,6 +2307,7 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 		ExcludeFromSuggestions bool   `json:"exclude_from_suggestions"`
 		ComicSpreadFallback    string `json:"comic_spread_fallback"`
 		MetadataProtection     bool   `json:"metadata_protection_enabled"`
+		AudioDefaultCategory   string `json:"audio_default_category"`
 		SortOrder              int64  `json:"sort_order"`
 		BookCount              int64  `json:"book_count"`
 		IsImporting            bool   `json:"is_importing"`
@@ -2294,6 +2325,7 @@ func getLibrariesHandler(w http.ResponseWriter, r *http.Request) {
 			&excludeFromSuggestions,
 			&lib.ComicSpreadFallback,
 			&metadataProtection,
+			&lib.AudioDefaultCategory,
 			&lib.SortOrder,
 			&lib.BookCount,
 		); err != nil {
@@ -2320,6 +2352,7 @@ func getLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		ExcludeFromSuggestions bool     `json:"exclude_from_suggestions"`
 		ComicSpreadFallback    string   `json:"comic_spread_fallback"`
 		MetadataProtection     bool     `json:"metadata_protection_enabled"`
+		AudioDefaultCategory   string   `json:"audio_default_category"`
 		BookCount              int64    `json:"book_count"`
 		Paths                  []string `json:"paths"`
 	}
@@ -2330,12 +2363,13 @@ func getLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(l.exclude_from_suggestions, 0) as exclude_from_suggestions,
 		       COALESCE(l.comic_spread_fallback, 'inherit') as comic_spread_fallback,
 		       COALESCE(l.metadata_protection_enabled, 0) as metadata_protection_enabled,
+		       COALESCE(l.audio_default_category, 'audiobook') as audio_default_category,
 		       COUNT(DISTINCT CASE WHEN bf.id IS NOT NULL THEN b.id END) as book_count
 		FROM library l
 		LEFT JOIN book b ON l.id = b.library_id
 		LEFT JOIN book_file bf ON bf.book_id = b.id AND bf.missing_at IS NULL
 		WHERE l.id = ? AND ` + ownerClause + `
-		GROUP BY l.id, l.exclude_from_suggestions, l.comic_spread_fallback, l.metadata_protection_enabled
+		GROUP BY l.id, l.exclude_from_suggestions, l.comic_spread_fallback, l.metadata_protection_enabled, l.audio_default_category
 	`
 	var excludeFromSuggestions int
 	var metadataProtection int
@@ -2346,6 +2380,7 @@ func getLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		&excludeFromSuggestions,
 		&lib.ComicSpreadFallback,
 		&metadataProtection,
+		&lib.AudioDefaultCategory,
 		&lib.BookCount,
 	)
 	if err != nil {
@@ -2874,6 +2909,7 @@ func createLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		Icon                   string   `json:"icon"`
 		ExcludeFromSuggestions bool     `json:"exclude_from_suggestions"`
 		ComicSpreadFallback    string   `json:"comic_spread_fallback"`
+		AudioDefaultCategory   string   `json:"audio_default_category"`
 		Paths                  []string `json:"paths"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
@@ -2895,9 +2931,12 @@ func createLibraryHandler(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	comicSpreadFallback := coverprefs.NormalizeComicSpreadFallback(req.ComicSpreadFallback, true)
+	if !validAudioCategory(req.AudioDefaultCategory) {
+		req.AudioDefaultCategory = "audiobook"
+	}
 	var nextSortOrder int64
 	_ = tx.QueryRow(`SELECT COALESCE(MAX(sort_order), 0) + 1 FROM library WHERE owner_user_id = ?`, current.ID).Scan(&nextSortOrder)
-	result, err := tx.Exec(`INSERT INTO library (id, name, icon, owner_user_id, exclude_from_suggestions, comic_spread_fallback, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)`, libraryID, req.Name, req.Icon, current.ID, boolToInt(req.ExcludeFromSuggestions), comicSpreadFallback, nextSortOrder)
+	result, err := tx.Exec(`INSERT INTO library (id, name, icon, owner_user_id, exclude_from_suggestions, comic_spread_fallback, audio_default_category, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, libraryID, req.Name, req.Icon, current.ID, boolToInt(req.ExcludeFromSuggestions), comicSpreadFallback, req.AudioDefaultCategory, nextSortOrder)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to create library")
 		return
@@ -2929,6 +2968,7 @@ func createLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		"icon":                     req.Icon,
 		"exclude_from_suggestions": req.ExcludeFromSuggestions,
 		"comic_spread_fallback":    comicSpreadFallback,
+		"audio_default_category":   req.AudioDefaultCategory,
 		"paths":                    req.Paths,
 		"scan_job_id":              scanJobID,
 		"scan_queued":              scanQueued,
@@ -3005,6 +3045,7 @@ func updateLibraryHandler(w http.ResponseWriter, r *http.Request) {
 		Icon                   string   `json:"icon"`
 		ExcludeFromSuggestions bool     `json:"exclude_from_suggestions"`
 		ComicSpreadFallback    string   `json:"comic_spread_fallback"`
+		AudioDefaultCategory   string   `json:"audio_default_category"`
 		Paths                  []string `json:"paths"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
@@ -3020,7 +3061,10 @@ func updateLibraryHandler(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	comicSpreadFallback := coverprefs.NormalizeComicSpreadFallback(req.ComicSpreadFallback, true)
-	_, err = tx.Exec(`UPDATE library SET name = ?, icon = ?, exclude_from_suggestions = ?, comic_spread_fallback = ? WHERE id = ?`, req.Name, req.Icon, boolToInt(req.ExcludeFromSuggestions), comicSpreadFallback, libraryID)
+	if !validAudioCategory(req.AudioDefaultCategory) {
+		req.AudioDefaultCategory = "audiobook"
+	}
+	_, err = tx.Exec(`UPDATE library SET name = ?, icon = ?, exclude_from_suggestions = ?, comic_spread_fallback = ?, audio_default_category = ? WHERE id = ?`, req.Name, req.Icon, boolToInt(req.ExcludeFromSuggestions), comicSpreadFallback, req.AudioDefaultCategory, libraryID)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to update library")
 		return
@@ -3571,7 +3615,7 @@ func getJSONMetadataOptions(column string, hierarchical bool, current *AppUser) 
 		FROM book_metadata bm
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE %s AND bm.%s IS NOT NULL AND bm.%s != '[]' AND bm.%s != ''
+		WHERE %s AND `+bookCatalogAudioVisibilitySQL+` AND bm.%s IS NOT NULL AND bm.%s != '[]' AND bm.%s != ''
 		GROUP BY bm.%s
 	`, column, ownerClause, column, column, column, column), ownerArgs...)
 	if err != nil {
@@ -3675,7 +3719,7 @@ func getScalarMetadataOptions(column string, current *AppUser) ([]metadataOption
 		FROM book_metadata bm
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE %s AND bm.%s IS NOT NULL AND bm.%s != ''
+		WHERE %s AND `+bookCatalogAudioVisibilitySQL+` AND bm.%s IS NOT NULL AND bm.%s != ''
 		GROUP BY bm.%s
 	`, column, ownerClause, column, column, column), ownerArgs...)
 	if err != nil {

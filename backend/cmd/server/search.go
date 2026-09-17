@@ -226,7 +226,7 @@ func queryFTSBookCandidates(ftsQuery string, libraryID string, current *AppUser,
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
 			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
-		WHERE (`+ownerClause+`)`+libraryClause+filterClause+` AND book_fts MATCH ?
+		WHERE (`+ownerClause+`) AND `+bookCatalogAudioVisibilitySQL+libraryClause+filterClause+` AND book_fts MATCH ?
 		ORDER BY rank
 		LIMIT ?
 	`, args...)
@@ -322,7 +322,7 @@ func queryTokenLikeBookCandidates(
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
 			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
-		WHERE (`+ownerClause+`)`+libraryClause+filterClause+` AND `+strings.Join(tokenConditions, " AND ")+`
+		WHERE (`+ownerClause+`) AND `+bookCatalogAudioVisibilitySQL+libraryClause+filterClause+` AND `+strings.Join(tokenConditions, " AND ")+`
 		ORDER BY
 			CASE WHEN LOWER(COALESCE(bm.title, '')) LIKE ? THEN 0 ELSE 1 END,
 			b.added_at DESC
@@ -396,7 +396,7 @@ func queryFallbackBookCandidates(libraryID string, current *AppUser, filters Boo
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
 			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
-		WHERE (`+ownerClause+`)`+libraryClause+filterClause+`
+		WHERE (`+ownerClause+`) AND `+bookCatalogAudioVisibilitySQL+libraryClause+filterClause+`
 		ORDER BY b.added_at DESC
 		LIMIT ?
 	`, args...)

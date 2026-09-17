@@ -7,6 +7,7 @@ A personal digital library application for self-hosting. Organize, read, and man
 - **Multiple Format Support**: EPUB/text ebooks, PDF, CBZ/CBR/CB7/CBT comics, and MP3/M4B/M4A/other audiobooks
 - **Library Organization**: Organize books by custom libraries and shelves, with per-library discovery exclusions
 - **Built-in Readers**: Read books directly in the app with dedicated readers for ebooks, PDFs, comics, audiobooks, and speed reading
+- **Local Audio Library**: Organize scanned audiobooks, music, and podcast files with playlists, queues, chapters, bookmarks, listening progress, and per-book or per-show playback speed
 - **EmbedPDF PDF Reader**: PDF reading is powered by EmbedPDF/PDFium, not PDF.js, with app-integrated progress, resume, search access, auto-hiding chrome, and theme-aware controls
 - **Full-Text Search**: Find books quickly with SQLite FTS5 search
 - **OPDS 2 Catalog**: Browse and download the library from compatible reading apps
@@ -77,6 +78,10 @@ libraries:
   - name: Comics
     paths:
       - /books/comics
+  - name: Music
+    audio_default_category: music
+    paths:
+      - /audio/music
 
 bookdrop:
   path: /bookdrop         # Drop files here for auto-import
@@ -123,7 +128,7 @@ Cryptorum includes separate reader experiences for each major format family:
 - **EPUB/text ebooks** use epub.js plus the app's processed EPUB cache for continuous or paginated reading.
 - **PDFs** use EmbedPDF's Svelte viewer, backed by PDFium WebAssembly. The current PDF reader does not use PDF.js.
 - **Comics** use the app's CBX reader for archive formats such as CBZ, CBR, CB7, and CBT.
-- **Audiobooks** use the app's audio reader for common audio formats.
+- **Audio** uses a persistent player that continues across the app and inside readers. The dedicated Audio area keeps local audiobooks, music, podcasts, and playlists organized separately from the book catalog while sharing the same library folders and scanner.
 - **Speed Reader** provides an RSVP-style mode for text-readable formats.
 
 Reader controls are designed to stay out of the way while reading. PDF, EPUB, and comic

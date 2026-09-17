@@ -11,6 +11,7 @@
 		book_count?: number;
 		exclude_from_suggestions?: boolean;
 		comic_spread_fallback?: string;
+		audio_default_category?: 'audiobook' | 'music' | 'podcast';
 		metadata_protection_enabled?: boolean;
 		is_importing?: boolean;
 		paths?: string[];
@@ -50,6 +51,7 @@
 		icon: '',
 		exclude_from_suggestions: false,
 		comic_spread_fallback: 'inherit',
+		audio_default_category: 'audiobook' as 'audiobook' | 'music' | 'podcast',
 		paths: ['']
 	});
 	let originalLibraryPaths = $state<string[]>([]);
@@ -76,6 +78,7 @@
 			icon: library?.icon || '',
 			exclude_from_suggestions: !!library?.exclude_from_suggestions,
 			comic_spread_fallback: library?.comic_spread_fallback || 'inherit',
+			audio_default_category: library?.audio_default_category || 'audiobook',
 			paths: paths.length ? [...paths] : ['']
 		};
 		originalLibraryPaths = normalizeLibraryPaths(paths);
@@ -179,6 +182,7 @@
 			icon: form.icon.trim(),
 			exclude_from_suggestions: form.exclude_from_suggestions,
 			comic_spread_fallback: form.comic_spread_fallback,
+			audio_default_category: form.audio_default_category,
 			paths: filteredPaths
 		};
 
@@ -375,6 +379,15 @@
 							class="settings-switch"
 						>
 					</label>
+				</div>
+
+				<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
+					<h4 class="text-sm font-semibold text-[var(--color-surface-text)]">Audio imports</h4>
+					<label for="library-audio-category" class="mt-3 block text-sm font-medium text-[var(--color-surface-text-muted)]">Default category for new audio files</label>
+					<select id="library-audio-category" bind:value={form.audio_default_category} class="mt-2 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-sm text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]">
+						<option value="audiobook">Audiobooks</option><option value="music">Music</option><option value="podcast">Podcasts</option>
+					</select>
+					<p class="mt-2 text-xs leading-5 text-[var(--color-surface-text-muted)]">This applies to newly discovered audio. Existing files keep their current category.</p>
 				</div>
 
 				<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">

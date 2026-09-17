@@ -103,6 +103,8 @@ func combineBooks(primaryID int64, secondaryIDs []int64) (int, []string, error) 
 		"UPDATE book_file SET book_id = ? WHERE book_id IN (" + inClause + ")",
 		"UPDATE reading_position SET book_id = ? WHERE book_id IN (" + inClause + ")",
 		"UPDATE reading_session SET book_id = ? WHERE book_id IN (" + inClause + ")",
+		"UPDATE audio_item SET book_id = ? WHERE book_id IN (" + inClause + ")",
+		"UPDATE audio_queue_item SET book_id = ? WHERE book_id IN (" + inClause + ")",
 		"UPDATE bookmark SET book_id = ? WHERE book_id IN (" + inClause + ")",
 		"UPDATE annotation SET book_id = ? WHERE book_id IN (" + inClause + ")",
 		"UPDATE notebook_entry SET book_id = ? WHERE book_id IN (" + inClause + ")",
