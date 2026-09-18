@@ -25,7 +25,10 @@
 	import ShelfPickerRow from '$lib/components/ShelfPickerRow.svelte';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
 	import LibraryModal from '$lib/components/LibraryModal.svelte';
+	import BulkAddToQueueButton from '$lib/components/BulkAddToQueueButton.svelte';
+	import { trackBulkActionBar } from '$lib/stores/bulkActionBar';
 	import { combineSelectionError } from '$lib/utils/combine-books';
+	import { selectionMayContainAudio } from '$lib/utils/bulk-audio-selection';
 
 		type FilterMode = 'AND' | 'OR' | 'NOT';
 		const COMPACT_TOOLBAR_WIDTH = 720;
@@ -149,6 +152,9 @@
 	let actionInProgress = $state(false);
 	let selectAllMode = $state<'none' | 'page' | 'filtered'>('none');
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
+	let bulkSelectionMayContainAudio = $derived(
+		selectAllMode === 'filtered' || selectionMayContainAudio(selectedBooks, books)
+	);
 	let manualShelves = $derived(shelves.filter((shelf) => shelf.is_magic !== 1));
 	let bulkSelectionAnchorId = $state<number | null>(null);
 	let bulkSelectionRestored = false;
@@ -733,7 +739,7 @@
 		editingLibrary = null;
 	}
 
-	async function handleLibrarySaved(result: { library: any; isEditing: boolean; foldersChanged: boolean }) {
+	async function handleLibrarySaved(result: { library: any; isEditing: boolean; foldersChanged: boolean; scopeChanged: boolean }) {
 		closeLibraryModal();
 		await fetchLibraryName();
 		await fetchBooks(true);
@@ -741,7 +747,7 @@
 		if ((window as any).refreshSidebar) {
 			(window as any).refreshSidebar();
 		}
-		if (result.isEditing && result.foldersChanged && confirm('Library folders changed. Scan this library now?')) {
+		if (result.isEditing && (result.foldersChanged || result.scopeChanged) && confirm('Library folders or content type changed. Scan this library now?')) {
 			await scanLibrary(result.library);
 		}
 	}
@@ -1131,7 +1137,7 @@
 
 	async function addToShelf(shelfId: number) {
 		const count = getSelectionCount();
-		if (!confirmBulkAction({ action: 'add {count} books to this shelf', count })) return;
+		if (!confirmBulkAction({ action: 'add {count} books to this collection', count })) return;
 		actionInProgress = true;
 		try {
 			let res;
@@ -1156,10 +1162,10 @@
 				deselectAll();
 				await fetchBooks(true);
 			} else {
-				console.error('Failed to add books to shelf');
+				console.error('Failed to add books to collection');
 			}
 		} catch (e) {
-			console.error('Failed to add books to shelf:', e);
+			console.error('Failed to add books to collection:', e);
 		} finally {
 			actionInProgress = false;
 		}
@@ -1668,8 +1674,8 @@
 						<span class={compactToolbar ? 'hidden' : 'hidden sm:inline'}>Filter</span>
 						{#if getActiveFilters().length > 0}
 							<span class={compactToolbar
-								? 'absolute -right-1 -top-1 min-w-5 rounded-full bg-[var(--color-primary-500)] px-1.5 py-0.5 text-center text-[10px] leading-none text-white'
-								: 'ml-2 px-2 py-0.5 text-xs rounded-full bg-[var(--color-primary-500)] text-white'}
+								? 'passive-count-indicator absolute -right-1 -top-1'
+								: 'passive-count-indicator ml-2'}
 							>
 								{getActiveFilters().length}
 							</span>
@@ -1933,12 +1939,12 @@
 
  <!-- Bulk Actions Panel -->
  {#if showBulkPanel}
-	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up">
+	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up" use:trackBulkActionBar>
 		<div class="bg-[var(--color-surface-overlay)] backdrop-blur-lg border-t border-[var(--color-surface-border)] shadow-2xl">
-			<div class="max-w-7xl mx-auto px-4 py-3">
-				<div class="flex items-center justify-between gap-4">
-					<div class="flex items-center space-x-4">
-						<span class="text-[var(--color-surface-text)] font-medium">
+			<div class="mx-auto max-w-7xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-4">
+				<div class="bulk-action-layout">
+					<div class="bulk-selection-cluster">
+						<span class="text-sm font-medium text-[var(--color-surface-text)] sm:text-base">
 							{getSelectionCount()} selected
 							{#if selectAllMode === 'filtered'}
 								<span class="text-xs text-[var(--color-surface-text-muted)]">(all {totalBooks} in filter)</span>
@@ -1946,7 +1952,7 @@
 								<span class="text-xs text-[var(--color-surface-text-muted)]">({getVisibleSelectedCount()} visible / {getHiddenSelectedCount()} hidden by filters)</span>
 							{/if}
 						</span>
-						<div class="flex items-center space-x-2">
+						<div class="bulk-selection-controls">
 							<button
 								onclick={selectAllPage}
 								class="px-3 py-1.5 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
@@ -1969,12 +1975,20 @@
 							</button>
 						</div>
 					</div>
-					<div class="flex items-center space-x-2">
-						<div class="relative">
+					<div class="bulk-primary-actions">
+						{#if bulkSelectionMayContainAudio}
+							<BulkAddToQueueButton
+								bookIds={Array.from(selectedBooks)}
+								disabled={actionInProgress || selectAllMode === 'filtered'}
+								label="Add Audio to Queue"
+								title={selectAllMode === 'filtered' ? 'Deselect “all filtered” and select specific books to add audio to the queue' : 'Add audio from this selection to the queue'}
+							/>
+						{/if}
+						<div class="relative w-full sm:w-auto">
 							<button
 								onclick={() => showMetadataMenu = !showMetadataMenu}
 								disabled={selectedBooks.size === 0}
-								class="px-4 py-2 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none flex items-center space-x-2"
+								class="flex w-full items-center justify-center space-x-2 rounded-lg bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none sm:w-auto"
 							>
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
@@ -1982,7 +1996,7 @@
 								<span>Metadata</span>
 							</button>
 							{#if showMetadataMenu}
-								<div class="floating-surface absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-lg border">
+								<div class="floating-surface bulk-menu-surface absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-lg border">
 									<button
 										type="button"
 										class="block w-full px-4 py-3 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
@@ -2029,7 +2043,7 @@
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
 								</svg>
-							<span>Add to Shelf</span>
+							<span>Add to Collection</span>
 						</button>
 						<button
 							onclick={deleteSelectedBooks}
@@ -2058,15 +2072,15 @@
  <!-- Shelf Picker Modal -->
  {#if showShelfPicker}
 	<div class="fixed inset-0 z-[60] flex items-center justify-center">
-		<button type="button" class="absolute inset-0 bg-black/60" aria-label="Close shelf picker" onclick={() => showShelfPicker = false}></button>
+		<button type="button" class="absolute inset-0 bg-black/60" aria-label="Close collection picker" onclick={() => showShelfPicker = false}></button>
 		<div class="relative bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-md max-h-[80vh] overflow-hidden shadow-2xl">
 			<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add to Shelf</h3>
-				<p class="text-sm text-[var(--color-surface-text-muted)] mt-1">Add {getSelectionCount()} book(s) to shelf</p>
+				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add to Collection</h3>
+				<p class="text-sm text-[var(--color-surface-text-muted)] mt-1">Add {getSelectionCount()} book(s) to a collection</p>
 			</div>
 			<div class="p-4 max-h-64 overflow-y-auto">
 				{#if manualShelves.length === 0}
-					<p class="text-center text-[var(--color-surface-text-muted)] py-4">No manual shelves yet. Create one first.</p>
+					<p class="text-center text-[var(--color-surface-text-muted)] py-4">No manual collections yet. Create one first.</p>
 				{:else}
 					<div class="space-y-2">
 						{#each manualShelves as shelf}
@@ -2085,7 +2099,7 @@
 					onclick={() => showCreateShelfModal = true}
 					class="block w-full text-center px-4 py-2 text-sm rounded-lg border border-dashed border-[var(--color-surface-border)] text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] transition-colors"
 				>
-					+ Create New Shelf
+					+ Create New Collection
 				</button>
 			</div>
 		</div>

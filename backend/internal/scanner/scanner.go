@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"cryptorum/internal/audiometa"
 	"cryptorum/internal/coverprefs"
 	"cryptorum/internal/covers"
 	"cryptorum/internal/filenameinfo"
@@ -88,7 +89,8 @@ func (s *Scanner) ScanLibraryWithProgress(libraryID int64, paths []string, onPro
 
 func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []string, onProgress ScanProgressFunc, shouldCancel ScanCancelFunc) (int, error) {
 	var ownerUserID int64 = 1
-	_ = s.db.QueryRow(`SELECT COALESCE(owner_user_id, 1) FROM library WHERE id = ?`, libraryID).Scan(&ownerUserID)
+	mediaScope := "mixed"
+	_ = s.db.QueryRow(`SELECT COALESCE(owner_user_id, 1), COALESCE(media_scope, 'mixed') FROM library WHERE id = ?`, libraryID).Scan(&ownerUserID, &mediaScope)
 
 	progress := ScanProgress{Phase: "inventory"}
 	files, err := collectProcessableFiles(paths, shouldCancel)
@@ -102,6 +104,7 @@ func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []stri
 	if err != nil {
 		slog.Warn("Library inventory completed with errors", "libraryID", libraryID, "error", err)
 	}
+	files = filterFilesForMediaScope(files, mediaScope)
 	progress.TotalFiles = len(files)
 	if onProgress != nil {
 		onProgress(progress)
@@ -198,6 +201,20 @@ func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []stri
 	}
 
 	return imported, nil
+}
+
+func filterFilesForMediaScope(files []fileInventoryItem, mediaScope string) []fileInventoryItem {
+	if mediaScope != "audio" && mediaScope != "books" {
+		return files
+	}
+	filtered := make([]fileInventoryItem, 0, len(files))
+	for _, file := range files {
+		isAudio := audiometa.Supported(file.Format)
+		if (mediaScope == "audio" && isAudio) || (mediaScope == "books" && !isAudio) {
+			filtered = append(filtered, file)
+		}
+	}
+	return filtered
 }
 
 type fileInventoryItem struct {
@@ -590,6 +607,9 @@ func (s *Scanner) processFileWithInfo(
 		if repairErr := s.saveFilenameFallbackMetadataIfWeak(existingBookID, file.Path, ownerUserID); repairErr != nil {
 			slog.Debug("Skipped filename metadata fallback", "path", file.Path, "error", repairErr)
 		}
+		if audioErr := audiometa.SyncFile(s.db, ownerUserID, existingBookID, existingFileID, file.Path, file.Format, hashes.Full); audioErr != nil {
+			slog.Warn("Failed to index audio metadata", "path", file.Path, "error", audioErr)
+		}
 		return processFileResult{Status: status}, nil
 	}
 
@@ -630,7 +650,7 @@ func (s *Scanner) processFileWithInfo(
 		return processFileResult{}, fmt.Errorf("failed to get book ID: %w", err)
 	}
 
-	_, err = s.db.Exec(`
+	fileResult, err := s.db.Exec(`
 		INSERT INTO book_file (book_id, path, format, size, hash, hash_algorithm, last_modified, owner_user_id, scan_seen_at, missing_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 	`, bookID, file.Path, file.Format, file.Size, hashes.Full, fullFileHashAlgorithm, file.ModTimeUnix, ownerUserID, scanSeenAt)
@@ -646,6 +666,12 @@ func (s *Scanner) processFileWithInfo(
 	meta = metadataWithFilenameTitleFallback(meta, file.Path)
 	if saveErr := s.saveMetadata(bookID, meta, ownerUserID); saveErr != nil {
 		slog.Warn("Failed to save metadata", "path", file.Path, "error", saveErr)
+	}
+	fileID, fileIDErr := fileResult.LastInsertId()
+	if fileIDErr == nil {
+		if audioErr := audiometa.SyncFile(s.db, ownerUserID, bookID, fileID, file.Path, file.Format, hashes.Full); audioErr != nil {
+			slog.Warn("Failed to index audio metadata", "path", file.Path, "error", audioErr)
+		}
 	}
 
 	slog.Info("Imported new book", "path", file.Path, "bookID", bookID)

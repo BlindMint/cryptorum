@@ -6,6 +6,7 @@
 	import FullscreenToggle from './FullscreenToggle.svelte';
 	import ThemeSelector from './ThemeSelector.svelte';
 	import NotificationBell from './NotificationBell.svelte';
+	import AudioPlayerToggle from './AudioPlayerToggle.svelte';
 
 	type MobileActionsView = 'menu' | 'notifications' | 'theme';
 
@@ -141,6 +142,7 @@
 
 		<div class="hidden items-center gap-1.5 lg:flex">
 			<FullscreenToggle />
+			<AudioPlayerToggle />
 			<NotificationBell />
 			<ThemeSelector />
 
@@ -178,6 +180,9 @@
 
 		<div class="lg:hidden">
 			<FullscreenToggle />
+		</div>
+		<div class="lg:hidden">
+			<AudioPlayerToggle />
 		</div>
 
 		<button

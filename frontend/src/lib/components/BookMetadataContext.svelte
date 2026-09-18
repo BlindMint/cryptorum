@@ -2,7 +2,7 @@
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import PathDisplay from '$lib/components/PathDisplay.svelte';
 	import { getCoverThumbUrl } from '$lib/utils/covers';
-	import { getFormatDisplayLabel, uniqueBookFormats } from '$lib/utils/book-formats';
+	import { getFormatDisplayLabel, getPreferredBookFormat, uniqueBookFormats } from '$lib/utils/book-formats';
 	import { parseAuthors } from '$lib/utils/metadata-edit';
 
 	interface Props {
@@ -41,6 +41,7 @@
 				: null
 	);
 	let showReset = $derived(customCover ?? book?.cover_source === 'custom');
+	let coverFormat = $derived(book?.format || book?.resume_format || getPreferredBookFormat(files));
 
 	function getPrimaryFilePath(): string {
 		return files[0]?.path || '';
@@ -52,7 +53,7 @@
 		<BookCoverFrame
 			src={frameSrc}
 			alt={book?.title || 'Book cover'}
-			format={book?.format}
+			format={coverFormat}
 			mode="contain"
 			frameClass="aspect-[2/3] w-full"
 			loading="eager"

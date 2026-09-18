@@ -311,7 +311,7 @@
 
 	async function addAllMatchingBooks() {
 		if (!shelf?.id || totalBooks === 0 || adding) return;
-		if (!confirm(`Add all ${totalBooks} matching books to "${shelf.name}"? Books already on this shelf will be skipped.`)) return;
+		if (!confirm(`Add all ${totalBooks} matching books to "${shelf.name}"? Books already in this collection will be skipped.`)) return;
 		adding = true;
 		errorMessage = '';
 		try {
@@ -548,7 +548,7 @@
 											</span>
 										{/if}
 										{#if alreadyOnShelf}
-											<span class="text-xs text-[var(--color-primary-400)]">On shelf</span>
+											<span class="text-xs text-[var(--color-primary-400)]">In collection</span>
 										{/if}
 									</div>
 								</div>

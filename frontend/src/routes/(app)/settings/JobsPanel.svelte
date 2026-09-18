@@ -486,7 +486,7 @@
 						<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/70 p-3 {isAttentionItem(item) ? 'ring-1 ring-amber-500/30' : ''}">
 							<div class="mb-2 flex flex-wrap items-center justify-between gap-2">
 								<div class="flex flex-wrap items-center gap-2">
-									<span class="rounded-full border border-[var(--color-primary-500)]/40 bg-[var(--color-primary-500)]/25 px-2 py-0.5 text-[10px] font-semibold uppercase text-white">Job</span>
+									<span class="passive-status-indicator uppercase">Job</span>
 									<span class="text-xs text-[var(--color-surface-text-muted)]">ID {item.job.id}</span>
 									<span class="text-xs text-[var(--color-surface-text-muted)]">{formatTime(item.created_at)}</span>
 								</div>
@@ -523,7 +523,7 @@
 										</span>
 										<span class="text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">{item.kind}</span>
 										{#if !item.read_at}
-											<span class="rounded-full bg-[var(--color-primary-500)] px-2 py-0.5 text-[10px] font-semibold text-white">New</span>
+											<span class="passive-status-indicator">New</span>
 										{/if}
 										<span class="text-xs text-[var(--color-surface-text-muted)]">{formatTime(item.created_at)}</span>
 									</div>

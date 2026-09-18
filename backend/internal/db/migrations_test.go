@@ -336,3 +336,62 @@ func TestMigration26BackfillsConservativeActiveTime(t *testing.T) {
 		t.Fatalf("migrated sessions = %#v, want %#v", got, want)
 	}
 }
+
+func TestMigration28BackfillsAudioLibraryAndRollsBack(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "cryptorum.db")
+	conn, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer conn.Close()
+
+	goose.SetBaseFS(embedMigrations)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("set dialect: %v", err)
+	}
+	if err := goose.UpTo(conn, "migrations", 27); err != nil {
+		t.Fatalf("migrate to 27: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO library (id, name, owner_user_id) VALUES (1, 'Audio', 1)`); err != nil {
+		t.Fatalf("insert library: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO book (id, library_id, added_at, last_scanned, owner_user_id) VALUES (1, 1, 100, 100, 1)`); err != nil {
+		t.Fatalf("insert book: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO book_metadata (book_id, title, authors, owner_user_id) VALUES (1, 'Local Audio', '["Artist"]', 1)`); err != nil {
+		t.Fatalf("insert metadata: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO book_file (id, book_id, path, format, size, hash, last_modified, owner_user_id) VALUES (10, 1, '/audio/track.mp3', 'mp3', 100, 'hash', 100, 1)`); err != nil {
+		t.Fatalf("insert file: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO audio_queue_item (id, owner_user_id, book_id, file_id, position, added_at) VALUES (20, 1, 1, 10, 0, 100)`); err != nil {
+		t.Fatalf("insert queue item: %v", err)
+	}
+
+	if err := goose.Up(conn, "migrations"); err != nil {
+		t.Fatalf("migrate to latest: %v", err)
+	}
+	var title string
+	var queueAudioID sql.NullInt64
+	if err := conn.QueryRow(`SELECT ai.title, qi.audio_item_id FROM audio_item ai JOIN audio_queue_item qi ON qi.file_id = ai.file_id WHERE ai.file_id = 10`).Scan(&title, &queueAudioID); err != nil {
+		t.Fatalf("load audio backfill: %v", err)
+	}
+	if title != "Local Audio" || !queueAudioID.Valid {
+		t.Fatalf("backfill title=%q queue audio=%v", title, queueAudioID)
+	}
+	var mediaScope string
+	if err := conn.QueryRow(`SELECT media_scope FROM library WHERE id = 1`).Scan(&mediaScope); err != nil || mediaScope != "mixed" {
+		t.Fatalf("library media scope=%q, %v", mediaScope, err)
+	}
+
+	if err := goose.DownTo(conn, "migrations", 27); err != nil {
+		t.Fatalf("roll back migration 28: %v", err)
+	}
+	var audioTables int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'audio_item'`).Scan(&audioTables); err != nil {
+		t.Fatalf("inspect rollback: %v", err)
+	}
+	if audioTables != 0 {
+		t.Fatalf("audio_item table remains after rollback")
+	}
+}

@@ -5,14 +5,15 @@ A personal digital library application for self-hosting. Organize, read, and man
 ## Features
 
 - **Multiple Format Support**: EPUB/text ebooks, PDF, CBZ/CBR/CB7/CBT comics, and MP3/M4B/M4A/other audiobooks
-- **Library Organization**: Organize books by custom libraries and shelves, with per-library discovery exclusions
+- **Library Organization**: Organize books and audio by folder-backed libraries and custom collections, with per-library discovery exclusions
 - **Built-in Readers**: Read books directly in the app with dedicated readers for ebooks, PDFs, comics, audiobooks, and speed reading
+- **Local Audio Library**: Organize scanned audiobooks, music, and podcast files with playlists, queues, chapters, bookmarks, listening progress, and per-book or per-show playback speed
 - **EmbedPDF PDF Reader**: PDF reading is powered by EmbedPDF/PDFium, not PDF.js, with app-integrated progress, resume, search access, auto-hiding chrome, and theme-aware controls
 - **Full-Text Search**: Find books quickly with SQLite FTS5 search
 - **OPDS 2 Catalog**: Browse and download the library from compatible reading apps
 - **Reading Progress**: Track and resume progress across supported readers, with cover progress bars for opened books
 - **Discovery**: Dashboard discovery and similar-book recommendations can exclude selected libraries while keeping those books searchable and readable
-- **Cover Metadata**: Optional file-format chips on covers, including library/dashboard/shelf cards and similar books
+- **Cover Metadata**: Optional file-format chips on covers, including library, dashboard, collection, and similar-item cards
 - **Speed Reader**: RSVP word-at-a-time reading mode for text formats
 - **Single-User Design**: Simple authentication with password protection
 
@@ -77,6 +78,11 @@ libraries:
   - name: Comics
     paths:
       - /books/comics
+  - name: Music
+    media_scope: audio
+    audio_default_category: music
+    paths:
+      - /audio/music
 
 bookdrop:
   path: /bookdrop         # Drop files here for auto-import
@@ -123,7 +129,7 @@ Cryptorum includes separate reader experiences for each major format family:
 - **EPUB/text ebooks** use epub.js plus the app's processed EPUB cache for continuous or paginated reading.
 - **PDFs** use EmbedPDF's Svelte viewer, backed by PDFium WebAssembly. The current PDF reader does not use PDF.js.
 - **Comics** use the app's CBX reader for archive formats such as CBZ, CBR, CB7, and CBT.
-- **Audiobooks** use the app's audio reader for common audio formats.
+- **Audio** uses a persistent player that continues across the app and inside readers. The dedicated Audio area keeps local audiobooks, music, podcasts, and playlists organized separately from the book catalog while sharing the same library folders and scanner.
 - **Speed Reader** provides an RSVP-style mode for text-readable formats.
 
 Reader controls are designed to stay out of the way while reading. PDF, EPUB, and comic
@@ -160,7 +166,7 @@ Cryptorum can expose the library as an OPDS 2 catalog. Open **Settings → OPDS*
 https://your-cryptorum-host/opds/
 ```
 
-The catalog includes all books with available files, recently added books, libraries, authors, series, shelves, and search. Each available file format is offered as a separate acquisition link.
+The catalog includes all books with available files, recently added books, libraries, authors, series, collections, and search. Each available file format is offered as a separate acquisition link.
 
 When `auth.mode` is `password`, OPDS clients use the same configured username and password through HTTP Basic authentication. When `auth.mode` is `none`, the catalog is available without authentication. Use HTTPS whenever the catalog is accessed outside a trusted local network; Basic authentication does not encrypt credentials on its own.
 

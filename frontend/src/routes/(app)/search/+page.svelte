@@ -24,6 +24,9 @@
 	import ShelfPickerRow from '$lib/components/ShelfPickerRow.svelte';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
 	import { combineSelectionError } from '$lib/utils/combine-books';
+	import BulkAddToQueueButton from '$lib/components/BulkAddToQueueButton.svelte';
+	import { trackBulkActionBar } from '$lib/stores/bulkActionBar';
+	import { selectionMayContainAudio } from '$lib/utils/bulk-audio-selection';
 
 	type FilterMode = 'AND' | 'OR' | 'NOT';
 	type SearchResponse = {
@@ -107,6 +110,7 @@
 	});
 
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
+	let bulkSelectionMayContainAudio = $derived(selectionMayContainAudio(selectedBooks, results));
 	let hasMore = $derived(serverHasMore);
 	let manualShelves = $derived(shelves.filter((shelf) => shelf.is_magic !== 1));
 	let compactToolbar = $derived(toolbarWidth > 0 && toolbarWidth < COMPACT_TOOLBAR_WIDTH);
@@ -808,7 +812,7 @@
 	}
 
 	async function addToShelf(shelfId: number) {
-		if (!confirmBulkAction({ action: 'add {count} books to this shelf', count: selectedBooks.size })) return;
+		if (!confirmBulkAction({ action: 'add {count} books to this collection', count: selectedBooks.size })) return;
 		actionInProgress = true;
 		try {
 			const res = await fetch(`/api/shelves/${shelfId}/books/bulk`, {
@@ -821,10 +825,10 @@
 				showShelfPicker = false;
 				deselectAll();
 			} else {
-				console.error('Failed to add books to shelf');
+				console.error('Failed to add books to collection');
 			}
 		} catch (error) {
-			console.error('Failed to add books to shelf:', error);
+			console.error('Failed to add books to collection:', error);
 		} finally {
 			actionInProgress = false;
 		}
@@ -1197,7 +1201,7 @@
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
 						</svg>
 						{#if getActiveFilters().length > 0}
-							<span class="absolute -right-1 -top-1 min-w-5 rounded-full bg-[var(--color-primary-500)] px-1.5 py-0.5 text-center text-[10px] leading-none text-white">
+							<span class="passive-count-indicator absolute -right-1 -top-1">
 								{getActiveFilters().length}
 							</span>
 						{/if}
@@ -1405,15 +1409,15 @@
 </div>
 
 {#if selectedBooks.size > 0}
-	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up">
+	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up" use:trackBulkActionBar>
 		<div class="bg-[var(--color-surface-overlay)] backdrop-blur-lg border-t border-[var(--color-surface-border)] shadow-2xl">
-			<div class="max-w-7xl mx-auto px-4 py-3">
-				<div class="flex items-center justify-between gap-4 flex-wrap">
-					<div class="flex items-center gap-4 flex-wrap">
-						<span class="text-[var(--color-surface-text)] font-medium">
+			<div class="mx-auto max-w-7xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-4">
+				<div class="bulk-action-layout">
+					<div class="bulk-selection-cluster">
+						<span class="text-sm font-medium text-[var(--color-surface-text)] sm:text-base">
 							{selectedBooks.size} selected
 						</span>
-						<div class="flex items-center gap-2">
+						<div class="bulk-selection-controls">
 							<button
 								onclick={selectAllPage}
 								class="px-3 py-1.5 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
@@ -1428,12 +1432,15 @@
 							</button>
 						</div>
 					</div>
-					<div class="flex items-center gap-2">
-						<div class="relative">
+					<div class="bulk-primary-actions">
+						{#if bulkSelectionMayContainAudio}
+							<BulkAddToQueueButton bookIds={Array.from(selectedBooks)} disabled={actionInProgress} label="Add Audio to Queue" />
+						{/if}
+						<div class="relative w-full sm:w-auto">
 							<button
 								onclick={() => showMetadataMenu = !showMetadataMenu}
 								disabled={selectedBooks.size === 0}
-								class="px-4 py-2 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none flex items-center gap-2"
+								class="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none sm:w-auto"
 							>
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
@@ -1441,7 +1448,7 @@
 								<span>Metadata</span>
 							</button>
 							{#if showMetadataMenu}
-								<div class="floating-surface absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-lg border">
+								<div class="floating-surface bulk-menu-surface absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-lg border">
 									<button
 										type="button"
 										class="block w-full px-4 py-3 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
@@ -1488,7 +1495,7 @@
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
 								</svg>
-							<span>Add to Shelf</span>
+							<span>Add to Collection</span>
 						</button>
 						<button
 							onclick={deleteSelectedBooks}
@@ -1516,15 +1523,15 @@
 
 {#if showShelfPicker}
 	<div class="fixed inset-0 z-[60] flex items-center justify-center">
-		<button type="button" class="absolute inset-0 bg-black/60" aria-label="Close shelf picker" onclick={() => showShelfPicker = false}></button>
+		<button type="button" class="absolute inset-0 bg-black/60" aria-label="Close collection picker" onclick={() => showShelfPicker = false}></button>
 		<div class="relative bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-md max-h-[80vh] overflow-hidden shadow-2xl">
 			<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add to Shelf</h3>
-				<p class="text-sm text-[var(--color-surface-text-muted)] mt-1">Add {selectedBooks.size} book(s) to shelf</p>
+				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add to Collection</h3>
+				<p class="text-sm text-[var(--color-surface-text-muted)] mt-1">Add {selectedBooks.size} book(s) to a collection</p>
 			</div>
 			<div class="p-4 max-h-64 overflow-y-auto">
 				{#if manualShelves.length === 0}
-					<p class="text-center text-[var(--color-surface-text-muted)] py-4">No manual shelves yet. Create one first.</p>
+					<p class="text-center text-[var(--color-surface-text-muted)] py-4">No manual collections yet. Create one first.</p>
 				{:else}
 					<div class="space-y-2">
 						{#each manualShelves as shelf}
@@ -1543,7 +1550,7 @@
 					onclick={() => showCreateShelfModal = true}
 					class="block w-full text-center px-4 py-2 text-sm rounded-lg border border-dashed border-[var(--color-surface-border)] text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] transition-colors"
 				>
-					+ Create New Shelf
+					+ Create New Collection
 				</button>
 			</div>
 		</div>

@@ -91,8 +91,8 @@
 
 	function getShelfCountLabel(): string {
 		if (shelves.length === 0) return 'Organize your books into collections';
-		if (!searchQuery.trim()) return `${shelves.length} shelves`;
-		return `${getVisibleShelves().length} of ${shelves.length} shelves`;
+		if (!searchQuery.trim()) return `${shelves.length} collections`;
+		return `${getVisibleShelves().length} of ${shelves.length} collections`;
 	}
 </script>
 
@@ -100,7 +100,7 @@
 	<div class="catalog-page-header">
 		<div class="catalog-page-header-row">
 			<div class="catalog-page-title-row">
-				<h1 class="catalog-page-title">Shelves</h1>
+				<h1 class="catalog-page-title">Collections</h1>
 				<p class="catalog-page-count">{getShelfCountLabel()}</p>
 			</div>
 
@@ -113,7 +113,7 @@
 					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
 					</svg>
-					Create Shelf
+					Create Collection
 				</button>
 				<button
 					type="button"
@@ -123,7 +123,7 @@
 					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
 					</svg>
-					Create Magic Shelf
+					Create Smart Collection
 				</button>
 			</div>
 		</div>
@@ -137,7 +137,7 @@
 					<input
 						type="search"
 						bind:value={searchQuery}
-						placeholder="Search shelves"
+						placeholder="Search collections"
 						class="catalog-page-control catalog-search-control"
 					>
 				</div>
@@ -163,12 +163,12 @@
 			<svg class="w-16 h-16 text-[var(--color-primary-400)] mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
 			</svg>
-			<h3 class="text-lg font-medium text-[var(--color-surface-text)] mb-2">No shelves yet</h3>
-			<p class="text-[var(--color-surface-text-muted)]">Create shelves to organize your books</p>
+			<h3 class="text-lg font-medium text-[var(--color-surface-text)] mb-2">No collections yet</h3>
+			<p class="text-[var(--color-surface-text-muted)]">Create collections to organize your library</p>
 		</div>
 	{:else if getVisibleShelves().length === 0}
 		<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-12 text-center text-[var(--color-surface-text-muted)]">
-			No shelves match your search
+			No collections match your search
 		</div>
 	{:else}
 		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">

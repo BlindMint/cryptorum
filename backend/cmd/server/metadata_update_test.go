@@ -476,3 +476,19 @@ func TestFetchBookDetailMergesLegacyGenresIntoTags(t *testing.T) {
 		t.Fatalf("tags = %#v, want legacy genres merged into tags %#v", tags, want)
 	}
 }
+
+func TestFetchBookDetailIncludesAvailableAudioFormat(t *testing.T) {
+	setupMetadataUpdateTestDB(t)
+	mustExec(t, `
+		INSERT INTO book_file (id, book_id, path, format, size, hash, last_modified, owner_user_id)
+		VALUES (10, 1, '/library/audio.m4b', 'm4b', 1000, 'audio-hash', 100, 1)
+	`)
+
+	book, err := fetchBookDetail(1, &AppUser{ID: 1, IsAdmin: true})
+	if err != nil {
+		t.Fatalf("fetch book detail: %v", err)
+	}
+	if book.Format != "m4b" {
+		t.Fatalf("format = %q, want m4b", book.Format)
+	}
+}

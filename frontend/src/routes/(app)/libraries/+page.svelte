@@ -11,6 +11,7 @@
 		book_count: number;
 		exclude_from_suggestions?: boolean;
 		comic_spread_fallback?: string;
+		media_scope?: 'mixed' | 'books' | 'audio';
 		is_importing?: boolean;
 		sort_order?: number;
 	}
@@ -130,7 +131,7 @@
 			{#each getVisibleLibraries() as library}
 				{@const parsedIcon = parseLibraryIcon(library.icon)}
 				<a
-					href="/library?library={library.id}"
+					href={library.media_scope === 'audio' ? `/audio?library=${library.id}` : `/library?library=${library.id}`}
 					class="flex flex-col justify-center overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 transition-colors hover:border-[var(--color-primary-500)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 				>
 					<div class="flex min-w-0 w-full items-center gap-3">
@@ -145,11 +146,11 @@
 						</div>
 						<div class="min-w-0 flex-1">
 							<h3 class="line-clamp-2 break-words text-base font-semibold leading-snug text-[var(--color-surface-text)]">{library.name}</h3>
-							<p class="text-sm text-[var(--color-surface-text-muted)]">{library.book_count} books</p>
+							<p class="text-sm text-[var(--color-surface-text-muted)]">{library.book_count} {library.media_scope === 'audio' ? 'audio items' : 'books'}</p>
 						</div>
 					</div>
 					{#if libraryStatusLabel(library)}
-						<div class="mt-3 inline-flex rounded-full border border-[var(--color-primary-500)]/35 bg-[var(--color-primary-500)]/10 px-2.5 py-1 text-xs font-medium text-[var(--color-primary-400)]">
+						<div class="passive-status-indicator mt-3">
 							{libraryStatusLabel(library)}
 						</div>
 					{/if}

@@ -28,6 +28,9 @@
 	} from '$lib/utils/metadata-edit-session';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
+	import BulkAddToQueueButton from '$lib/components/BulkAddToQueueButton.svelte';
+	import { trackBulkActionBar } from '$lib/stores/bulkActionBar';
+	import { selectionMayContainAudio } from '$lib/utils/bulk-audio-selection';
 
 	let shelf = $state<any>(null);
 	let books = $state<any[]>([]);
@@ -65,6 +68,7 @@
 	let bulkSelectionAnchorId = $state<number | null>(null);
 
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
+	let bulkSelectionMayContainAudio = $derived(selectionMayContainAudio(selectedBooks, books));
 	let visibleBooks = $derived(getVisibleBooks());
 	let existingShelfBookIds = $derived(new Set(books.map((book) => Number(book.id))));
 	let estimatedGridWidth = $derived(shelfGridWidth > 0 ? shelfGridWidth : typeof window === 'undefined' ? 1920 : window.innerWidth);
@@ -317,7 +321,7 @@
 
 	async function deleteShelf() {
 		if (!shelf?.id || deletingShelf) return;
-		if (!confirm(`Delete shelf "${shelf.name}"? Books will remain in your libraries.`)) return;
+		if (!confirm(`Delete collection "${shelf.name}"? Items will remain in your libraries.`)) return;
 
 		deletingShelf = true;
 		try {
@@ -367,7 +371,7 @@
 	}
 
 	function getShelfTypeLabel(): string {
-		return shelf?.is_magic === 1 ? 'Magic' : 'Manual';
+		return shelf?.is_magic === 1 ? 'Smart' : 'Manual';
 	}
 
 	function getShelfTypeClass(): string {
@@ -539,7 +543,7 @@
 	async function removeSelectedFromShelf() {
 		if (selectedBooks.size === 0 || !shelf) return;
 		if (shelf.is_magic === 1) return;
-		if (!confirmBulkAction({ action: 'remove {count} books from this shelf', count: selectedBooks.size, destructive: true, alwaysConfirm: true })) return;
+		if (!confirmBulkAction({ action: 'remove {count} books from this collection', count: selectedBooks.size, destructive: true, alwaysConfirm: true })) return;
 
 		actionInProgress = true;
 		try {
@@ -637,7 +641,7 @@
 					<input
 						type="search"
 						bind:value={shelfSearch}
-						placeholder="Search this shelf"
+						placeholder="Search this collection"
 						class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-2 pl-9 pr-9 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 					>
 					{#if shelfSearch}
@@ -645,7 +649,7 @@
 							type="button"
 							onclick={clearShelfSearch}
 							class="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
-							aria-label="Clear shelf search"
+							aria-label="Clear collection search"
 						>
 							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 								<path d="M18 6 6 18"></path>
@@ -660,14 +664,14 @@
 					<button
 						type="button"
 						class="fixed inset-0 z-20"
-						aria-label="Close shelf settings menu"
+						aria-label="Close collection settings menu"
 						onclick={() => showSettingsMenu = false}
 					></button>
 				{/if}
 				<button
 					type="button"
 					onclick={() => showSettingsMenu = !showSettingsMenu}
-					aria-label="Shelf settings"
+					aria-label="Collection settings"
 					aria-expanded={showSettingsMenu}
 					class="toolbar-action inline-flex h-10 w-10 items-center justify-center rounded-lg border transition-colors"
 				>
@@ -749,7 +753,7 @@
 					<button
 						type="button"
 						class="fixed inset-0 z-20"
-						aria-label="Close shelf sort menu"
+						aria-label="Close collection sort menu"
 						onclick={() => showSortMenu = false}
 					></button>
 				{/if}
@@ -757,7 +761,7 @@
 					<button
 						type="button"
 						onclick={() => showSortMenu = !showSortMenu}
-						aria-label="Sort shelf books by {shelfSortLabel()}"
+						aria-label="Sort collection items by {shelfSortLabel()}"
 						class="inline-flex min-w-0 items-center px-3 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-overlay)]"
 					>
 						<span class="hidden min-w-0 truncate sm:inline">{shelfSortLabel()}</span>
@@ -808,15 +812,15 @@
 				<svg class="w-16 h-16 text-[var(--color-surface-text-muted)] mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
 				</svg>
-				<h3 class="text-lg font-medium text-[var(--color-surface-text)] mb-2">No books on this shelf</h3>
+				<h3 class="text-lg font-medium text-[var(--color-surface-text)] mb-2">No items in this collection</h3>
 				<p class="text-[var(--color-surface-text-muted)]">
-					{shelf.is_magic === 1 ? 'No books currently match these smart rules.' : 'Use Add Books to build this shelf.'}
+					{shelf.is_magic === 1 ? 'No items currently match these smart rules.' : 'Use Add Books to build this collection.'}
 				</p>
 			</div>
 		{:else if visibleBooks.length === 0}
 			<div class="text-center py-16 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">
-				<h3 class="text-lg font-medium text-[var(--color-surface-text)] mb-2">No books match your shelf search</h3>
-				<p class="text-[var(--color-surface-text-muted)]">Clear the shelf search to see all books on this shelf.</p>
+				<h3 class="text-lg font-medium text-[var(--color-surface-text)] mb-2">No items match your collection search</h3>
+				<p class="text-[var(--color-surface-text-muted)]">Clear the search to see every item in this collection.</p>
 			</div>
 		{:else if viewMode === 'list'}
 			<div class="space-y-2">
@@ -967,19 +971,19 @@
 		{/if}
 	{:else}
 		<div class="text-center py-16 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">
-			<p class="text-[var(--color-surface-text-muted)]">Shelf not found</p>
+			<p class="text-[var(--color-surface-text-muted)]">Collection not found</p>
 		</div>
 	{/if}
 </div>
 
 {#if selectedBooks.size > 0}
-	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up">
+	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up" use:trackBulkActionBar>
 		<div class="bg-[var(--color-surface-overlay)] backdrop-blur-lg border-t border-[var(--color-surface-border)] shadow-2xl">
-			<div class="max-w-7xl mx-auto px-4 py-3">
-				<div class="flex items-center justify-between gap-4 flex-wrap">
-					<div class="flex items-center gap-4 flex-wrap">
-						<span class="text-[var(--color-surface-text)] font-medium">{selectedBooks.size} selected</span>
-						<div class="flex items-center gap-2">
+			<div class="mx-auto max-w-7xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-4">
+				<div class="bulk-action-layout">
+					<div class="bulk-selection-cluster">
+						<span class="text-sm font-medium text-[var(--color-surface-text)] sm:text-base">{selectedBooks.size} selected</span>
+						<div class="bulk-selection-controls">
 							<button
 								onclick={selectAllPage}
 								class="px-3 py-1.5 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
@@ -994,12 +998,15 @@
 							</button>
 						</div>
 					</div>
-					<div class="flex items-center gap-2">
-						<div class="relative">
+					<div class="bulk-primary-actions">
+						{#if bulkSelectionMayContainAudio}
+							<BulkAddToQueueButton bookIds={Array.from(selectedBooks)} disabled={actionInProgress} label="Add Audio to Queue" />
+						{/if}
+						<div class="relative w-full sm:w-auto">
 							<button
 								onclick={() => showMetadataMenu = !showMetadataMenu}
 								disabled={selectedBooks.size === 0}
-								class="px-4 py-2 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] font-medium transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none flex items-center gap-2"
+								class="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none sm:w-auto"
 							>
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
@@ -1007,7 +1014,7 @@
 								<span>Metadata</span>
 							</button>
 							{#if showMetadataMenu}
-								<div class="floating-surface absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-lg border">
+								<div class="floating-surface bulk-menu-surface absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-lg border">
 									<button
 										type="button"
 										class="block w-full px-4 py-3 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
@@ -1051,7 +1058,7 @@
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 6h14M10 6V4h4v2m-5 4v6m4-6v6M6 6l1 14h10l1-14"></path>
 									</svg>
 								{/if}
-								<span>Remove from Shelf</span>
+								<span>Remove from Collection</span>
 							</button>
 						{/if}
 					</div>

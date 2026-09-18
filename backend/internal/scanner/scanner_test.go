@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	appdb "cryptorum/internal/db"
@@ -703,5 +704,37 @@ func TestComputeFileHashUsesFullSHA256ForLargeFiles(t *testing.T) {
 	want := hex.EncodeToString(sum[:])
 	if got != want {
 		t.Fatalf("hash = %q, want full SHA-256 %q", got, want)
+	}
+}
+
+func TestFilterFilesForMediaScope(t *testing.T) {
+	files := []fileInventoryItem{
+		{Path: "/library/book.epub", Format: "epub"},
+		{Path: "/library/comic.cbz", Format: "cbz"},
+		{Path: "/library/song.mp3", Format: "mp3"},
+		{Path: "/library/audiobook.m4b", Format: "m4b"},
+	}
+
+	tests := []struct {
+		name  string
+		scope string
+		want  []string
+	}{
+		{name: "mixed keeps every supported file", scope: "mixed", want: []string{"epub", "cbz", "mp3", "m4b"}},
+		{name: "audio keeps audio formats", scope: "audio", want: []string{"mp3", "m4b"}},
+		{name: "books excludes audio formats", scope: "books", want: []string{"epub", "cbz"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotFiles := filterFilesForMediaScope(files, tt.scope)
+			got := make([]string, 0, len(gotFiles))
+			for _, file := range gotFiles {
+				got = append(got, file.Format)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("formats = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

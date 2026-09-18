@@ -179,14 +179,15 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		AND EXISTS (
 			SELECT 1 FROM book_file active_bf
 			WHERE active_bf.book_id = b.id AND active_bf.missing_at IS NULL
-		)`
+		)
+		AND ` + bookCatalogAudioVisibilitySQL
 
 	appDB.QueryRow(`
 		SELECT COUNT(DISTINCT b.id)
 		FROM book b
 		JOIN book_file bf ON bf.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause+` AND bf.missing_at IS NULL
+		WHERE `+ownerClause+` AND bf.missing_at IS NULL AND `+bookCatalogAudioVisibilitySQL+`
 	`, ownerArgs...).Scan(&stats.TotalBooks)
 	appDB.QueryRow(`
 		SELECT COALESCE(SUM(COALESCE(bm.page_count, 0)), 0)
@@ -241,7 +242,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		FROM reading_session rs
 		JOIN book b ON rs.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause+` AND rs.started_at > ?
+		WHERE `+ownerClause+` AND `+bookCatalogAudioVisibilitySQL+` AND rs.started_at > ?
 	`, withOwnerArgs(weekAgo)...).Scan(&stats.SessionsThisWeek)
 	appDB.QueryRow(`
 		SELECT COALESCE(SUM(CASE WHEN activity_tracked = 1 THEN active_seconds ELSE 0 END), 0),
@@ -250,7 +251,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		FROM reading_session rs
 		JOIN book b ON rs.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause, ownerArgs...).Scan(
+		WHERE `+ownerClause+` AND `+bookCatalogAudioVisibilitySQL, ownerArgs...).Scan(
 		&stats.TotalSessionMinutes,
 		&stats.AverageSessionMinutes,
 		&stats.UntrackedSessions,
@@ -264,7 +265,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		FROM book_file bf
 		JOIN book b ON bf.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause+` AND bf.missing_at IS NULL
+		WHERE `+ownerClause+` AND bf.missing_at IS NULL AND `+bookCatalogAudioVisibilitySQL+`
 		GROUP BY format
 	`, ownerArgs...)
 	if err == nil {
@@ -304,7 +305,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 			FROM reading_session rs
 			JOIN book b ON rs.book_id = b.id
 			JOIN library l ON b.library_id = l.id
-			WHERE `+ownerClause+` AND rs.started_at >= ? AND rs.started_at < ?
+			WHERE `+ownerClause+` AND `+bookCatalogAudioVisibilitySQL+` AND rs.started_at >= ? AND rs.started_at < ?
 		`, withOwnerArgs(dayStart, dayEnd)...).Scan(&sessionCount, &totalSeconds)
 
 		stats.ReadingActivity = append(stats.ReadingActivity, ActivityDay{
@@ -506,7 +507,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		FROM reading_session rs
 		JOIN book b ON rs.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause+` AND rs.activity_tracked = 1
+		WHERE `+ownerClause+` AND `+bookCatalogAudioVisibilitySQL+` AND rs.activity_tracked = 1
 		GROUP BY bucket
 	`, ownerArgs...)
 	stats.SessionBuckets = []CountItem{}
@@ -528,7 +529,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 		FROM reading_session rs
 		JOIN book b ON rs.book_id = b.id
 		JOIN library l ON b.library_id = l.id
-		WHERE `+ownerClause+`
+		WHERE `+ownerClause+` AND `+bookCatalogAudioVisibilitySQL+`
 		ORDER BY day DESC
 	`, ownerArgs...)
 	var streakDays []string
@@ -627,7 +628,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 			FROM reading_session rs
 			JOIN book b ON rs.book_id = b.id
 			JOIN library l ON b.library_id = l.id
-			WHERE `+ownerClause+` AND rs.started_at >= ? AND rs.started_at < ?
+			WHERE `+ownerClause+` AND `+bookCatalogAudioVisibilitySQL+` AND rs.started_at >= ? AND rs.started_at < ?
 		`, withOwnerArgs(dayStart, dayEnd)...).Scan(&booksRead)
 
 		stats.ReadingProgress = append(stats.ReadingProgress, ReadingProgress{

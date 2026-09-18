@@ -34,6 +34,7 @@ type SearchResult struct {
 	AddedAt             int64   `json:"added_at"`
 	LastReadAt          int64   `json:"last_read_at"`
 	ResumeFileID        int64   `json:"resume_file_id,omitempty"`
+	HasAudio            bool    `json:"has_audio"`
 }
 
 type SearchResultsPage struct {
@@ -220,13 +221,14 @@ func queryFTSBookCandidates(ftsQuery string, libraryID string, current *AppUser,
 		       b.added_at,
 		       COALESCE(rp.updated_at, 0) as last_read_at,
 		       COALESCE(rp.file_id, 0) as resume_file_id,
+		       `+bookHasAudioSQL+` as has_audio,
 		       bm25(book_fts, 5.0, 3.0, 0.5, 2.0) as rank
 		FROM book_fts
 		JOIN book_metadata bm ON bm.id = book_fts.rowid
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
 			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
-		WHERE (`+ownerClause+`)`+libraryClause+filterClause+` AND book_fts MATCH ?
+		WHERE (`+ownerClause+`) AND `+bookCatalogAudioVisibilitySQL+libraryClause+filterClause+` AND book_fts MATCH ?
 		ORDER BY rank
 		LIMIT ?
 	`, args...)
@@ -255,6 +257,7 @@ func queryFTSBookCandidates(ftsQuery string, libraryID string, current *AppUser,
 			&candidate.result.AddedAt,
 			&candidate.result.LastReadAt,
 			&candidate.result.ResumeFileID,
+			&candidate.result.HasAudio,
 			&candidate.ftsRank,
 		); err != nil {
 			continue
@@ -317,12 +320,13 @@ func queryTokenLikeBookCandidates(
 		       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened,
 		       b.added_at,
 		       COALESCE(rp.updated_at, 0) as last_read_at,
-		       COALESCE(rp.file_id, 0) as resume_file_id
+		       COALESCE(rp.file_id, 0) as resume_file_id,
+		       `+bookHasAudioSQL+` as has_audio
 		FROM book_metadata bm
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
 			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
-		WHERE (`+ownerClause+`)`+libraryClause+filterClause+` AND `+strings.Join(tokenConditions, " AND ")+`
+		WHERE (`+ownerClause+`) AND `+bookCatalogAudioVisibilitySQL+libraryClause+filterClause+` AND `+strings.Join(tokenConditions, " AND ")+`
 		ORDER BY
 			CASE WHEN LOWER(COALESCE(bm.title, '')) LIKE ? THEN 0 ELSE 1 END,
 			b.added_at DESC
@@ -353,6 +357,7 @@ func queryTokenLikeBookCandidates(
 			&candidate.result.AddedAt,
 			&candidate.result.LastReadAt,
 			&candidate.result.ResumeFileID,
+			&candidate.result.HasAudio,
 		); err != nil {
 			continue
 		}
@@ -391,12 +396,13 @@ func queryFallbackBookCandidates(libraryID string, current *AppUser, filters Boo
 		       CASE WHEN rp.book_id IS NOT NULL THEN 1 ELSE 0 END as opened,
 		       b.added_at,
 		       COALESCE(rp.updated_at, 0) as last_read_at,
-		       COALESCE(rp.file_id, 0) as resume_file_id
+		       COALESCE(rp.file_id, 0) as resume_file_id,
+		       `+bookHasAudioSQL+` as has_audio
 		FROM book_metadata bm
 		JOIN book b ON bm.book_id = b.id
 		JOIN library l ON b.library_id = l.id
 			LEFT JOIN reading_progress rp ON b.id = rp.book_id AND rp.owner_user_id = ?
-		WHERE (`+ownerClause+`)`+libraryClause+filterClause+`
+		WHERE (`+ownerClause+`) AND `+bookCatalogAudioVisibilitySQL+libraryClause+filterClause+`
 		ORDER BY b.added_at DESC
 		LIMIT ?
 	`, args...)
@@ -425,6 +431,7 @@ func queryFallbackBookCandidates(libraryID string, current *AppUser, filters Boo
 			&candidate.result.AddedAt,
 			&candidate.result.LastReadAt,
 			&candidate.result.ResumeFileID,
+			&candidate.result.HasAudio,
 		); err != nil {
 			continue
 		}

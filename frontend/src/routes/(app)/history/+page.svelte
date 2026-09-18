@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import { getCoverThumbUrl } from '$lib/utils/covers';
 	
 	let history = $state<any[]>([]);
@@ -103,23 +104,13 @@
 						{#each items as item}
 							<div class="block bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] p-4 hover:border-[var(--color-surface-border)] transition-colors">
 								<div class="flex items-start space-x-4">
-									<div class="w-16 h-24 bg-[var(--color-surface-overlay)] rounded overflow-hidden flex-shrink-0">
-										{#if item.cover_path}
-											<img
-												src={getCoverThumbUrl(item.book_id, 'small')}
-												alt={item.title}
-												class="w-full h-full object-cover"
-												loading="lazy"
-												decoding="async"
-											>
-										{:else}
-											<div class="w-full h-full flex items-center justify-center">
-												<svg class="w-8 h-8 text-[var(--color-surface-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-												</svg>
-											</div>
-										{/if}
-									</div>
+									<BookCoverFrame
+										src={item.cover_path ? getCoverThumbUrl(item.book_id, 'small') : null}
+										alt={item.title}
+										placeholderKind={item.reader_type === 'audio' ? 'audio' : 'book'}
+										frameClass="h-24 w-16 flex-shrink-0 rounded"
+										placeholderSize="sm"
+									/>
 									<div class="flex-1 min-w-0">
 										<div class="flex items-start justify-between">
 											<div>
@@ -132,7 +123,7 @@
 											<span class="text-xs text-[var(--color-primary-400)]">
 														{formatSessionDuration(item)}{item.activity_tracked ? ' active' : ''}
 											</span>
-											<span class="px-2 py-0.5 text-[10px] rounded-full bg-[var(--color-primary-500)]/20 text-[var(--color-primary-300)]">
+											<span class="passive-status-indicator">
 												{item.reader_type === 'speed' ? 'Speed Reader' : item.reader_type === 'epub' || item.reader_type === 'normal' ? 'Normal Reader' : item.reader_type}
 											</span>
 										</div>

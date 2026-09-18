@@ -12,6 +12,7 @@
 	import ShelfPickerRow from '$lib/components/ShelfPickerRow.svelte';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
 	import { showFormatOnCover, showProgressChipOnCover, getFormatColor } from '$lib/stores';
+	import { audioPlayer } from '$lib/stores/audioPlayer';
 	import { addMetadataSuggestionsFromPayload, refreshMetadataSuggestions } from '$lib/stores/metadataSuggestions';
 	import { getCoverThumbUrl } from '$lib/utils/covers';
 	import {
@@ -69,6 +70,7 @@
 		getReadableBookFiles,
 		getReaderRouteKind,
 		getSpeedReaderHref,
+		isAudioFormat,
 		isReadableBookFile,
 		normalizeBookFormat,
 		uniqueBookFormats
@@ -482,12 +484,28 @@
 		saveError = 'Unable to preserve the unsaved metadata draft on this device. Save or cancel the edits before opening the reader.';
 	}
 
+	function handleReadAction(event: MouseEvent, file: any) {
+		handleReaderLaunch(event);
+		if (event.defaultPrevented || getReaderRouteKind(file?.format) !== 'audio') return;
+		event.preventDefault();
+		void audioPlayer.playBook(Number(book.id), Number(file.id));
+	}
+
+	function addPrimaryAudioToQueue() {
+		if (!book?.id || audioFiles.length === 0) return;
+		void audioPlayer.addBooksToQueue([Number(book.id)]);
+	}
+
 	const readableFormats = $derived(getReadableFormats());
 	const readableFiles = $derived(getReadableFiles());
 	const primaryReadFormat = $derived(getPrimaryReadFormat());
 	const primaryReadFile = $derived(getPrimaryReadableFile(files, book?.resume_file_id, book?.resume_format || primaryReadFormat));
 	const primarySpeedReadFormat = $derived(getPrimarySpeedReadFormat());
-	const isAudioItem = $derived(getReaderRouteKind(primaryReadFile?.format || primaryReadFormat || getPreferredBookFormat(files) || book?.format) === 'audio');
+	const coverFormat = $derived(primaryReadFile?.format || primaryReadFormat || getPreferredBookFormat(files) || book?.format || book?.resume_format);
+	const isAudioItem = $derived(getReaderRouteKind(coverFormat) === 'audio');
+	const audioFiles = $derived.by(() => files.filter((file) => isAudioFormat(file.format)).sort((left, right) => String(left.path || '').localeCompare(String(right.path || ''), undefined, { numeric: true, sensitivity: 'base' })));
+	const queuedAudioFileCount = $derived(audioFiles.filter((file) => $audioPlayer.items.some((item) => item.file_id === Number(file.id))).length);
+	const allAudioFilesQueued = $derived(audioFiles.length > 0 && queuedAudioFileCount === audioFiles.length);
 
 	function formatSize(bytes: number): string {
 		if (bytes < 1024) return bytes + ' B';
@@ -904,13 +922,13 @@
 				body: JSON.stringify({ book_id: book.id })
 			});
 			if (res.ok) {
-				shelfActionMessage = 'Added to shelf';
+				shelfActionMessage = 'Added to collection';
 				await fetchShelves();
 			} else {
 				shelfActionMessage = await res.text() || 'Failed to add book';
 			}
 		} catch (e) {
-			console.error('Failed to add book to shelf:', e);
+			console.error('Failed to add book to collection:', e);
 			shelfActionMessage = 'Failed to add book';
 		} finally {
 			shelfActionInProgress = false;
@@ -1366,7 +1384,7 @@
 							<BookCoverFrame
 								src={displayCoverSrc}
 								alt={book.title}
-								format={book.format}
+								format={coverFormat}
 								mode="contain"
 								frameClass="aspect-[2/3] w-full"
 								imageClass="transition-transform duration-200 ease-out group-hover:scale-[1.02]"
@@ -1464,7 +1482,7 @@
 								{#if primaryReadFormat}
 									<a
 									href={getBookReaderHref(book.id, primaryReadFile?.format || book.resume_format || primaryReadFormat, getCurrentBookDetailUrl(), primaryReadFile?.id || book.resume_file_id)}
-										onclick={handleReaderLaunch}
+										onclick={(event) => handleReadAction(event, primaryReadFile)}
 										title={formatHasDuplicateFiles(files, primaryReadFile?.format) ? getFileName(primaryReadFile?.path || '') : undefined}
 												class="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2 text-sm font-medium transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
 										>
@@ -1508,7 +1526,7 @@
 											href={getBookReaderHref(book.id, file.format, getCurrentBookDetailUrl(), file.id)}
 											onclick={(event) => {
 												formatMenuOpen = false;
-												handleReaderLaunch(event);
+												handleReadAction(event, file);
 											}}
 											class="read-file-menu-item flex items-start justify-between gap-3 px-3 py-2 text-sm text-[var(--color-surface-text)] {isCurrent ? 'is-current' : ''}"
 											title={getFileName(file.path || '')}
@@ -1539,6 +1557,17 @@
 								</div>
 							{/if}
 						</div>
+							{#if isAudioItem && primaryReadFile}
+								<button
+									type="button"
+									onclick={addPrimaryAudioToQueue}
+									disabled={allAudioFilesQueued}
+									class="group flex w-full items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] disabled:cursor-default disabled:opacity-60 disabled:hover:border-[var(--color-surface-border)] disabled:hover:bg-[var(--color-surface-700)] sm:px-4"
+								>
+									<svg class="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h12M3 12h9M3 18h6"/><path d="M18 14v7m-3.5-3.5h7"/></svg>
+									{allAudioFilesQueued ? 'In queue' : audioFiles.length > 1 ? `Add ${audioFiles.length - queuedAudioFileCount} ${audioFiles.length - queuedAudioFileCount === 1 ? 'track' : 'tracks'} to queue` : 'Add to queue'}
+								</button>
+							{/if}
 							{#if primarySpeedReadFormat}
 									<a
 											href={getSpeedReaderHref(book.id, book.speed_reader_format || primarySpeedReadFormat, getCurrentBookDetailUrl(), book.speed_reader_file_id)}
@@ -1559,7 +1588,7 @@
 									<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-primary-300)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
 									</svg>
-									Add to Shelf
+									Add to Collection
 								</button>
 						</div>
 					</div>
@@ -2108,7 +2137,7 @@
 		coverPath={book.cover_path}
 		coverUpdatedOn={book.cover_updated_on}
 		previewSrc={displayCoverSrc}
-		format={book.format}
+		format={coverFormat}
 		title={book.title || 'book'}
 		onClose={() => showCoverUpload = false}
 		onSelected={stageSelectedCover}
@@ -2120,18 +2149,18 @@
 		<button
 			type="button"
 			class="absolute inset-0 bg-black/70"
-			aria-label="Close shelf picker"
+			aria-label="Close collection picker"
 			onclick={() => showShelfPicker = false}
 		></button>
 		<div class="relative w-full max-w-md overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
 			<div class="border-b border-[var(--color-surface-border)] px-5 py-4">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add to Shelf</h3>
+				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add to Collection</h3>
 				<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">{book.title || 'This book'}</p>
 			</div>
 			<div class="max-h-[60vh] overflow-y-auto p-4">
 							{#if manualShelves.length === 0}
 								<div class="py-6 text-center text-sm text-[var(--color-surface-text-muted)]">
-									No manual shelves yet.
+									No manual collections yet.
 								</div>
 							{:else}
 								<div class="space-y-2">
@@ -2149,7 +2178,7 @@
 						{#if shelfActionMessage}
 							<p class="text-sm text-[var(--color-surface-text-muted)]">{shelfActionMessage}</p>
 						{:else}
-							<span class="text-sm text-[var(--color-surface-text-muted)]">Choose a shelf to add this book.</span>
+							<span class="text-sm text-[var(--color-surface-text-muted)]">Choose a collection to add this book.</span>
 						{/if}
 						<div class="flex items-center gap-3">
 							<button
@@ -2157,7 +2186,7 @@
 								onclick={() => showCreateShelfModal = true}
 								class="text-sm text-[var(--color-primary-400)] transition-colors duration-200 hover:text-[var(--color-primary-300)] focus-visible:outline-none focus-visible:underline"
 							>
-								New shelf
+								New collection
 							</button>
 							<button
 								type="button"
@@ -2208,7 +2237,7 @@
 					<BookCoverFrame
 						src={pendingCover.previewUrl || (book.cover_path ? `/api/covers/${book.id}` : null)}
 						alt={book.title}
-						format={book.format}
+						format={coverFormat}
 						mode="contain"
 						frameClass="aspect-[2/3] w-full"
 						imageClass="object-contain p-2"

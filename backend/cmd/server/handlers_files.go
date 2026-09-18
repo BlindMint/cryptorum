@@ -613,6 +613,7 @@ func ServeBookFileHandler(w http.ResponseWriter, r *http.Request) {
 		"m4b":  "audio/mp4",
 		"flac": "audio/flac",
 		"ogg":  "audio/ogg",
+		"wav":  "audio/wav",
 	}
 
 	if contentType, ok := contentTypes[format]; ok {

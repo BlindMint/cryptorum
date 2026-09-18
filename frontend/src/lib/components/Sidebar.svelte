@@ -16,6 +16,8 @@
 		book_count: number;
 		exclude_from_suggestions?: boolean;
 		comic_spread_fallback?: string;
+		audio_default_category?: 'audiobook' | 'music' | 'podcast';
+		media_scope?: 'mixed' | 'books' | 'audio';
 		is_importing?: boolean;
 		sort_order?: number;
 		paths?: string[];
@@ -50,6 +52,7 @@
 	let shelfDropTargetId = $state<number | null>(null);
 	let shelfDropPosition = $state<'before' | 'after'>('before');
 	let showShelfModal = $state(false);
+	let libraryModalInitialScope = $state<'mixed' | 'books' | 'audio'>('mixed');
 
 	// Library modal state
 	let showLibraryModal = $state(false);
@@ -59,6 +62,8 @@
 	const SIDEBAR_STORAGE_KEY = 'sidebarWidth';
 	const LIBRARY_NAME_CACHE_KEY = 'cryptorumLibraryNames';
 	const SHELF_SUMMARY_CACHE_KEY = 'cryptorumShelfSummaries';
+	let standardLibraries = $derived(libraries.filter((library) => library.media_scope !== 'audio'));
+	let audioLibraries = $derived(libraries.filter((library) => library.media_scope === 'audio'));
 
 	function clampSidebarWidth(width: number): number {
 		return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -134,6 +139,15 @@
 			return currentPath.startsWith('/shelves/') && currentPath === href;
 		}
 
+		if (href === '/audio') {
+			return currentPath === '/audio' && !currentParams.has('library');
+		}
+
+		if (href.startsWith('/audio?library=')) {
+			const expectedLibrary = new URLSearchParams(href.split('?')[1] || '').get('library');
+			return currentPath === '/audio' && currentParams.get('library') === expectedLibrary;
+		}
+
 		return currentPath === href;
 	}
 
@@ -165,7 +179,6 @@
 				setSidebarWidth(parsedWidth);
 			}
 		}
-
 		appActivity.init();
 		await loadData();
 		refreshTimer = window.setInterval(() => {
@@ -186,8 +199,9 @@
 		}
 	});
 
-	function openLibraryModal() {
+	function openLibraryModal(mediaScope: 'mixed' | 'books' | 'audio' = 'mixed') {
 		editingLibrary = null;
+		libraryModalInitialScope = mediaScope;
 		showLibraryModal = true;
 	}
 
@@ -237,6 +251,7 @@
 		try {
 			const response = await fetch(`/api/libraries/${library.id}`, { cache: 'no-store' });
 			const fullLibrary = response.ok ? await response.json() : library;
+			libraryModalInitialScope = fullLibrary.media_scope || 'mixed';
 			editingLibrary = fullLibrary;
 			showLibraryModal = true;
 		} catch (e) {
@@ -244,10 +259,10 @@
 		}
 	}
 
-	async function handleLibrarySaved(result: { library: Library; isEditing: boolean; foldersChanged: boolean }) {
+	async function handleLibrarySaved(result: { library: Library; isEditing: boolean; foldersChanged: boolean; scopeChanged: boolean }) {
 		closeLibraryModal();
 		await loadData();
-		if (result.isEditing && result.foldersChanged && !result.library.is_importing && confirm('Library folders changed. Scan this library now?')) {
+		if (result.isEditing && (result.foldersChanged || result.scopeChanged) && !result.library.is_importing && confirm('Library folders or content type changed. Scan this library now?')) {
 			await scanLibrary(result.library);
 		}
 	}
@@ -520,7 +535,7 @@
 	style={`--sidebar-width: ${sidebarWidth}px;`}
 >
 	<div class={`flex h-full min-w-[220px] flex-col min-h-0 ${$desktopSidebarCollapsed ? 'lg:pointer-events-none lg:opacity-0' : 'lg:opacity-100'}`}>
-	<div class="flex-shrink-0 space-y-0.5 p-2.5 pb-2 text-[0.9375rem] leading-[1.375rem]">
+	<div class="flex flex-shrink-0 flex-col space-y-0.5 p-2.5 pb-2 text-[0.9375rem] leading-[1.375rem]">
 		<a
 			href="/"
 			onclick={closeMobileNavigation}
@@ -546,7 +561,7 @@
 		<a
 			href="/authors"
 			onclick={closeMobileNavigation}
-			class="flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/authors') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
+			class="order-3 flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/authors') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
 		>
 			<svg class="h-[1.125rem] w-[1.125rem] shrink-0 transition-transform duration-200 {isActive('/authors') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
@@ -557,12 +572,21 @@
 		<a
 			href="/series"
 			onclick={closeMobileNavigation}
-			class="flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/series') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
+			class="order-4 flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/series') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
 		>
 			<svg class="h-[1.125rem] w-[1.125rem] shrink-0 transition-transform duration-200 {isActive('/series') ? '' : 'group-hover:scale-110'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
 			</svg>
 			<span>Series</span>
+		</a>
+
+		<a
+			href="/audio"
+			onclick={closeMobileNavigation}
+			class="order-2 flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/audio') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
+		>
+			<svg class="h-[1.125rem] w-[1.125rem] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18V5l11-2v12M9 18c0 1.1-1.34 2-3 2s-3-.9-3-2 1.34-2 3-2 3 .9 3 2Zm11-3c0 1.1-1.34 2-3 2s-3-.9-3-2 1.34-2 3-2 3 .9 3 2Z"/></svg>
+			<span>All Audio</span>
 		</a>
 	</div>
 
@@ -633,7 +657,7 @@
 						{/if}
 					</div>
 					<button
-						onclick={openLibraryModal}
+						onclick={() => openLibraryModal()}
 						class="rounded p-1 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-500)]"
 						title="Add Library"
 					>
@@ -644,7 +668,7 @@
 				</div>
 			</div>
 
-			{#each libraries as library}
+			{#each standardLibraries as library}
 				{@const parsedLibraryIcon = parseLibraryIcon(library.icon || 'book')}
 				<div
 					role="listitem"
@@ -710,22 +734,54 @@
 
 		<div>
 			<div class="flex items-center justify-between px-2.5 py-1.5">
+				<a href="/audio" onclick={closeMobileNavigation} class="flex items-center gap-1.5 rounded-md text-xs font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]" aria-label="View all audio">
+					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 18V5l11-2v12M9 18c0 1.1-1.34 2-3 2s-3-.9-3-2 1.34-2 3-2 3 .9 3 2Zm11-3c0 1.1-1.34 2-3 2s-3-.9-3-2 1.34-2 3-2 3 .9 3 2Z"/></svg>
+					<span>Audio Libraries</span>
+				</a>
+				<button type="button" onclick={() => { openLibraryModal('audio'); closeMobileNavigation(); }} class="rounded p-1 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-500)]" title="Create Audio Library" aria-label="Create Audio Library">
+					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+				</button>
+			</div>
+
+			{#each audioLibraries as library}
+				{@const parsedAudioLibraryIcon = parseLibraryIcon(library.icon || 'music')}
+				<div class="group/audio-library-row relative flex items-center rounded-md transition-all duration-200 {isActive('/audio?library=' + library.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:translate-x-0.5 hover:bg-[var(--color-surface-base)] hover:shadow-sm'}">
+					<a href="/audio?library={library.id}" onclick={closeMobileNavigation} class="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5">
+						{#if isLibraryScanActive(library)}
+							<svg class="h-[1.125rem] w-[1.125rem] flex-none animate-scan-spin text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 0 0 4.582 9M4 4v5h5m11 11v-5h-.581m0 0A8.003 8.003 0 0 1 4.062 13M20 20v-5h-5"/></svg>
+						{:else if parsedAudioLibraryIcon?.svg}
+							<div class="sidebar-icon-svg h-[1.125rem] w-[1.125rem] flex-none text-[var(--color-primary-400)]">{@html parsedAudioLibraryIcon.svg}</div>
+						{:else}
+							<svg class="h-[1.125rem] w-[1.125rem] flex-none text-[var(--color-primary-400)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l11-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="15" r="3"/></svg>
+						{/if}
+						<span class="min-w-0 flex-1 truncate">{library.name}</span>
+					</a>
+					<button type="button" class="group/count relative mr-1.5 inline-flex h-6 min-w-7 flex-none items-center justify-center rounded bg-[var(--color-surface-700)] px-1.5 text-xs font-medium text-[var(--color-surface-500)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]" aria-haspopup="menu" aria-expanded={activeLibraryMenu?.id === library.id} aria-label="Open actions for {library.name}" title="Audio library actions" onclick={(event) => openLibraryMenu(event, library)}>
+						<span class="transition-opacity group-hover/count:opacity-0 {activeLibraryMenu?.id === library.id ? 'opacity-0' : ''}">{library.book_count}</span>
+						<svg class="absolute h-4 w-4 opacity-0 transition-opacity group-hover/count:opacity-100 {activeLibraryMenu?.id === library.id ? 'opacity-100' : ''}" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+					</button>
+				</div>
+			{/each}
+		</div>
+
+		<div>
+			<div class="flex items-center justify-between px-2.5 py-1.5">
 				<a
 					href="/shelves"
 					onclick={closeMobileNavigation}
 					class="flex items-center gap-1.5 rounded-md text-xs font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
-					aria-label="View shelves"
+					aria-label="View collections"
 				>
 					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
 					</svg>
-					<span>Shelves</span>
+					<span>Collections</span>
 				</a>
 				<button
 					type="button"
 					onclick={() => { openShelfModal(); closeMobileNavigation(); }}
 					class="rounded p-1 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-500)]"
-					title="Create Shelf"
+					title="Create Collection"
 				>
 					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
@@ -773,8 +829,8 @@
 						{#if shelf.is_magic === 1}
 							<span
 								class="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-purple-300"
-								title="Magic shelf"
-								aria-label="Magic shelf"
+								title="Smart collection"
+								aria-label="Smart collection"
 							>
 								<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
@@ -788,6 +844,7 @@
 				</div>
 			{/each}
 		</div>
+
 	</nav>
 
 	{#if !authDisabled}
@@ -831,12 +888,12 @@
 		onkeydown={(event) => event.stopPropagation()}
 	>
 		<a
-			href="/library?library={activeLibraryMenu.id}"
+			href={activeLibraryMenu.media_scope === 'audio' ? `/audio?library=${activeLibraryMenu.id}` : `/library?library=${activeLibraryMenu.id}`}
 			class="block px-2.5 py-1.5 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
 			role="menuitem"
 			onclick={() => { closeLibraryMenu(); $mobileMenuOpen = false; }}
 		>
-			Open Library
+			Open {activeLibraryMenu.media_scope === 'audio' ? 'Audio Library' : 'Library'}
 		</a>
 		<button
 			type="button"
@@ -893,9 +950,10 @@
 <LibraryModal
 	open={showLibraryModal}
 	library={editingLibrary}
+	initialMediaScope={libraryModalInitialScope}
 	isScanActive={(library) => isLibraryScanActive(library as Library)}
 	onClose={closeLibraryModal}
-	onSaved={(result) => handleLibrarySaved(result as { library: Library; isEditing: boolean; foldersChanged: boolean })}
+	onSaved={(result) => handleLibrarySaved(result as { library: Library; isEditing: boolean; foldersChanged: boolean; scopeChanged: boolean })}
 	onScan={(library) => scanLibrary(library)}
 	onRegenerateCovers={(library, mode) => regenerateLibraryCovers(library as Library, mode)}
 />
