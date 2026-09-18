@@ -3,6 +3,7 @@
 	import { afterNavigate, goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
+	import CombineBooksModal from '$lib/components/CombineBooksModal.svelte';
 	import { audioPlayer } from '$lib/stores/audioPlayer';
 	import { bulkActionBarHeight, trackBulkActionBar } from '$lib/stores/bulkActionBar';
 
@@ -39,9 +40,17 @@
 	let showPlaylistForm = $state(false);
 	let showPlaylistPicker = $state(false);
 	let showTypeMenu = $state(false);
+	let showGroupAudiobookModal = $state(false);
+	let groupAudiobookBookIDs = $state<number[]>([]);
+	let bulkSelectionAnchorID = $state<number | null>(null);
+	let longPressTimer: number | null = null;
+	let suppressNextClickID: number | null = null;
+	let longPressTouchStart: { x: number; y: number } | null = null;
 	let activeLibraryID = $state<number | null>(null);
 	let activeLibrary = $state<AudioLibrary | null>(null);
 	let loadedRouteKey = '';
+	const LONG_PRESS_THRESHOLD = 500;
+	const LONG_PRESS_MOVE_TOLERANCE = 10;
 
 	const selectedSet = $derived(new Set(selectedIDs));
 	const selectedItems = $derived(items.filter((item) => selectedSet.has(item.id)));
@@ -101,6 +110,7 @@
 				items = data.items ?? [];
 				const resultIDs = new Set(items.map((item) => item.id));
 				selectedIDs = selectedIDs.filter((id) => resultIDs.has(id));
+				if (bulkSelectionAnchorID !== null && !resultIDs.has(bulkSelectionAnchorID)) bulkSelectionAnchorID = null;
 				if (!selectedIDs.length) showTypeMenu = false;
 			}
 		} catch (reason) { error = reason instanceof Error ? reason.message : 'Unable to load audio'; }
@@ -120,9 +130,105 @@
 		}
 	}
 
-	function toggleSelected(id: number) { selectedIDs = selectedSet.has(id) ? selectedIDs.filter((value) => value !== id) : [...selectedIDs, id]; }
-	function selectAllResults() { selectedIDs = items.map((item) => item.id); }
-	function deselectAll() { selectedIDs = []; showTypeMenu = false; }
+	function visibleAudioIDs(): number[] {
+		if (activeTab === 'music' && musicView !== 'tracks' || activeTab === 'podcast') {
+			return groupedItems.flatMap(([, group]) => group.map((item) => item.id));
+		}
+		return items.map((item) => item.id);
+	}
+
+	function toggleSelected(id: number, event?: MouseEvent) {
+		if (event) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+		const visibleIDs = visibleAudioIDs();
+		if (event?.shiftKey && bulkSelectionAnchorID !== null) {
+			const anchorIndex = visibleIDs.indexOf(bulkSelectionAnchorID);
+			const targetIndex = visibleIDs.indexOf(id);
+			if (anchorIndex !== -1 && targetIndex !== -1) {
+				const next = new Set(selectedIDs);
+				const shouldSelect = !selectedSet.has(id);
+				const [start, end] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+				for (const rangeID of visibleIDs.slice(start, end + 1)) {
+					if (shouldSelect) next.add(rangeID);
+					else next.delete(rangeID);
+				}
+				selectedIDs = [...next];
+				return;
+			}
+		}
+		selectedIDs = selectedSet.has(id) ? selectedIDs.filter((value) => value !== id) : [...selectedIDs, id];
+		bulkSelectionAnchorID = id;
+	}
+
+	function selectAllResults() { selectedIDs = items.map((item) => item.id); bulkSelectionAnchorID = null; }
+	function deselectAll() { selectedIDs = []; bulkSelectionAnchorID = null; showTypeMenu = false; }
+
+	function handleAudioClick(event: MouseEvent) {
+		const id = Number((event.currentTarget as HTMLElement).dataset.audioId);
+		if (suppressNextClickID === id) {
+			event.preventDefault();
+			event.stopPropagation();
+			suppressNextClickID = null;
+			return;
+		}
+		if (!selectedIDs.length) return;
+		const target = event.target as HTMLElement;
+		if (target.closest('[data-audio-action]')) return;
+		toggleSelected(id, event);
+	}
+
+	function handleAudioKeydown(event: KeyboardEvent) {
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+		if (!selectedIDs.length) return;
+		event.preventDefault();
+		handleAudioClick(event as unknown as MouseEvent);
+	}
+
+	function clearLongPressTimer() {
+		if (longPressTimer !== null) {
+			clearTimeout(longPressTimer);
+			longPressTimer = null;
+		}
+	}
+
+	function handleAudioMouseDown(event: MouseEvent) {
+		if ('ontouchstart' in window || (event.target as HTMLElement).closest('[data-audio-action]')) return;
+		const id = Number((event.currentTarget as HTMLElement).dataset.audioId);
+		longPressTimer = window.setTimeout(() => {
+			suppressNextClickID = id;
+			toggleSelected(id);
+			longPressTimer = null;
+		}, LONG_PRESS_THRESHOLD);
+	}
+
+	function handleAudioTouchStart(event: TouchEvent) {
+		if ((event.target as HTMLElement).closest('[data-audio-action]')) return;
+		const id = Number((event.currentTarget as HTMLElement).dataset.audioId);
+		const touch = event.touches[0];
+		longPressTouchStart = touch ? { x: touch.clientX, y: touch.clientY } : null;
+		longPressTimer = window.setTimeout(() => {
+			suppressNextClickID = id;
+			toggleSelected(id);
+			longPressTimer = null;
+		}, LONG_PRESS_THRESHOLD);
+	}
+
+	function handleAudioTouchMove(event: TouchEvent) {
+		if (longPressTimer === null || !longPressTouchStart) return;
+		const touch = event.touches[0];
+		if (!touch) return;
+		if (Math.abs(touch.clientX - longPressTouchStart.x) > LONG_PRESS_MOVE_TOLERANCE || Math.abs(touch.clientY - longPressTouchStart.y) > LONG_PRESS_MOVE_TOLERANCE) {
+			clearLongPressTimer();
+			longPressTouchStart = null;
+		}
+	}
+
+	function finishAudioPress() {
+		clearLongPressTimer();
+		longPressTouchStart = null;
+	}
 	function resultTypeLabel() {
 		if (activeTab === 'music') return items.length === 1 ? 'Track' : 'Tracks';
 		if (activeTab === 'podcast') return items.length === 1 ? 'Episode' : 'Episodes';
@@ -139,16 +245,19 @@
 		deselectAll(); await load();
 	}
 
-	async function groupAudiobook() {
+	function openGroupAudiobookModal() {
 		const selected = items.filter((item) => selectedSet.has(item.id));
 		const bookIDs = [...new Set(selected.map((item) => item.book_id))];
 		if (bookIDs.length < 2) { error = 'Select tracks from at least two separate book records to group them.'; return; }
-		if (!confirm(`Group ${bookIDs.length} records under “${selected[0].title}”?`)) return;
-		saving = true;
-		const response = await fetch('/api/books/combine', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ primary_book_id: bookIDs[0], book_ids: bookIDs }) });
-		saving = false;
-		if (!response.ok) { error = await response.text() || 'Unable to group audiobook'; return; }
-		deselectAll(); await load();
+		groupAudiobookBookIDs = bookIDs;
+		showGroupAudiobookModal = true;
+	}
+
+	function handleAudiobookGrouped() {
+		showGroupAudiobookModal = false;
+		groupAudiobookBookIDs = [];
+		deselectAll();
+		void load();
 	}
 
 	function play(item: AudioItem) { void audioPlayer.playBook(item.book_id, item.file_id); }
@@ -351,22 +460,54 @@
 </div>
 
 {#snippet AudioRow(item: AudioItem, compact = false)}
-	<div class="group flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-[var(--color-surface-base)]">
-		<input type="checkbox" class="shrink-0 accent-[var(--color-primary-500)]" checked={selectedSet.has(item.id)} onchange={() => toggleSelected(item.id)} aria-label={`Select ${item.title}`} />
-		<button type="button" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--color-primary-300)] hover:bg-[var(--color-primary-500)]/15" disabled={item.unavailable} aria-label={`Play ${item.title}`} onclick={() => play(item)}>▶</button>
+	<div
+		class="group flex items-center gap-2 rounded-lg px-2 py-2 transition {selectedSet.has(item.id) ? 'bg-[var(--color-primary-500)]/10 ring-1 ring-inset ring-[var(--color-primary-500)]' : 'hover:bg-[var(--color-surface-base)]'}"
+		data-audio-id={item.id}
+		onclick={handleAudioClick}
+		onkeydown={handleAudioKeydown}
+		onmousedown={handleAudioMouseDown}
+		onmouseup={finishAudioPress}
+		onmouseleave={finishAudioPress}
+		ontouchstart={handleAudioTouchStart}
+		ontouchmove={handleAudioTouchMove}
+		ontouchend={finishAudioPress}
+		ontouchcancel={finishAudioPress}
+		role="button"
+		tabindex="0"
+	>
+		<button type="button" data-audio-action class="flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors {selectedSet.has(item.id) ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]' : 'border-[var(--color-surface-400)] bg-[var(--color-surface-800)]/90'}" aria-label={selectedSet.has(item.id) ? `Deselect ${item.title}` : `Select ${item.title}`} onclick={(event) => toggleSelected(item.id, event)}>
+			{#if selectedSet.has(item.id)}<svg class="h-3.5 w-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>{/if}
+		</button>
+		<button type="button" data-audio-action class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--color-primary-300)] hover:bg-[var(--color-primary-500)]/15" disabled={item.unavailable} aria-label={`Play ${item.title}`} onclick={() => play(item)}>▶</button>
 		<div class="min-w-0 flex-1"><div class="truncate text-sm font-medium text-[var(--color-surface-text)]">{item.track_number ? `${item.track_number}. ` : ''}{item.title}</div>{#if !compact}<div class="truncate text-xs text-[var(--color-surface-text-muted)]">{item.artists.join(', ') || item.filename}</div>{/if}</div>
 		<span class="text-[10px] tabular-nums text-[var(--color-surface-text-muted)]">{formatDuration(item.duration_seconds)}</span>
-		{#if activeTab === 'podcast'}<button type="button" class="rounded px-1.5 py-1 text-[10px] text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" title={item.status === 'played' ? 'Mark unplayed' : 'Mark played'} onclick={() => void setPodcastPlayed(item, item.status !== 'played')}>{item.status === 'played' ? 'Unplayed' : 'Played'}</button>{/if}
-		<button type="button" class="rounded p-1.5 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" disabled={item.unavailable} title="Play next" onclick={() => queue(item, 'next')}>+1</button>
+		{#if activeTab === 'podcast'}<button type="button" data-audio-action class="rounded px-1.5 py-1 text-[10px] text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" title={item.status === 'played' ? 'Mark unplayed' : 'Mark played'} onclick={() => void setPodcastPlayed(item, item.status !== 'played')}>{item.status === 'played' ? 'Unplayed' : 'Played'}</button>{/if}
+		<button type="button" data-audio-action class="rounded p-1.5 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-surface-text)]" disabled={item.unavailable} title="Play next" onclick={() => queue(item, 'next')}>+1</button>
 	</div>
 {/snippet}
 
 {#snippet AudioCard(item: AudioItem)}
-	<article class="relative flex gap-3 rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3 shadow-sm transition hover:border-[var(--color-surface-500)]">
-		<input type="checkbox" class="mt-1 accent-[var(--color-primary-500)]" checked={selectedSet.has(item.id)} onchange={() => toggleSelected(item.id)} aria-label={`Select ${item.title}`} />
+	<div
+		class="relative flex gap-3 rounded-2xl border bg-[var(--color-surface-overlay)] p-3 shadow-sm transition {selectedSet.has(item.id) ? 'border-[var(--color-primary-500)] ring-1 ring-[var(--color-primary-500)]' : 'border-[var(--color-surface-border)] hover:border-[var(--color-surface-500)]'}"
+		data-audio-id={item.id}
+		onclick={handleAudioClick}
+		onkeydown={handleAudioKeydown}
+		onmousedown={handleAudioMouseDown}
+		onmouseup={finishAudioPress}
+		onmouseleave={finishAudioPress}
+		ontouchstart={handleAudioTouchStart}
+		ontouchmove={handleAudioTouchMove}
+		ontouchend={finishAudioPress}
+		ontouchcancel={finishAudioPress}
+		role="button"
+		tabindex="0"
+	>
+		<button type="button" data-audio-action class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors {selectedSet.has(item.id) ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]' : 'border-[var(--color-surface-400)] bg-[var(--color-surface-800)]/90'}" aria-label={selectedSet.has(item.id) ? `Deselect ${item.title}` : `Select ${item.title}`} onclick={(event) => toggleSelected(item.id, event)}>
+			{#if selectedSet.has(item.id)}<svg class="h-3.5 w-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>{/if}
+		</button>
 		<BookCoverFrame src={`/api/covers/${item.book_id}/thumb?size=small`} alt={`${item.title} cover`} format={item.format} placeholderKind="audio" placeholderSize="xs" frameClass="h-24 w-16 flex-none rounded-lg shadow" />
-		<div class="min-w-0 flex-1"><h2 class="line-clamp-2 font-semibold leading-tight text-[var(--color-surface-text)]">{item.title}</h2><p class="mt-1 truncate text-xs text-[var(--color-surface-text-muted)]">{item.artists.join(', ') || item.filename}</p>{#if item.chapter_count || item.bookmark_count}<p class="mt-1 text-[10px] text-[var(--color-surface-text-muted)]">{item.chapter_count ? `${item.chapter_count} chapters` : ''}{item.chapter_count && item.bookmark_count ? ' · ' : ''}{item.bookmark_count ? `${item.bookmark_count} bookmarks` : ''}</p>{/if}<div class="mt-3 flex flex-wrap gap-1.5"><button type="button" class="accent-action rounded-lg px-2.5 py-1.5 text-xs" disabled={item.unavailable} onclick={() => play(item)}>Play</button><button type="button" class="rounded-lg border border-[var(--color-surface-border)] px-2.5 py-1.5 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)] disabled:opacity-50" disabled={item.unavailable} onclick={() => queue(item)}>Queue</button><button type="button" class="rounded-lg px-2 py-1.5 text-xs text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)]" onclick={() => editing = structuredClone(item)}>Edit</button></div></div>
-	</article>
+		<div class="min-w-0 flex-1"><h2 class="line-clamp-2 font-semibold leading-tight text-[var(--color-surface-text)]">{item.title}</h2><p class="mt-1 truncate text-xs text-[var(--color-surface-text-muted)]">{item.artists.join(', ') || item.filename}</p>{#if item.chapter_count || item.bookmark_count}<p class="mt-1 text-[10px] text-[var(--color-surface-text-muted)]">{item.chapter_count ? `${item.chapter_count} chapters` : ''}{item.chapter_count && item.bookmark_count ? ' · ' : ''}{item.bookmark_count ? `${item.bookmark_count} bookmarks` : ''}</p>{/if}<div class="mt-3 flex flex-wrap gap-1.5"><button type="button" data-audio-action class="accent-action rounded-lg px-2.5 py-1.5 text-xs" disabled={item.unavailable} onclick={() => play(item)}>Play</button><button type="button" data-audio-action class="rounded-lg border border-[var(--color-surface-border)] px-2.5 py-1.5 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)] disabled:opacity-50" disabled={item.unavailable} onclick={() => queue(item)}>Queue</button><button type="button" data-audio-action class="rounded-lg px-2 py-1.5 text-xs text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)]" onclick={() => editing = structuredClone(item)}>Edit</button></div></div>
+	</div>
 {/snippet}
 
 {#if selectedIDs.length}
@@ -411,7 +552,7 @@
 							{/if}
 						</div>
 						{#if activeTab === 'audiobook'}
-							<button type="button" disabled={saving || !canGroupAudiobook} title={canGroupAudiobook ? 'Group selected records into one audiobook' : 'Select tracks from at least two separate audiobook records'} onclick={() => { showTypeMenu = false; void groupAudiobook(); }} class="flex items-center justify-center gap-2 rounded-lg bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none">
+							<button type="button" disabled={saving || !canGroupAudiobook} title={canGroupAudiobook ? 'Group selected records into one audiobook' : 'Select tracks from at least two separate audiobook records'} onclick={() => { showTypeMenu = false; openGroupAudiobookModal(); }} class="flex items-center justify-center gap-2 rounded-lg bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none">
 								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 7h12M8 12h12M8 17h8M4 7h.01M4 12h.01M4 17h.01"/></svg>
 								<span>Group Audiobook</span>
 							</button>
@@ -421,6 +562,15 @@
 			</div>
 		</div>
 	</div>
+{/if}
+
+{#if showGroupAudiobookModal}
+	<CombineBooksModal
+		bookIds={groupAudiobookBookIDs}
+		variant="audio"
+		onClose={() => { showGroupAudiobookModal = false; groupAudiobookBookIDs = []; }}
+		onCombined={handleAudiobookGrouped}
+	/>
 {/if}
 
 {#if editing}
