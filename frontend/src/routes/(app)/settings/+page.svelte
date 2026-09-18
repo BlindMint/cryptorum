@@ -28,7 +28,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		epub: { fontFamily: 'serif', fontSize: 18, fontWeight: 400, fontStyle: 'normal' as const, lineHeight: 1.6, letterSpacing: 0, paragraphSpacing: 0, paragraphIndent: 0, justify: true, hyphenate: false, hyphenationLanguage: 'en', maxColumnCount: 1, gap: 5, theme: 'catppuccin', isDark: true, flow: 'paginated' as const, maxInlineSize: 680, maxBlockSize: 1440, margin: 5, continuousMaxWidth: 720, brightness: 100, contrast: 100, pageAnimation: 'slide' as const, autoAdvance: false, autoAdvanceTimer: 0, fullscreenLock: false, useStandardFullscreen: false, autoHideControls: true, customCss: '', showTextLayer: true, originalLayout: false, continuousMode: true, showImages: true, imageSize: 'fit-width' as const, imageGrayscale: false },
 		pdf: { autoHideControls: true, viewMode: 'dark' as const, useStandardFullscreen: false },
 		cbx: { pageSpread: 'auto' as const, pageLayout: 'single' as const, fitMode: 'fit-width' as const, scrollMode: 'paginated' as const, backgroundColor: '#111111', readingDirection: 'ltr' as const, stripMaxWidthPercent: 100, mangaMode: false, panelViewEnabled: false, spreadHandling: 'auto' as const, pageTransitionSound: false, autoHideControls: true, useStandardFullscreen: false, vibrance: 100, saturation: 100 },
-		audio: { playbackSpeed: 1.0, musicPlaybackSpeed: 1.0, volume: 1, muted: false, skipForward: 15, skipBackward: 15, autoAdvance: true, autoHideControls: true, gaplessPlayback: true, sleepTimer: 'off' as const, sleepTimerCustom: 30, theme: 'cover-focused' as const, waveformStyle: 'line' as const, backgroundStyle: 'cover-blur' as const, voiceBoost: false, equalizerLow: 50, equalizerMid: 50, equalizerHigh: 50 },
+		audio: { playbackSpeed: 1.0, musicPlaybackSpeed: 1.0, volume: 1, muted: false, skipForward: 15, skipBackward: 15, autoAdvance: true, confirmQueueDuplicates: true, autoHideControls: true, gaplessPlayback: true, sleepTimer: 'off' as const, sleepTimerCustom: 30, theme: 'cover-focused' as const, waveformStyle: 'line' as const, backgroundStyle: 'cover-blur' as const, voiceBoost: false, equalizerLow: 50, equalizerMid: 50, equalizerHigh: 50 },
 		speedReader: { wpm: 300, wordSize: 48, fontFamily: 'serif', fontWeight: 400, focalPoint: 0.38, centerWord: false, accentEnabled: true, accentColor: '#ef4444', accentOpacity: 1.0, focusIndicator: 'lines' as const, focusIndicatorDistance: 20, horizontalBars: true, horizontalBarsColor: '#666666', horizontalBarsOpacity: 1.0, verticalIndicator: 'off' as const, sentencePause: 350, autoSentencePause: true, keepScreenOn: true, theme: 'catppuccin', letterSpacing: 0, focusIndicatorLength: 20, showWordCount: false }
 	});
 	let loading = $state(true);
@@ -1947,8 +1947,8 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</svg>
 					</div>
 					<div>
-						<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Audio Book Reader</h2>
-						<p class="mt-0.5 text-sm leading-5 text-[var(--color-surface-text-muted)]">Settings for audio books</p>
+						<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Audio</h2>
+						<p class="mt-0.5 text-sm leading-5 text-[var(--color-surface-text-muted)]">Playback, queue, and audio reader settings</p>
 					</div>
 				</div>
 				
@@ -2003,6 +2003,14 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								<span class="mt-0.5 block text-xs text-[var(--color-surface-text-muted)]">Start the next queued track when the current track ends.</span>
 							</span>
 							<input type="checkbox" id="auto-advance" checked={localReaderSettings.audio.autoAdvance} onchange={(e) => updateAudioSetting('autoAdvance', e.currentTarget.checked)} class="settings-switch">
+						</label>
+
+						<label for="confirm-queue-duplicates" class="settings-toggle-row settings-toggle-row-description">
+							<span>
+								<span class="block text-sm font-medium text-[var(--color-surface-text)]">Ask Before Adding Queue Duplicates</span>
+								<span class="mt-0.5 block text-xs text-[var(--color-surface-text-muted)]">Confirm before adding another copy of an audio file that is already queued.</span>
+							</span>
+							<input type="checkbox" id="confirm-queue-duplicates" checked={localReaderSettings.audio.confirmQueueDuplicates} onchange={(e) => updateAudioSetting('confirmQueueDuplicates', e.currentTarget.checked)} class="settings-switch">
 						</label>
 						</div>
 					</div>

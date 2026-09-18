@@ -135,10 +135,11 @@ func GetAudioQueueHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type addAudioQueueItemRequest struct {
-	BookID      int64  `json:"book_id"`
-	FileID      *int64 `json:"file_id"`
-	Placement   string `json:"placement"`
-	MakeCurrent bool   `json:"make_current"`
+	BookID         int64  `json:"book_id"`
+	FileID         *int64 `json:"file_id"`
+	Placement      string `json:"placement"`
+	MakeCurrent    bool   `json:"make_current"`
+	AllowDuplicate bool   `json:"allow_duplicate"`
 }
 
 type addAudioQueueItemsBulkRequest struct {
@@ -336,7 +337,7 @@ func AddAudioQueueItemsBulkHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, fileID := range fileIDs {
 			var itemID int64
-			err = tx.QueryRow(`SELECT id FROM audio_queue_item WHERE owner_user_id = ? AND file_id = ?`, ownerID, fileID).Scan(&itemID)
+			err = tx.QueryRow(`SELECT id FROM audio_queue_item WHERE owner_user_id = ? AND file_id = ? ORDER BY position, id LIMIT 1`, ownerID, fileID).Scan(&itemID)
 			if errors.Is(err, sql.ErrNoRows) {
 				result, execErr := tx.Exec(`INSERT INTO audio_queue_item (owner_user_id, book_id, file_id, audio_item_id, position, added_at) VALUES (?, ?, ?, (SELECT id FROM audio_item WHERE owner_user_id = ? AND file_id = ?), ?, ?)`, ownerID, bookID, fileID, ownerID, fileID, nextPosition, time.Now().Unix())
 				if execErr != nil {
@@ -441,7 +442,11 @@ func AddAudioQueueItemHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	var itemID int64
-	err = tx.QueryRow(`SELECT id FROM audio_queue_item WHERE owner_user_id = ? AND file_id = ?`, ownerID, fileID).Scan(&itemID)
+	if request.AllowDuplicate {
+		err = sql.ErrNoRows
+	} else {
+		err = tx.QueryRow(`SELECT id FROM audio_queue_item WHERE owner_user_id = ? AND file_id = ? ORDER BY position, id LIMIT 1`, ownerID, fileID).Scan(&itemID)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		var position int
 		if request.Placement == "next" {

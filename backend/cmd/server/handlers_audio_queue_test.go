@@ -161,6 +161,28 @@ func TestAudioQueuePlayNextMovesExistingItem(t *testing.T) {
 	}
 }
 
+func TestAudioQueueAllowsExplicitDuplicate(t *testing.T) {
+	setupAudioQueueTestDB(t)
+
+	for _, body := range []string{
+		`{"book_id":1,"file_id":12}`,
+		`{"book_id":1,"file_id":12,"allow_duplicate":true}`,
+	} {
+		recorder := httptest.NewRecorder()
+		AddAudioQueueItemHandler(recorder, readingPositionRequest(http.MethodPost, "/api/audio/queue/items", body, nil))
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("add status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+	}
+
+	getRecorder := httptest.NewRecorder()
+	GetAudioQueueHandler(getRecorder, readingPositionRequest(http.MethodGet, "/api/audio/queue", "", nil))
+	queue := decodeAudioQueueResponse(t, getRecorder)
+	if len(queue.Items) != 2 || queue.Items[0].FileID != 12 || queue.Items[1].FileID != 12 || queue.Items[0].ID == queue.Items[1].ID {
+		t.Fatalf("expected two distinct queue entries for the same file: %+v", queue.Items)
+	}
+}
+
 func jsonNumber(value int64) string {
 	return strconv.FormatInt(value, 10)
 }

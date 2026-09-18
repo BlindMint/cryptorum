@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import { audioPlayer } from '$lib/stores/audioPlayer';
 	import { readerSettings } from '$lib/stores/readerSettings';
@@ -20,10 +20,13 @@
 	let sleepMenuOpen = $state(false);
 	let sleepMenuLeft = $state(0);
 	let sleepMenuBottom = $state(0);
+	let dontAskDuplicateAgain = $state(false);
+	let duplicateConfirmButton = $state<HTMLButtonElement>();
 	const current = $derived($audioPlayer.items.find((item) => item.id === $audioPlayer.currentItemId));
 	const currentIndex = $derived($audioPlayer.items.findIndex((item) => item.id === $audioPlayer.currentItemId));
-	const hasPrevious = $derived(currentIndex > 0 && $audioPlayer.items.slice(0, currentIndex).some((item) => !item.unavailable));
-	const hasNext = $derived(currentIndex >= 0 && $audioPlayer.items.slice(currentIndex + 1).some((item) => !item.unavailable));
+	const playableCount = $derived($audioPlayer.items.filter((item) => !item.unavailable).length);
+	const hasPrevious = $derived(($audioPlayer.repeatMode === 'all' && playableCount > 1) || (currentIndex > 0 && $audioPlayer.items.slice(0, currentIndex).some((item) => !item.unavailable)));
+	const hasNext = $derived(($audioPlayer.shuffleEnabled && playableCount > 1) || ($audioPlayer.repeatMode === 'all' && playableCount > 0) || (currentIndex >= 0 && $audioPlayer.items.slice(currentIndex + 1).some((item) => !item.unavailable)));
 	const currentBookTrackCount = $derived(current ? $audioPlayer.items.filter((item) => item.book_id === current.book_id).length : 0);
 	const progressPercent = $derived(
 		$audioPlayer.duration > 0
@@ -40,7 +43,13 @@
 			if (sleepMenuOpen && !sleepButtonElement?.contains(target) && !sleepMenuElement?.contains(target)) sleepMenuOpen = false;
 		};
 		const handleEscape = (event: KeyboardEvent) => {
-			if (event.key !== 'Escape' || (!speedMenuOpen && !sleepMenuOpen)) return;
+			if (event.key !== 'Escape') return;
+			if ($audioPlayer.duplicatePrompt) {
+				event.preventDefault();
+				audioPlayer.resolveDuplicatePrompt(false);
+				return;
+			}
+			if (!speedMenuOpen && !sleepMenuOpen) return;
 			event.preventDefault();
 			if (speedMenuOpen) { speedMenuOpen = false; speedButtonElement?.focus(); }
 			if (sleepMenuOpen) { sleepMenuOpen = false; sleepButtonElement?.focus(); }
@@ -59,6 +68,13 @@
 
 	$effect(() => {
 		if (!$audioPlayer.expanded || $audioPlayer.dismissed) { speedMenuOpen = false; sleepMenuOpen = false; }
+	});
+
+	$effect(() => {
+		if ($audioPlayer.duplicatePrompt) {
+			dontAskDuplicateAgain = false;
+			void tick().then(() => duplicateConfirmButton?.focus());
+		}
 	});
 
 	function formatTime(value: number) {
@@ -254,21 +270,8 @@
 						<span class="w-10 text-[10px] tabular-nums text-[var(--color-surface-text-muted)] sm:w-12 sm:text-xs">{formatTime($audioPlayer.duration)}</span>
 					</div>
 
-					<div class="mt-2 flex flex-wrap items-center justify-center gap-1 sm:gap-2">
-						<button type="button" class="player-control" disabled={!hasPrevious} aria-label="Previous queue item" onclick={() => void audioPlayer.previous()}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zm3 7 10-7v14L9 12z"/></svg></button>
-						<button type="button" class="player-control text-xs font-semibold" aria-label="Skip backward" onclick={() => audioPlayer.skip(-$readerSettings.audio.skipBackward)}>−{$readerSettings.audio.skipBackward}</button>
-						<button type="button" class="accent-action rounded-full p-3 focus-visible:outline-2" disabled={$audioPlayer.isLoading} aria-label={$audioPlayer.isPlaying ? 'Pause' : 'Play'} onclick={() => void audioPlayer.togglePlay()}>
-							{#if $audioPlayer.isLoading}
-								<svg class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3"/><path class="opacity-80" fill="currentColor" d="M12 3a9 9 0 0 1 9 9h-3a6 6 0 0 0-6-6V3Z"/></svg>
-							{:else if $audioPlayer.isPlaying}
-								<svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
-							{:else}
-								<svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5z"/></svg>
-							{/if}
-						</button>
-						<button type="button" class="player-control text-xs font-semibold" aria-label="Skip forward" onclick={() => audioPlayer.skip($readerSettings.audio.skipForward)}>+{$readerSettings.audio.skipForward}</button>
-						<button type="button" class="player-control" disabled={!hasNext} aria-label="Next queue item" onclick={() => void audioPlayer.next()}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM5 5l10 7-10 7V5z"/></svg></button>
-						<div class="ml-1">
+					<div class="player-control-layout mt-2">
+						<div class="player-secondary-left">
 							<button
 								bind:this={speedButtonElement}
 								type="button"
@@ -282,8 +285,30 @@
 								<span>{$audioPlayer.playbackSpeed}×</span>
 								<svg class="h-3 w-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m3 4.5 3 3 3-3"/></svg>
 							</button>
+							<button type="button" class="player-control player-mode-control" class:active={$audioPlayer.shuffleEnabled} aria-pressed={$audioPlayer.shuffleEnabled} aria-label={$audioPlayer.shuffleEnabled ? 'Turn shuffle off' : 'Turn shuffle on'} title={$audioPlayer.shuffleEnabled ? 'Shuffle on' : 'Shuffle off'} onclick={() => audioPlayer.toggleShuffle()}>
+								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h3c5 0 7 12 12 12h3"/><path d="m18 15 3 3-3 3"/><path d="M3 18h3c2.5 0 4.2-3 5.7-6C13.2 9 14.8 6 18 6h3"/><path d="m18 3 3 3-3 3"/></svg>
+							</button>
+							<button type="button" class="player-control player-mode-control relative" class:active={$audioPlayer.repeatMode !== 'off'} aria-label={`Repeat: ${$audioPlayer.repeatMode === 'off' ? 'off' : $audioPlayer.repeatMode === 'all' ? 'all' : 'one'}. Activate to change.`} title={`Repeat ${$audioPlayer.repeatMode}`} onclick={() => audioPlayer.cycleRepeatMode()}>
+								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></svg>
+								{#if $audioPlayer.repeatMode === 'one'}<span class="absolute text-[8px] font-bold leading-none" aria-hidden="true">1</span>{/if}
+							</button>
 						</div>
-						<div class="ml-1 flex items-center gap-1.5">
+						<div class="player-transport">
+							<button type="button" class="player-control" disabled={!hasPrevious} aria-label="Previous queue item" onclick={() => void audioPlayer.previous()}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zm3 7 10-7v14L9 12z"/></svg></button>
+							<button type="button" class="player-control text-xs font-semibold" aria-label="Skip backward" onclick={() => audioPlayer.skip(-$readerSettings.audio.skipBackward)}>−{$readerSettings.audio.skipBackward}</button>
+							<button type="button" class="accent-action rounded-full p-3 focus-visible:outline-2" disabled={$audioPlayer.isLoading} aria-label={$audioPlayer.isPlaying ? 'Pause' : 'Play'} onclick={() => void audioPlayer.togglePlay()}>
+								{#if $audioPlayer.isLoading}
+									<svg class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3"/><path class="opacity-80" fill="currentColor" d="M12 3a9 9 0 0 1 9 9h-3a6 6 0 0 0-6-6V3Z"/></svg>
+								{:else if $audioPlayer.isPlaying}
+									<svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
+								{:else}
+									<svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5z"/></svg>
+								{/if}
+							</button>
+							<button type="button" class="player-control text-xs font-semibold" aria-label="Skip forward" onclick={() => audioPlayer.skip($readerSettings.audio.skipForward)}>+{$readerSettings.audio.skipForward}</button>
+							<button type="button" class="player-control" disabled={!hasNext} aria-label="Next queue item" onclick={() => void audioPlayer.next()}><svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM5 5l10 7-10 7V5z"/></svg></button>
+						</div>
+						<div class="player-secondary-right">
 							<button type="button" class="player-control" aria-label={$audioPlayer.muted || $audioPlayer.volume === 0 ? 'Unmute' : 'Mute'} title={$audioPlayer.muted || $audioPlayer.volume === 0 ? 'Unmute' : 'Mute'} onclick={() => audioPlayer.toggleMute()}>
 								{#if $audioPlayer.muted || $audioPlayer.volume === 0}
 									<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="m22 9-6 6m0-6 6 6"/></svg>
@@ -292,10 +317,10 @@
 								{/if}
 							</button>
 							<input class="audio-volume w-16 sm:w-20" type="range" min="0" max="1" step="0.05" value={$audioPlayer.muted ? 0 : $audioPlayer.volume} aria-label="Volume" oninput={handleVolume} />
+							<button bind:this={sleepButtonElement} type="button" class="audio-sleep-button rounded-md px-2 py-1.5 text-xs font-semibold" class:active={$audioPlayer.sleepMode !== 'off'} aria-label={`Sleep setting: ${$audioPlayer.sleepMode === 'timer' ? formatSleepTimer($audioPlayer.sleepTimerRemaining) : $audioPlayer.sleepMode}. Activate to change.`} aria-haspopup="menu" aria-expanded={sleepMenuOpen} title="Sleep settings" onclick={toggleSleepMenu}>
+								<svg class="mr-1 inline h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>{$audioPlayer.sleepMode === 'timer' ? formatSleepTimer($audioPlayer.sleepTimerRemaining) : $audioPlayer.sleepMode === 'track' ? 'Track' : $audioPlayer.sleepMode === 'chapter' ? 'Chapter' : 'Sleep'}
+							</button>
 						</div>
-						<button bind:this={sleepButtonElement} type="button" class="audio-sleep-button rounded-md px-2 py-1.5 text-xs font-semibold" class:active={$audioPlayer.sleepMode !== 'off'} aria-label={`Sleep setting: ${$audioPlayer.sleepMode === 'timer' ? formatSleepTimer($audioPlayer.sleepTimerRemaining) : $audioPlayer.sleepMode}. Activate to change.`} aria-haspopup="menu" aria-expanded={sleepMenuOpen} title="Sleep settings" onclick={toggleSleepMenu}>
-							<svg class="mr-1 inline h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>{$audioPlayer.sleepMode === 'timer' ? formatSleepTimer($audioPlayer.sleepTimerRemaining) : $audioPlayer.sleepMode === 'track' ? 'Track' : $audioPlayer.sleepMode === 'chapter' ? 'Chapter' : 'Sleep'}
-						</button>
 					</div>
 					{#if $audioPlayer.error}
 						<div class="mt-2 flex items-center justify-center gap-2 text-xs" role="alert">
@@ -379,7 +404,49 @@
 	{/if}
 {/if}
 
+{#if $audioPlayer.duplicatePrompt}
+	<div class="fixed inset-0 z-[10020] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) audioPlayer.resolveDuplicatePrompt(false); }}>
+		<div class="w-full max-w-md rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="duplicate-queue-title" aria-describedby="duplicate-queue-description">
+			<h2 id="duplicate-queue-title" class="text-lg font-semibold text-[var(--color-surface-text)]">Add duplicate item to queue?</h2>
+			<p id="duplicate-queue-description" class="mt-2 text-sm leading-6 text-[var(--color-surface-text-muted)]">
+				“{$audioPlayer.duplicatePrompt.title}” is already in the queue. You can add another copy or keep the queue unchanged.
+			</p>
+			<label for="duplicate-queue-dont-ask" class="mt-4 flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-base)]/55 px-3 py-2.5">
+				<span>
+					<span class="block text-sm font-medium text-[var(--color-surface-text)]">Don’t ask again</span>
+					<span class="mt-0.5 block text-xs text-[var(--color-surface-text-muted)]">Always allow duplicate queue items. This can be changed in Reader Settings → Audio.</span>
+				</span>
+				<input id="duplicate-queue-dont-ask" type="checkbox" bind:checked={dontAskDuplicateAgain} class="settings-switch">
+			</label>
+			<div class="mt-5 flex justify-end gap-2">
+				<button type="button" class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)]" onclick={() => audioPlayer.resolveDuplicatePrompt(false)}>Cancel</button>
+				<button bind:this={duplicateConfirmButton} type="button" class="accent-action rounded-lg px-3 py-2 text-sm font-medium focus-visible:outline-2" onclick={() => audioPlayer.resolveDuplicatePrompt(true, dontAskDuplicateAgain)}>Add duplicate</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
+	.player-control-layout {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(max-content, auto);
+		gap: 0.35rem 0.5rem;
+		align-items: center;
+	}
+	.player-secondary-left,
+	.player-secondary-right,
+	.player-transport {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+	.player-transport {
+		grid-column: 1 / -1;
+		grid-row: 1;
+		justify-content: center;
+	}
+	.player-secondary-left { grid-column: 1; grid-row: 2; justify-content: flex-end; }
+	.player-secondary-right { grid-column: 2; grid-row: 2; justify-content: flex-start; }
 	.player-control {
 		display: inline-flex;
 		height: 2.25rem;
@@ -390,6 +457,7 @@
 		color: var(--color-surface-text-muted);
 	}
 	.player-control:hover:not(:disabled), .queue-control:hover:not(:disabled) { background: var(--color-surface-700); color: var(--color-surface-text); }
+	.player-mode-control.active { background: color-mix(in srgb, var(--color-primary-500) 14%, transparent); color: var(--color-primary-400); }
 	.player-control:disabled, .queue-control:disabled { opacity: 0.35; }
 	.queue-control { border-radius: 0.375rem; padding: 0.25rem 0.45rem; color: var(--color-surface-text-muted); }
 	.audio-seek, .audio-volume { accent-color: var(--color-primary-500); }
@@ -446,5 +514,14 @@
 	.audio-player-bottom { transition: bottom 180ms ease; }
 	.audio-reader-tab.is-playing .music-note { animation: audio-pulse 1.2s ease-in-out infinite; }
 	@keyframes audio-pulse { 50% { transform: translateY(-2px) rotate(6deg); } }
+	@media (min-width: 48rem) {
+		.player-control-layout {
+			grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+			column-gap: 0.875rem;
+		}
+		.player-secondary-left { grid-column: 1; grid-row: 1; justify-content: flex-end; }
+		.player-transport { grid-column: 2; grid-row: 1; }
+		.player-secondary-right { grid-column: 3; grid-row: 1; }
+	}
 	@media (prefers-reduced-motion: reduce) { .audio-reader-tab.is-playing .music-note { animation: none; } }
 </style>

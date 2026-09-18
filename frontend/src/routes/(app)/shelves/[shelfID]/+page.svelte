@@ -876,11 +876,12 @@
 						<button
 							type="button"
 							onclick={(event) => toggleBookSelection(book.id, event)}
-							class="absolute right-3 top-3 z-20 flex h-7 w-7 items-center justify-center rounded border-2 transition-all {selectedBooks.has(book.id) ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]' : 'border-[var(--color-surface-400)] bg-[var(--color-surface-800)]/90 opacity-0 group-hover:opacity-100'} {bulkSelectMode ? 'opacity-100' : ''}"
+							class="bulk-select-checkbox absolute right-3 top-3 z-20 h-7 w-7 rounded transition-all {selectedBooks.has(book.id) ? 'is-selected' : 'opacity-0 group-hover:opacity-100'} {bulkSelectMode ? 'opacity-100' : ''}"
+							aria-pressed={selectedBooks.has(book.id)}
 							aria-label={selectedBooks.has(book.id) ? 'Deselect book' : 'Select book'}
 						>
 							{#if selectedBooks.has(book.id)}
-								<svg class="h-4 w-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
 								</svg>
 							{/if}
@@ -956,11 +957,12 @@
 						<button
 							type="button"
 							onclick={(event) => toggleBookSelection(book.id, event)}
-							class="absolute top-2 left-2 z-20 w-6 h-6 rounded border-2 transition-all opacity-0 group-hover:opacity-100 {bulkSelectMode ? 'opacity-100' : ''} {selectedBooks.has(book.id) ? 'bg-[var(--color-primary-500)] border-[var(--color-primary-500)]' : 'bg-[var(--color-surface-800)]/90 border-[var(--color-surface-400)]'} flex items-center justify-center"
+							class="bulk-select-checkbox absolute top-2 left-2 z-20 w-6 h-6 rounded transition-all opacity-0 group-hover:opacity-100 {bulkSelectMode ? 'opacity-100' : ''} {selectedBooks.has(book.id) ? 'is-selected' : ''}"
+							aria-pressed={selectedBooks.has(book.id)}
 							aria-label={selectedBooks.has(book.id) ? 'Deselect book' : 'Select book'}
 						>
 							{#if selectedBooks.has(book.id)}
-								<svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
 								</svg>
 							{/if}

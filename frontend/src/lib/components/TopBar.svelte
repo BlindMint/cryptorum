@@ -102,10 +102,7 @@
 
 		<div class="hidden items-center gap-2 shrink-0 lg:flex">
 			<AppLogo sizeClass="h-9 w-9" roundedClass="rounded-lg" />
-			<div class="min-w-0">
-				<h1 class="text-[0.9375rem] font-bold leading-tight text-[var(--color-surface-text)]">Cryptorum</h1>
-				<p class="text-[11px] leading-tight text-[var(--color-surface-text-muted)]">Personal Library</p>
-			</div>
+			<h1 class="text-[0.9375rem] font-bold leading-tight text-[var(--color-surface-text)]">Cryptorum</h1>
 		</div>
 
 		<button

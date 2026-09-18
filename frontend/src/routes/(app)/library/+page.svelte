@@ -1837,11 +1837,12 @@
 						<!-- Checkbox for selection - visible in bulk mode or on hover -->
 						<button
 							onclick={(e) => toggleBookSelection(book.id, e)}
-							class="absolute top-2 left-2 z-20 w-6 h-6 rounded border-2 transition-all opacity-0 group-hover:opacity-100 {bulkSelectMode ? 'opacity-100' : ''} {selectedBooks.has(book.id) ? 'bg-[var(--color-primary-500)] border-[var(--color-primary-500)]' : 'bg-[var(--color-surface-800)]/90 border-[var(--color-surface-400)]'} flex items-center justify-center"
+							class="bulk-select-checkbox absolute top-2 left-2 z-20 w-6 h-6 rounded transition-all opacity-0 group-hover:opacity-100 {bulkSelectMode ? 'opacity-100' : ''} {selectedBooks.has(book.id) ? 'is-selected' : ''}"
+							aria-pressed={selectedBooks.has(book.id)}
 							aria-label={selectedBooks.has(book.id) ? 'Deselect book' : 'Select book'}
 						>
 							{#if selectedBooks.has(book.id)}
-								<svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
 								</svg>
 							{/if}
@@ -1898,11 +1899,12 @@
 						<!-- Checkbox for selection - visible in bulk mode or on hover -->
 						<button
 							onclick={(e) => toggleBookSelection(book.id, e)}
-							class="absolute top-1/2 -translate-y-1/2 left-3 z-20 w-6 h-6 rounded border-2 transition-all opacity-0 group-hover:opacity-100 {bulkSelectMode ? 'opacity-100' : ''} {selectedBooks.has(book.id) ? 'bg-[var(--color-primary-500)] border-[var(--color-primary-500)]' : 'bg-[var(--color-surface-800)]/90 border-[var(--color-surface-400)]'} flex items-center justify-center"
+							class="bulk-select-checkbox absolute top-1/2 -translate-y-1/2 left-3 z-20 w-6 h-6 rounded transition-all opacity-0 group-hover:opacity-100 {bulkSelectMode ? 'opacity-100' : ''} {selectedBooks.has(book.id) ? 'is-selected' : ''}"
+							aria-pressed={selectedBooks.has(book.id)}
 							aria-label={selectedBooks.has(book.id) ? 'Deselect book' : 'Select book'}
 						>
 							{#if selectedBooks.has(book.id)}
-								<svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
 								</svg>
 							{/if}

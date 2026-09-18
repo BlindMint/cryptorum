@@ -78,6 +78,7 @@ export interface AudioReaderSetting {
 	skipForward: number;
 	skipBackward: number;
 	autoAdvance: boolean;
+	confirmQueueDuplicates: boolean;
 	autoHideControls: boolean;
 	gaplessPlayback: boolean;
 	sleepTimer: 'off' | '15min' | '30min' | '60min' | 'end-of-chapter' | 'custom';
@@ -202,6 +203,7 @@ export const defaultReaderSettings: ReaderSettings = {
 		skipForward: 15,
 		skipBackward: 15,
 		autoAdvance: true,
+		confirmQueueDuplicates: true,
 		autoHideControls: true,
 		gaplessPlayback: true,
 		sleepTimer: 'off',

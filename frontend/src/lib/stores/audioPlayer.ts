@@ -28,6 +28,11 @@ export interface AudioChapter { id: number; position: number; title: string; sta
 export interface AudioBookmark { id: number; audio_id: number; seconds: number; label: string; created_at: number; }
 export type AudioPlayerPanel = 'queue' | 'chapters' | 'bookmarks';
 export type AudioSleepMode = 'off' | 'timer' | 'track' | 'chapter';
+export type AudioRepeatMode = 'off' | 'all' | 'one';
+
+export interface AudioDuplicatePrompt {
+	title: string;
+}
 
 interface QueueResponse {
 	items: AudioQueueItem[];
@@ -44,6 +49,9 @@ export interface AudioPlayerState {
 	playbackSpeed: number;
 	volume: number;
 	muted: boolean;
+	shuffleEnabled: boolean;
+	repeatMode: AudioRepeatMode;
+	duplicatePrompt: AudioDuplicatePrompt | null;
 	sleepTimerRemaining: number | null;
 	sleepTimerMinutes: number | null;
 	sleepMode: AudioSleepMode;
@@ -68,6 +76,9 @@ const initialState: AudioPlayerState = {
 	playbackSpeed: 1,
 	volume: 1,
 	muted: false,
+	shuffleEnabled: false,
+	repeatMode: 'off',
+	duplicatePrompt: null,
 	sleepTimerRemaining: null,
 	sleepTimerMinutes: null,
 	sleepMode: 'off',
@@ -95,6 +106,9 @@ function createAudioPlayerStore() {
 	let lastMediaPositionSecond = -1;
 	let volumeBeforeMute = 1;
 	let audioConfigured = false;
+	let shuffleRemaining: number[] = [];
+	let shuffleHistory: number[] = [];
+	let duplicatePromptResolver: ((confirmed: boolean) => void) | null = null;
 
 	function ensureAudioElement(): HTMLAudioElement | null {
 		if (!browser) return null;
@@ -204,12 +218,60 @@ function createAudioPlayerStore() {
 	}
 
 	function applyQueue(response: QueueResponse) {
+		const previous = get({ subscribe });
 		update((state) => ({
 			...state,
 			items: response.items ?? [],
 			currentItemId: response.current_item_id ?? response.items?.[0]?.id ?? null,
 			initialized: true
 		}));
+		const validIDs = new Set((response.items ?? []).filter((item) => !item.unavailable).map((item) => item.id));
+		shuffleRemaining = shuffleRemaining.filter((id) => validIDs.has(id));
+		shuffleHistory = shuffleHistory.filter((id) => validIDs.has(id));
+		if (previous.shuffleEnabled) {
+			const previousIDs = new Set(previous.items.map((item) => item.id));
+			for (const item of response.items ?? []) {
+				if (!item.unavailable && item.id !== response.current_item_id && !previousIDs.has(item.id)) shuffleRemaining.push(item.id);
+			}
+		}
+	}
+
+	function resetShuffleTraversal(state = get({ subscribe })) {
+		shuffleRemaining = state.items.filter((item) => !item.unavailable && item.id !== state.currentItemId).map((item) => item.id);
+		shuffleHistory = state.currentItemId === null ? [] : [state.currentItemId];
+	}
+
+	function setShuffleEnabled(enabled: boolean) {
+		update((state) => ({ ...state, shuffleEnabled: enabled }));
+		if (enabled) resetShuffleTraversal();
+		else {
+			shuffleRemaining = [];
+			shuffleHistory = [];
+		}
+	}
+
+	function toggleShuffle() {
+		setShuffleEnabled(!get({ subscribe }).shuffleEnabled);
+	}
+
+	function cycleRepeatMode() {
+		update((state) => ({ ...state, repeatMode: state.repeatMode === 'off' ? 'all' : state.repeatMode === 'all' ? 'one' : 'off' }));
+	}
+
+	function requestDuplicateConfirmation(title: string): Promise<boolean> {
+		return new Promise((resolve) => {
+			duplicatePromptResolver?.(false);
+			duplicatePromptResolver = resolve;
+			update((state) => ({ ...state, duplicatePrompt: { title } }));
+		});
+	}
+
+	function resolveDuplicatePrompt(confirmed: boolean, dontAskAgain = false) {
+		if (confirmed && dontAskAgain) readerSettings.updateAudio({ confirmQueueDuplicates: false });
+		const resolve = duplicatePromptResolver;
+		duplicatePromptResolver = null;
+		update((state) => ({ ...state, duplicatePrompt: null }));
+		resolve?.(confirmed);
 	}
 
 	async function requestQueue(path = '', options?: RequestInit): Promise<QueueResponse> {
@@ -451,6 +513,10 @@ function createAudioPlayerStore() {
 		try {
 			const response = await requestQueue('/current', { method: 'PUT', body: JSON.stringify({ item_id: itemID }) });
 			applyQueue(response);
+			if (get({ subscribe }).shuffleEnabled) {
+				shuffleRemaining = shuffleRemaining.filter((id) => id !== itemID);
+				if (shuffleHistory[shuffleHistory.length - 1] !== itemID) shuffleHistory.push(itemID);
+			}
 			await prepareCurrent(autoplay);
 		} catch (error) {
 			update((state) => ({ ...state, error: error instanceof Error ? error.message : 'Unable to select audio' }));
@@ -484,16 +550,24 @@ function createAudioPlayerStore() {
 
 	async function addToQueue(bookID: number, fileID?: number, placement: 'append' | 'next' = 'append') {
 		await initialize();
-		const hadCurrent = get({ subscribe }).currentItemId !== null;
+		const before = get({ subscribe });
+		const duplicate = before.items.find((item) => fileID ? item.file_id === fileID : item.book_id === bookID);
+		if (duplicate && get(readerSettings).audio.confirmQueueDuplicates) {
+			const confirmed = await requestDuplicateConfirmation(duplicate.title);
+			if (!confirmed) return false;
+		}
+		const hadCurrent = before.currentItemId !== null;
 		try {
 			applyQueue(await requestQueue('/items', {
 				method: 'POST',
-				body: JSON.stringify({ book_id: bookID, file_id: fileID, placement, make_current: false })
+				body: JSON.stringify({ book_id: bookID, file_id: fileID, placement, make_current: false, allow_duplicate: !!duplicate })
 			}));
 			update((state) => ({ ...state, dismissed: false }));
 			if (!hadCurrent) await prepareCurrent(false);
+			return true;
 		} catch (error) {
 			update((state) => ({ ...state, error: error instanceof Error ? error.message : 'Unable to add audio to the queue' }));
+			return false;
 		}
 	}
 
@@ -555,8 +629,25 @@ function createAudioPlayerStore() {
 
 	async function next() {
 		const state = get({ subscribe });
+		if (state.shuffleEnabled) {
+			if (!shuffleRemaining.length && state.repeatMode === 'all') resetShuffleTraversal(state);
+			if (shuffleRemaining.length) {
+				const randomIndex = Math.floor(Math.random() * shuffleRemaining.length);
+				const [nextID] = shuffleRemaining.splice(randomIndex, 1);
+				await setCurrent(nextID);
+				return;
+			}
+			if (state.repeatMode === 'all' && state.items.some((item) => !item.unavailable)) {
+				await prepareCurrent(true);
+				return;
+			}
+			audio?.pause();
+			seek(0);
+			return;
+		}
 		const index = state.items.findIndex((item) => item.id === state.currentItemId);
-		const nextItem = state.items.slice(index + 1).find((item) => !item.unavailable);
+		let nextItem = state.items.slice(index + 1).find((item) => !item.unavailable);
+		if (!nextItem && state.repeatMode === 'all') nextItem = state.items.find((item) => !item.unavailable);
 		if (nextItem) await setCurrent(nextItem.id);
 		else {
 			audio?.pause();
@@ -572,10 +663,10 @@ function createAudioPlayerStore() {
 			update((value) => ({ ...value, isPlaying: false, currentTime: value.duration }));
 			return;
 		}
-		const index = state.items.findIndex((item) => item.id === state.currentItemId);
-		const nextItem = state.items.slice(index + 1).find((item) => !item.unavailable);
-		if (get(readerSettings).audio.autoAdvance && nextItem) {
-			await setCurrent(nextItem.id);
+		if (state.repeatMode === 'one') {
+			await prepareCurrent(true);
+		} else if (get(readerSettings).audio.autoAdvance || state.repeatMode === 'all') {
+			await next();
 		} else {
 			update((value) => ({ ...value, isPlaying: false, currentTime: value.duration }));
 		}
@@ -592,8 +683,15 @@ function createAudioPlayerStore() {
 			return;
 		}
 		const state = get({ subscribe });
+		if (state.shuffleEnabled && shuffleHistory.length > 1) {
+			const currentID = shuffleHistory.pop();
+			if (currentID !== undefined && !shuffleRemaining.includes(currentID)) shuffleRemaining.push(currentID);
+			await setCurrent(shuffleHistory[shuffleHistory.length - 1]);
+			return;
+		}
 		const index = state.items.findIndex((item) => item.id === state.currentItemId);
-		const previousItem = state.items.slice(0, index).reverse().find((item) => !item.unavailable);
+		let previousItem = state.items.slice(0, index).reverse().find((item) => !item.unavailable);
+		if (!previousItem && state.repeatMode === 'all') previousItem = [...state.items].reverse().find((item) => !item.unavailable);
 		if (previousItem) await setCurrent(previousItem.id);
 		else seek(0);
 	}
@@ -748,6 +846,10 @@ function createAudioPlayerStore() {
 		remove,
 		clear,
 		move,
+		setShuffleEnabled,
+		toggleShuffle,
+		cycleRepeatMode,
+		resolveDuplicatePrompt,
 		setPlaybackSpeed,
 		setVolume,
 		toggleMute,
@@ -763,6 +865,10 @@ function createAudioPlayerStore() {
 		toggleQueue,
 		dismiss,
 		reset: () => {
+			duplicatePromptResolver?.(false);
+			duplicatePromptResolver = null;
+			shuffleRemaining = [];
+			shuffleHistory = [];
 			audio?.pause();
 			audio?.removeAttribute('src');
 			audio?.load();
