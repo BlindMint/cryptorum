@@ -30,6 +30,7 @@
 	import { restoreRouteScrollPosition, saveRouteScrollPosition } from '$lib/utils/scroll-position';
 	import BulkAddToQueueButton from '$lib/components/BulkAddToQueueButton.svelte';
 	import { trackBulkActionBar } from '$lib/stores/bulkActionBar';
+	import { selectionMayContainAudio } from '$lib/utils/bulk-audio-selection';
 
 	let shelf = $state<any>(null);
 	let books = $state<any[]>([]);
@@ -67,6 +68,7 @@
 	let bulkSelectionAnchorId = $state<number | null>(null);
 
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
+	let bulkSelectionMayContainAudio = $derived(selectionMayContainAudio(selectedBooks, books));
 	let visibleBooks = $derived(getVisibleBooks());
 	let existingShelfBookIds = $derived(new Set(books.map((book) => Number(book.id))));
 	let estimatedGridWidth = $derived(shelfGridWidth > 0 ? shelfGridWidth : typeof window === 'undefined' ? 1920 : window.innerWidth);
@@ -997,7 +999,9 @@
 						</div>
 					</div>
 					<div class="bulk-primary-actions">
-						<BulkAddToQueueButton bookIds={Array.from(selectedBooks)} disabled={actionInProgress} />
+						{#if bulkSelectionMayContainAudio}
+							<BulkAddToQueueButton bookIds={Array.from(selectedBooks)} disabled={actionInProgress} label="Add Audio to Queue" />
+						{/if}
 						<div class="relative w-full sm:w-auto">
 							<button
 								onclick={() => showMetadataMenu = !showMetadataMenu}

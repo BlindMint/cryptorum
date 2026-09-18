@@ -26,6 +26,7 @@
 	import { combineSelectionError } from '$lib/utils/combine-books';
 	import BulkAddToQueueButton from '$lib/components/BulkAddToQueueButton.svelte';
 	import { trackBulkActionBar } from '$lib/stores/bulkActionBar';
+	import { selectionMayContainAudio } from '$lib/utils/bulk-audio-selection';
 
 	type FilterMode = 'AND' | 'OR' | 'NOT';
 	type SearchResponse = {
@@ -109,6 +110,7 @@
 	});
 
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
+	let bulkSelectionMayContainAudio = $derived(selectionMayContainAudio(selectedBooks, results));
 	let hasMore = $derived(serverHasMore);
 	let manualShelves = $derived(shelves.filter((shelf) => shelf.is_magic !== 1));
 	let compactToolbar = $derived(toolbarWidth > 0 && toolbarWidth < COMPACT_TOOLBAR_WIDTH);
@@ -1431,7 +1433,9 @@
 						</div>
 					</div>
 					<div class="bulk-primary-actions">
-						<BulkAddToQueueButton bookIds={Array.from(selectedBooks)} disabled={actionInProgress} />
+						{#if bulkSelectionMayContainAudio}
+							<BulkAddToQueueButton bookIds={Array.from(selectedBooks)} disabled={actionInProgress} label="Add Audio to Queue" />
+						{/if}
 						<div class="relative w-full sm:w-auto">
 							<button
 								onclick={() => showMetadataMenu = !showMetadataMenu}

@@ -22,6 +22,12 @@ const bookCatalogAudioVisibilitySQL = `EXISTS (
 	       OR visible_ai.id IS NULL OR visible_ai.category = 'audiobook')
 )`
 
+const bookHasAudioSQL = `EXISTS (
+	SELECT 1 FROM book_file audio_bf
+	WHERE audio_bf.book_id = b.id AND audio_bf.missing_at IS NULL
+	  AND LOWER(audio_bf.format) IN ('mp3', 'm4a', 'm4b', 'flac', 'ogg', 'wav')
+)`
+
 type audioLibraryItem struct {
 	ID              int64    `json:"id"`
 	BookID          int64    `json:"book_id"`

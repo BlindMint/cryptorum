@@ -326,6 +326,46 @@ func TestBookFiltersAcrossORStaysInsideSearchScope(t *testing.T) {
 	}
 }
 
+func TestBooksReportAudioAvailabilityAcrossAllActiveFiles(t *testing.T) {
+	setupFilterOptionsTestDB(t)
+	mustExec(t, `
+		INSERT INTO book_file (id, book_id, path, format, size, hash, last_modified, owner_user_id)
+		VALUES (10, 1, 'Offensive.mp3', 'MP3', 456, 'offensive-audio-hash', 200, 1)
+	`)
+	mustExec(t, `
+		INSERT INTO book_file (id, book_id, path, format, size, hash, last_modified, missing_at, owner_user_id)
+		VALUES (11, 2, 'Other Offensive.m4b', 'm4b', 456, 'missing-audio-hash', 200, 300, 1)
+	`)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/books?library_id=1", nil)
+	getBooksHandler(rec, req.WithContext(authContextWithUser(req.Context(), &AppUser{ID: 1, IsAdmin: true})))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var response struct {
+		Books []struct {
+			ID       int64 `json:"id"`
+			HasAudio bool  `json:"has_audio"`
+		} `json:"books"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode books: %v", err)
+	}
+
+	availability := make(map[int64]bool, len(response.Books))
+	for _, book := range response.Books {
+		availability[book.ID] = book.HasAudio
+	}
+	if !availability[1] {
+		t.Fatal("book with an active secondary MP3 file should report has_audio=true")
+	}
+	if availability[2] || availability[3] {
+		t.Fatalf("books without active audio should report has_audio=false; got %#v", availability)
+	}
+}
+
 func fetchBooksForTest(t *testing.T, path string) []struct {
 	Title string `json:"title"`
 } {

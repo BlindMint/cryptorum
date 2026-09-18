@@ -28,6 +28,7 @@
 	import BulkAddToQueueButton from '$lib/components/BulkAddToQueueButton.svelte';
 	import { trackBulkActionBar } from '$lib/stores/bulkActionBar';
 	import { combineSelectionError } from '$lib/utils/combine-books';
+	import { selectionMayContainAudio } from '$lib/utils/bulk-audio-selection';
 
 		type FilterMode = 'AND' | 'OR' | 'NOT';
 		const COMPACT_TOOLBAR_WIDTH = 720;
@@ -151,6 +152,9 @@
 	let actionInProgress = $state(false);
 	let selectAllMode = $state<'none' | 'page' | 'filtered'>('none');
 	let bulkSelectMode = $derived(selectedBooks.size > 0);
+	let bulkSelectionMayContainAudio = $derived(
+		selectAllMode === 'filtered' || selectionMayContainAudio(selectedBooks, books)
+	);
 	let manualShelves = $derived(shelves.filter((shelf) => shelf.is_magic !== 1));
 	let bulkSelectionAnchorId = $state<number | null>(null);
 	let bulkSelectionRestored = false;
@@ -1972,11 +1976,14 @@
 						</div>
 					</div>
 					<div class="bulk-primary-actions">
-						<BulkAddToQueueButton
-							bookIds={Array.from(selectedBooks)}
-							disabled={actionInProgress || selectAllMode === 'filtered'}
-							title={selectAllMode === 'filtered' ? 'Deselect “all filtered” and select specific books to add audio to the queue' : 'Add audio from this selection to the queue'}
-						/>
+						{#if bulkSelectionMayContainAudio}
+							<BulkAddToQueueButton
+								bookIds={Array.from(selectedBooks)}
+								disabled={actionInProgress || selectAllMode === 'filtered'}
+								label="Add Audio to Queue"
+								title={selectAllMode === 'filtered' ? 'Deselect “all filtered” and select specific books to add audio to the queue' : 'Add audio from this selection to the queue'}
+							/>
+						{/if}
 						<div class="relative w-full sm:w-auto">
 							<button
 								onclick={() => showMetadataMenu = !showMetadataMenu}

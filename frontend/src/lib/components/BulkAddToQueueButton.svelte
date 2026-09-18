@@ -2,10 +2,11 @@
 	import { onDestroy } from 'svelte';
 	import { audioPlayer } from '$lib/stores/audioPlayer';
 
-	let { bookIds, disabled = false, title = 'Add audio from this selection to the queue' } = $props<{
+	let { bookIds, disabled = false, title = 'Add audio from this selection to the queue', label = 'Add to queue' } = $props<{
 		bookIds: number[];
 		disabled?: boolean;
 		title?: string;
+		label?: string;
 	}>();
 	let adding = $state(false);
 	let resultLabel = $state('');
@@ -45,5 +46,5 @@
 	{:else}
 		<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h10M3 12h7M3 18h5"/><path d="M17 13v8m-4-4h8"/></svg>
 	{/if}
-	<span>{adding ? 'Adding…' : resultLabel || 'Add to queue'}</span>
+	<span>{adding ? 'Adding…' : resultLabel || label}</span>
 </button>
