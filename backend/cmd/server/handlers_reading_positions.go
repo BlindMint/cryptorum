@@ -368,7 +368,10 @@ func StartReadingPositionSessionHandler(w http.ResponseWriter, r *http.Request) 
 			VALUES (?, ?, ?, 'unread', 0, ?)
 			ON CONFLICT(book_id, owner_user_id) DO UPDATE SET
 				file_id = excluded.file_id,
-				percent = excluded.percent
+				percent = CASE
+					WHEN excluded.percent > 0 THEN excluded.percent
+					ELSE reading_progress.percent
+				END
 		`, bookID, req.FileID, position.Percent, current.ID)
 		if err != nil {
 			errorResponse(w, http.StatusInternalServerError, "Failed to update resume target")
@@ -380,7 +383,10 @@ func StartReadingPositionSessionHandler(w http.ResponseWriter, r *http.Request) 
 			VALUES (?, ?, ?, 'unread', 0, ?)
 			ON CONFLICT(book_id, owner_user_id) DO UPDATE SET
 				speed_file_id = excluded.speed_file_id,
-				speed_reader_percent = excluded.speed_reader_percent
+				speed_reader_percent = CASE
+					WHEN excluded.speed_reader_percent > 0 THEN excluded.speed_reader_percent
+					ELSE reading_progress.speed_reader_percent
+				END
 		`, bookID, req.FileID, position.Percent, current.ID)
 		if err != nil {
 			errorResponse(w, http.StatusInternalServerError, "Failed to update speed reader target")

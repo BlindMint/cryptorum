@@ -313,6 +313,11 @@
 		editing = null; await load();
 	}
 
+	function openAudioEditor(item: AudioItem, event?: MouseEvent) {
+		event?.stopPropagation();
+		editing = { ...item, artists: [...item.artists] };
+	}
+
 	async function createPlaylist(audioIDs = selectedIDs) {
 		if (!playlistName.trim()) return;
 		saving = true;
@@ -521,7 +526,7 @@
 			{#if selectedSet.has(item.id)}<svg class="h-3.5 w-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>{/if}
 		</button>
 		<BookCoverFrame src={`/api/covers/${item.book_id}/thumb?size=small`} alt={`${item.title} cover`} format={item.format} placeholderKind="audio" placeholderSize="xs" frameClass="h-24 w-16 flex-none rounded-lg shadow" />
-		<div class="min-w-0 flex-1"><h2 class="line-clamp-2 font-semibold leading-tight text-[var(--color-surface-text)]">{item.title}</h2><p class="mt-1 truncate text-xs text-[var(--color-surface-text-muted)]">{item.artists.join(', ') || item.filename}</p>{#if item.chapter_count || item.bookmark_count}<p class="mt-1 text-[10px] text-[var(--color-surface-text-muted)]">{item.chapter_count ? `${item.chapter_count} chapters` : ''}{item.chapter_count && item.bookmark_count ? ' · ' : ''}{item.bookmark_count ? `${item.bookmark_count} bookmarks` : ''}</p>{/if}<div class="mt-3 flex flex-wrap gap-1.5"><button type="button" data-audio-action class="accent-action rounded-lg px-2.5 py-1.5 text-xs" disabled={item.unavailable} onclick={() => play(item)}>Play</button><button type="button" data-audio-action class="rounded-lg border border-[var(--color-surface-border)] px-2.5 py-1.5 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)] disabled:opacity-50" disabled={item.unavailable} onclick={() => queue(item)}>Queue</button><button type="button" data-audio-action class="rounded-lg px-2 py-1.5 text-xs text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)]" onclick={() => editing = structuredClone(item)}>Edit</button></div></div>
+		<div class="min-w-0 flex-1"><h2 class="line-clamp-2 font-semibold leading-tight text-[var(--color-surface-text)]">{item.title}</h2><p class="mt-1 truncate text-xs text-[var(--color-surface-text-muted)]">{item.artists.join(', ') || item.filename}</p>{#if item.chapter_count || item.bookmark_count}<p class="mt-1 text-[10px] text-[var(--color-surface-text-muted)]">{item.chapter_count ? `${item.chapter_count} chapters` : ''}{item.chapter_count && item.bookmark_count ? ' · ' : ''}{item.bookmark_count ? `${item.bookmark_count} bookmarks` : ''}</p>{/if}<div class="mt-3 flex flex-wrap gap-1.5"><button type="button" data-audio-action class="accent-action rounded-lg px-2.5 py-1.5 text-xs" disabled={item.unavailable} onclick={() => play(item)}>Play</button><button type="button" data-audio-action class="rounded-lg border border-[var(--color-surface-border)] px-2.5 py-1.5 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)] disabled:opacity-50" disabled={item.unavailable} onclick={() => queue(item)}>Queue</button><button type="button" data-audio-action class="rounded-lg px-2 py-1.5 text-xs text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)]" onclick={(event) => openAudioEditor(item, event)}>Edit</button></div></div>
 	</div>
 {/snippet}
 

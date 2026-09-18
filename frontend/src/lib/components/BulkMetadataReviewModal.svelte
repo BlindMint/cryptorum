@@ -486,7 +486,7 @@
 	});
 </script>
 
-<div class="fixed inset-0 z-[125] flex items-center justify-center p-4">
+<div class="fixed inset-0 z-[11000] flex items-center justify-center p-4">
 	<button type="button" class="absolute inset-0 bg-black/70" aria-label="Close metadata review" onclick={onClose}></button>
 	<div class="relative flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
 		<header class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-5 py-3.5">

@@ -125,6 +125,40 @@ func TestReadingPositionSessionMigratesLegacyProgressToExplicitFile(t *testing.T
 	}
 }
 
+func TestStartingAlternateFileDoesNotResetBookSummaryProgress(t *testing.T) {
+	setupReadingPositionHandlerTestDB(t)
+	mustExec(t, `
+		INSERT INTO reading_progress (
+			book_id, file_id, percent, speed_file_id, speed_reader_percent,
+			status, updated_at, legacy_standard_adopted, legacy_speed_adopted, owner_user_id
+		) VALUES (1, 10, 48, 10, 22, 'reading', 100, 1, 1, 1)
+	`)
+
+	_, standardPosition := startPositionSession(t, 11, "standard", "epub_paginated")
+	if standardPosition.Percent != 0 {
+		t.Fatalf("new alternate-file position = %v, want 0", standardPosition.Percent)
+	}
+	_, speedPosition := startPositionSession(t, 11, "speed", "speed")
+	if speedPosition.Percent != 0 {
+		t.Fatalf("new alternate-file speed position = %v, want 0", speedPosition.Percent)
+	}
+
+	var fileID, speedFileID int64
+	var percent, speedPercent float64
+	if err := appDB.QueryRow(`
+		SELECT file_id, percent, speed_file_id, speed_reader_percent
+		FROM reading_progress WHERE book_id = 1 AND owner_user_id = 1
+	`).Scan(&fileID, &percent, &speedFileID, &speedPercent); err != nil {
+		t.Fatalf("load reading summary: %v", err)
+	}
+	if fileID != 11 || speedFileID != 11 {
+		t.Fatalf("resume targets = standard %d, speed %d; want 11", fileID, speedFileID)
+	}
+	if percent != 48 || speedPercent != 22 {
+		t.Fatalf("starting alternate files reset summary progress to standard=%v speed=%v", percent, speedPercent)
+	}
+}
+
 func TestReadingPositionRejectsSupersededAndOutOfOrderSessions(t *testing.T) {
 	setupReadingPositionHandlerTestDB(t)
 	firstSession, _ := startPositionSession(t, 10, "standard", "pdf")

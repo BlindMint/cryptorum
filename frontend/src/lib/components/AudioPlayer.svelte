@@ -8,7 +8,6 @@
 	import { getCoverThumbUrl } from '$lib/utils/covers';
 
 	let { readerMode = false } = $props<{ readerMode?: boolean }>();
-	let audioElement: HTMLAudioElement;
 	let speedButtonElement = $state<HTMLButtonElement>();
 	let speedMenuElement = $state<HTMLDivElement>();
 	let sleepButtonElement = $state<HTMLButtonElement>();
@@ -35,7 +34,6 @@
 	const speedOptions = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
 	onMount(() => {
-		const detach = audioPlayer.attach(audioElement);
 		const handleOutsidePointer = (event: PointerEvent) => {
 			const target = event.target as Node;
 			if (speedMenuOpen && !speedButtonElement?.contains(target) && !speedMenuElement?.contains(target)) speedMenuOpen = false;
@@ -53,7 +51,6 @@
 		window.addEventListener('resize', closeMenus);
 		void audioPlayer.initialize();
 		return () => {
-			detach();
 			document.removeEventListener('pointerdown', handleOutsidePointer);
 			document.removeEventListener('keydown', handleEscape);
 			window.removeEventListener('resize', closeMenus);
@@ -151,19 +148,6 @@
 		queueMessage = response.ok ? `Saved as “${name}”.` : 'Unable to save this queue.';
 	}
 </script>
-
-<audio
-	bind:this={audioElement}
-	class="hidden"
-	preload="metadata"
-	onloadedmetadata={() => audioPlayer.handleLoadedMetadata()}
-	ontimeupdate={() => audioPlayer.handleTimeUpdate()}
-	onplaying={() => audioPlayer.handlePlaying()}
-	onpause={() => audioPlayer.handlePause()}
-	onwaiting={() => audioPlayer.handleWaiting()}
-	onerror={() => audioPlayer.handleError()}
-	onended={() => audioPlayer.handleEnded()}
-></audio>
 
 {#if $audioPlayer.initialized && $audioPlayer.expanded && !current && !$audioPlayer.dismissed}
 	<section class="audio-player-bottom fixed left-1/2 z-[10000] w-[min(94vw,36rem)] -translate-x-1/2 rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-5 shadow-2xl backdrop-blur" style:bottom={`calc(0.75rem + ${bottomBarHeight}px)`} aria-label="Audio player">

@@ -94,6 +94,36 @@ function createAudioPlayerStore() {
 	let listeningItem: AudioQueueItem | null = null;
 	let lastMediaPositionSecond = -1;
 	let volumeBeforeMute = 1;
+	let audioConfigured = false;
+
+	function ensureAudioElement(): HTMLAudioElement | null {
+		if (!browser) return null;
+		if (audio) return audio;
+
+		const element = document.createElement('audio');
+		element.preload = 'metadata';
+		element.setAttribute('playsinline', '');
+		element.dataset.cryptorumAudioHost = 'true';
+		element.setAttribute('aria-hidden', 'true');
+		Object.assign(element.style, {
+			position: 'fixed',
+			width: '1px',
+			height: '1px',
+			opacity: '0',
+			pointerEvents: 'none',
+			inset: '0 auto auto 0'
+		});
+		element.addEventListener('loadedmetadata', handleLoadedMetadata);
+		element.addEventListener('timeupdate', handleTimeUpdate);
+		element.addEventListener('playing', handlePlaying);
+		element.addEventListener('pause', handlePause);
+		element.addEventListener('waiting', handleWaiting);
+		element.addEventListener('error', handleError);
+		element.addEventListener('ended', () => void handleEnded());
+		document.body.appendChild(element);
+		audio = element;
+		return element;
+	}
 
 	function currentItem(state = get({ subscribe })): AudioQueueItem | null {
 		return state.items.find((item) => item.id === state.currentItemId) ?? null;
@@ -203,6 +233,7 @@ function createAudioPlayerStore() {
 
 	async function initialize() {
 		if (!browser) return;
+		configureAudioElement();
 		if (initializedPromise) return initializedPromise;
 		initializedPromise = (async () => {
 			try {
@@ -339,8 +370,10 @@ function createAudioPlayerStore() {
 		}
 	}
 
-	function attach(element: HTMLAudioElement) {
-		audio = element;
+	function configureAudioElement() {
+		if (audioConfigured) return;
+		ensureAudioElement();
+		audioConfigured = true;
 		unsubscribeSettings?.();
 		unsubscribeSettings = readerSettings.subscribe((settings) => {
 			const volume = Math.max(0, Math.min(1, Number(settings.audio.volume ?? 1)));
@@ -364,14 +397,6 @@ function createAudioPlayerStore() {
 		setMediaSessionAction('seekto', (details) => {
 			if (details.seekTime !== undefined) seek(details.seekTime);
 		});
-		return () => {
-			unsubscribeSettings?.();
-			unsubscribeSettings = null;
-			for (const action of ['play', 'pause', 'previoustrack', 'nexttrack', 'seekbackward', 'seekforward', 'seekto'] as MediaSessionAction[]) {
-				setMediaSessionAction(action, null);
-			}
-			if (audio === element) audio = null;
-		};
 	}
 
 	function handleLoadedMetadata() {
@@ -433,6 +458,7 @@ function createAudioPlayerStore() {
 	}
 
 	async function playBook(bookID: number, fileID?: number) {
+		ensureAudioElement();
 		if (audio && fileID) {
 			const source = `/api/books/${bookID}/file?file_id=${fileID}`;
 			if (audio.getAttribute('src') !== source) {
@@ -702,7 +728,6 @@ function createAudioPlayerStore() {
 	return {
 		subscribe,
 		initialize,
-		attach,
 		handleLoadedMetadata,
 		handleTimeUpdate,
 		handlePlaying,
@@ -738,6 +763,9 @@ function createAudioPlayerStore() {
 		toggleQueue,
 		dismiss,
 		reset: () => {
+			audio?.pause();
+			audio?.removeAttribute('src');
+			audio?.load();
 			clearSleepTimer();
 			if (listeningInterval) clearInterval(listeningInterval);
 			listeningInterval = null;

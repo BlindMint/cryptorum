@@ -129,7 +129,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="fixed inset-0 flex items-center justify-center p-4 {isAudio ? 'z-[11000]' : 'z-[60]'}">
+<div class="fixed inset-0 z-[11000] flex items-center justify-center p-4">
 	<button type="button" class="absolute inset-0 bg-black/60 backdrop-blur-sm" aria-label={isAudio ? 'Close group audiobook' : 'Close combine books'} onclick={() => { if (!saving) onClose(); }}></button>
 	<div class="relative flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
 		<div class="flex items-start justify-between gap-4 border-b border-[var(--color-surface-border)] px-5 py-4">

@@ -1409,7 +1409,7 @@
 </div>
 
 {#if selectedBooks.size > 0}
-	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up" use:trackBulkActionBar>
+	<div class="fixed bottom-0 left-0 right-0 z-[10010] animate-slide-up" use:trackBulkActionBar>
 		<div class="bg-[var(--color-surface-overlay)] backdrop-blur-lg border-t border-[var(--color-surface-border)] shadow-2xl">
 			<div class="mx-auto max-w-7xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-4">
 				<div class="bulk-action-layout">
@@ -1522,7 +1522,7 @@
 {/if}
 
 {#if showShelfPicker}
-	<div class="fixed inset-0 z-[60] flex items-center justify-center">
+	<div class="fixed inset-0 z-[11000] flex items-center justify-center">
 		<button type="button" class="absolute inset-0 bg-black/60" aria-label="Close collection picker" onclick={() => showShelfPicker = false}></button>
 		<div class="relative bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-md max-h-[80vh] overflow-hidden shadow-2xl">
 			<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
