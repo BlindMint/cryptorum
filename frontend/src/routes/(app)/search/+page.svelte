@@ -1410,12 +1410,12 @@
 	<div class="fixed bottom-0 left-0 right-0 z-50 animate-slide-up" use:trackBulkActionBar>
 		<div class="bg-[var(--color-surface-overlay)] backdrop-blur-lg border-t border-[var(--color-surface-border)] shadow-2xl">
 			<div class="mx-auto max-w-7xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-4">
-				<div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between xl:gap-4">
-					<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4 xl:justify-start">
+				<div class="bulk-action-layout">
+					<div class="bulk-selection-cluster">
 						<span class="text-sm font-medium text-[var(--color-surface-text)] sm:text-base">
 							{selectedBooks.size} selected
 						</span>
-						<div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+						<div class="bulk-selection-controls">
 							<button
 								onclick={selectAllPage}
 								class="px-3 py-1.5 text-sm rounded-lg bg-[var(--color-surface-700)] hover:bg-[var(--color-surface-600)] text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
@@ -1430,7 +1430,7 @@
 							</button>
 						</div>
 					</div>
-					<div class="grid grid-cols-2 gap-2 border-t border-[var(--color-surface-border)] pt-3 sm:flex sm:flex-wrap sm:items-center sm:border-t-0 sm:pt-0 xl:justify-end">
+					<div class="bulk-primary-actions">
 						<BulkAddToQueueButton bookIds={Array.from(selectedBooks)} disabled={actionInProgress} />
 						<div class="relative w-full sm:w-auto">
 							<button

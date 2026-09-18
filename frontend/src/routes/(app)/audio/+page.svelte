@@ -514,10 +514,10 @@
 	<div class="fixed bottom-0 left-0 right-0 z-[10010] animate-slide-up" use:trackBulkActionBar>
 		<div class="border-t border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-lg">
 			<div class="mx-auto max-w-7xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-4">
-				<div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between xl:gap-4">
-					<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4 xl:justify-start">
+				<div class="bulk-action-layout">
+					<div class="bulk-selection-cluster">
 						<span class="text-sm font-medium text-[var(--color-surface-text)] sm:text-base">{selectedIDs.length} selected</span>
-						<div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+						<div class="bulk-selection-controls">
 							{#if !allResultsSelected}
 								<button type="button" onclick={selectAllResults} class="rounded-lg bg-[var(--color-surface-700)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]">
 									Select All {items.length} {resultTypeLabel()}
@@ -527,7 +527,7 @@
 						</div>
 					</div>
 
-					<div class="grid grid-cols-2 gap-2 border-t border-[var(--color-surface-border)] pt-3 sm:flex sm:flex-wrap sm:items-center sm:border-t-0 sm:pt-0 xl:justify-end">
+					<div class="bulk-primary-actions">
 						<button type="button" disabled={saving || selectedItems.every((item) => item.unavailable)} onclick={() => void queueSelectedItems()} class="flex items-center justify-center gap-2 rounded-lg bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none">
 							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h10M3 12h7M3 18h5"/><path d="M17 13v8m-4-4h8"/></svg>
 							<span>Add to Queue</span>
