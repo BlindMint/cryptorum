@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { afterNavigate, goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
@@ -39,6 +40,7 @@
 	let showPlaylistPicker = $state(false);
 	let activeLibraryID = $state<number | null>(null);
 	let activeLibrary = $state<AudioLibrary | null>(null);
+	let loadedRouteKey = '';
 
 	const selectedSet = $derived(new Set(selectedIDs));
 	const tabOptions = $derived(activeLibraryID === null
@@ -223,7 +225,10 @@
 		const next = [...current]; [next[index], next[target]] = [next[target], next[index]]; void savePlaylistOrder(playlistID, next);
 	}
 
-	afterNavigate(() => {
+	function loadRoute() {
+		const routeKey = `${$page.url.pathname}${$page.url.search}`;
+		if (routeKey === loadedRouteKey) return;
+		loadedRouteKey = routeKey;
 		const libraryID = Number.parseInt($page.url.searchParams.get('library') || '', 10);
 		activeLibraryID = Number.isNaN(libraryID) || libraryID <= 0 ? null : libraryID;
 		const tab = $page.url.searchParams.get('tab');
@@ -233,6 +238,14 @@
 		selectedIDs = [];
 		void loadActiveLibrary();
 		void load();
+	}
+
+	onMount(() => {
+		loadRoute();
+	});
+
+	afterNavigate(() => {
+		loadRoute();
 	});
 </script>
 
