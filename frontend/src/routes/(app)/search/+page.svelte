@@ -1444,7 +1444,7 @@
 								<span>Metadata</span>
 							</button>
 							{#if showMetadataMenu}
-								<div class="floating-surface absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-lg border">
+								<div class="floating-surface bulk-menu-surface absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-lg border">
 									<button
 										type="button"
 										class="block w-full px-4 py-3 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"

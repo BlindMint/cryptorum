@@ -542,7 +542,7 @@
 								<span>Change Type</span>
 							</button>
 							{#if showTypeMenu}
-								<div class="floating-surface absolute bottom-full left-0 z-20 mb-2 w-64 overflow-hidden rounded-lg border sm:left-auto sm:right-0" role="menu">
+								<div class="floating-surface bulk-menu-surface absolute bottom-full left-0 z-20 mb-2 w-64 overflow-hidden rounded-lg border sm:left-auto sm:right-0" role="menu">
 									{#each ['audiobook', 'music', 'podcast'] as category}
 										<button type="button" role="menuitem" disabled={activeTab === category || saving} onclick={() => void classify(category as Category)} class="block w-full px-4 py-3 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] disabled:cursor-default disabled:text-[var(--color-surface-text-muted)]">
 											<span class="font-medium">{categoryLabel(category as Category)}</span>{#if activeTab === category}<span class="ml-2 text-xs">Current type</span>{/if}
