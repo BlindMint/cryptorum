@@ -4,7 +4,7 @@
 	import { page } from '$app/stores';
 	import BookCoverFrame from '$lib/components/BookCoverFrame.svelte';
 	import { audioPlayer } from '$lib/stores/audioPlayer';
-	import { trackBulkActionBar } from '$lib/stores/bulkActionBar';
+	import { bulkActionBarHeight, trackBulkActionBar } from '$lib/stores/bulkActionBar';
 
 	type Category = 'audiobook' | 'music' | 'podcast';
 	type Tab = Category | 'playlists';
@@ -38,11 +38,15 @@
 	let playlistName = $state('');
 	let showPlaylistForm = $state(false);
 	let showPlaylistPicker = $state(false);
+	let showTypeMenu = $state(false);
 	let activeLibraryID = $state<number | null>(null);
 	let activeLibrary = $state<AudioLibrary | null>(null);
 	let loadedRouteKey = '';
 
 	const selectedSet = $derived(new Set(selectedIDs));
+	const selectedItems = $derived(items.filter((item) => selectedSet.has(item.id)));
+	const allResultsSelected = $derived(items.length > 0 && items.every((item) => selectedSet.has(item.id)));
+	const canGroupAudiobook = $derived(new Set(selectedItems.map((item) => item.book_id)).size >= 2);
 	const tabOptions = $derived(activeLibraryID === null
 		? [['audiobook', 'Audiobooks'], ['music', 'Music'], ['podcast', 'Podcasts'], ['playlists', 'Playlists']]
 		: [['audiobook', 'Audiobooks'], ['music', 'Music'], ['podcast', 'Podcasts']]);
@@ -71,7 +75,7 @@
 
 	async function setTab(tab: Tab) {
 		activeTab = tab;
-		selectedIDs = [];
+		deselectAll();
 		if (tab === 'podcast' && sort === 'title') sort = 'published';
 		else if (tab !== 'podcast' && sort === 'published') sort = 'title';
 		const url = new URL($page.url);
@@ -93,7 +97,11 @@
 				if (statusFilter) params.set('status', statusFilter);
 				const response = await fetch(`/api/audio/items?${params}`, { credentials: 'same-origin' });
 				if (!response.ok) throw new Error('Unable to load the audio library');
-				const data = await response.json(); items = data.items ?? [];
+				const data = await response.json();
+				items = data.items ?? [];
+				const resultIDs = new Set(items.map((item) => item.id));
+				selectedIDs = selectedIDs.filter((id) => resultIDs.has(id));
+				if (!selectedIDs.length) showTypeMenu = false;
 			}
 		} catch (reason) { error = reason instanceof Error ? reason.message : 'Unable to load audio'; }
 		finally { loading = false; }
@@ -113,14 +121,22 @@
 	}
 
 	function toggleSelected(id: number) { selectedIDs = selectedSet.has(id) ? selectedIDs.filter((value) => value !== id) : [...selectedIDs, id]; }
+	function selectAllResults() { selectedIDs = items.map((item) => item.id); }
+	function deselectAll() { selectedIDs = []; showTypeMenu = false; }
+	function resultTypeLabel() {
+		if (activeTab === 'music') return items.length === 1 ? 'Track' : 'Tracks';
+		if (activeTab === 'podcast') return items.length === 1 ? 'Episode' : 'Episodes';
+		return items.length === 1 ? 'Audiobook' : 'Audiobooks';
+	}
 
 	async function classify(category: Category) {
 		if (!selectedIDs.length) return;
+		showTypeMenu = false;
 		saving = true;
 		const response = await fetch('/api/audio/items/classify', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: selectedIDs, category }) });
 		saving = false;
 		if (!response.ok) { error = 'Unable to update audio categories'; return; }
-		selectedIDs = []; await load();
+		deselectAll(); await load();
 	}
 
 	async function groupAudiobook() {
@@ -132,7 +148,7 @@
 		const response = await fetch('/api/books/combine', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ primary_book_id: bookIDs[0], book_ids: bookIDs }) });
 		saving = false;
 		if (!response.ok) { error = await response.text() || 'Unable to group audiobook'; return; }
-		selectedIDs = []; await load();
+		deselectAll(); await load();
 	}
 
 	function play(item: AudioItem) { void audioPlayer.playBook(item.book_id, item.file_id); }
@@ -158,6 +174,14 @@
 		audioPlayer.openPanel('queue');
 	}
 
+	async function queueSelectedItems() {
+		if (!selectedItems.length || saving) return;
+		showTypeMenu = false;
+		saving = true;
+		try { await queueItems(selectedItems); }
+		finally { saving = false; }
+	}
+
 	async function saveMetadata() {
 		if (!editing) return;
 		saving = true; error = '';
@@ -173,11 +197,12 @@
 		const response = await fetch('/api/audio/playlists', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: playlistName.trim(), audio_ids: audioIDs }) });
 		saving = false;
 		if (!response.ok) { error = 'Unable to create playlist'; return; }
-		playlistName = ''; showPlaylistForm = false; selectedIDs = [];
+		playlistName = ''; showPlaylistForm = false; deselectAll();
 		if (activeTab === 'playlists') await load();
 	}
 
 	async function openPlaylistPicker() {
+		showTypeMenu = false;
 		const response = await fetch('/api/audio/playlists', { credentials: 'same-origin' });
 		if (response.ok) playlists = await response.json();
 		showPlaylistPicker = true;
@@ -188,7 +213,7 @@
 		if (!existing) { const response = await fetch(`/api/audio/playlists/${playlist.id}/items`, { credentials: 'same-origin' }); if (!response.ok) return; existing = await response.json(); }
 		const selected = items.filter((item) => selectedSet.has(item.id));
 		const next = [...existing, ...selected.filter((item) => !existing.some((entry) => entry.id === item.id))];
-		await savePlaylistOrder(playlist.id, next); selectedIDs = []; showPlaylistPicker = false;
+		await savePlaylistOrder(playlist.id, next); deselectAll(); showPlaylistPicker = false;
 	}
 
 	async function togglePlaylist(playlist: Playlist) {
@@ -235,7 +260,7 @@
 		activeTab = tab === 'music' || tab === 'podcast' || (tab === 'playlists' && activeLibraryID === null) ? tab : 'audiobook';
 		if (activeTab === 'podcast' && sort === 'title') sort = 'published';
 		else if (activeTab !== 'podcast' && sort === 'published') sort = 'title';
-		selectedIDs = [];
+		deselectAll();
 		void loadActiveLibrary();
 		void load();
 	}
@@ -251,7 +276,7 @@
 
 <svelte:head><title>{activeLibrary?.name || 'All Audio'} · Cryptorum</title></svelte:head>
 
-<div class="min-h-full bg-transparent px-3 py-4 sm:px-5 lg:px-7">
+<div class="min-h-full bg-transparent px-3 py-4 sm:px-5 lg:px-7" style:padding-bottom={selectedIDs.length ? `calc(1rem + ${$bulkActionBarHeight}px)` : undefined}>
 	<header class="mx-auto mb-5 flex max-w-7xl flex-wrap items-end justify-between gap-4">
 		<div>
 			<p class="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-primary-400)]">{activeLibraryID === null ? 'Local audio' : 'Audio library'}</p>
@@ -327,6 +352,7 @@
 
 {#snippet AudioRow(item: AudioItem, compact = false)}
 	<div class="group flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-[var(--color-surface-base)]">
+		<input type="checkbox" class="shrink-0 accent-[var(--color-primary-500)]" checked={selectedSet.has(item.id)} onchange={() => toggleSelected(item.id)} aria-label={`Select ${item.title}`} />
 		<button type="button" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--color-primary-300)] hover:bg-[var(--color-primary-500)]/15" disabled={item.unavailable} aria-label={`Play ${item.title}`} onclick={() => play(item)}>▶</button>
 		<div class="min-w-0 flex-1"><div class="truncate text-sm font-medium text-[var(--color-surface-text)]">{item.track_number ? `${item.track_number}. ` : ''}{item.title}</div>{#if !compact}<div class="truncate text-xs text-[var(--color-surface-text-muted)]">{item.artists.join(', ') || item.filename}</div>{/if}</div>
 		<span class="text-[10px] tabular-nums text-[var(--color-surface-text-muted)]">{formatDuration(item.duration_seconds)}</span>
@@ -344,12 +370,56 @@
 {/snippet}
 
 {#if selectedIDs.length}
-	<div class="fixed bottom-3 left-1/2 z-[9990] flex max-w-[94vw] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 shadow-2xl backdrop-blur-xl" use:trackBulkActionBar>
-		<span class="text-sm font-semibold text-[var(--color-surface-text)]">{selectedIDs.length} selected</span>
-		{#each ['audiobook', 'music', 'podcast'] as category}<button type="button" class="rounded-lg px-2.5 py-1.5 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)]" disabled={saving} onclick={() => void classify(category as Category)}>Move to {categoryLabel(category as Category)}</button>{/each}
-		{#if activeTab === 'audiobook'}<button type="button" class="rounded-lg px-2.5 py-1.5 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)]" disabled={saving} onclick={() => void groupAudiobook()}>Group audiobook</button>{/if}
-		<button type="button" class="rounded-lg px-2.5 py-1.5 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-700)]" onclick={() => void openPlaylistPicker()}>Add to playlist</button>
-		<button type="button" class="rounded-lg p-1.5 text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-700)]" aria-label="Clear selection" onclick={() => selectedIDs = []}>✕</button>
+	<div class="fixed bottom-0 left-0 right-0 z-[10010] animate-slide-up" use:trackBulkActionBar>
+		<div class="border-t border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl backdrop-blur-lg">
+			<div class="mx-auto max-w-7xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-4">
+				<div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between xl:gap-4">
+					<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4 xl:justify-start">
+						<span class="text-sm font-medium text-[var(--color-surface-text)] sm:text-base">{selectedIDs.length} selected</span>
+						<div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+							{#if !allResultsSelected}
+								<button type="button" onclick={selectAllResults} class="rounded-lg bg-[var(--color-surface-700)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]">
+									Select All {items.length} {resultTypeLabel()}
+								</button>
+							{/if}
+							<button type="button" onclick={deselectAll} class="rounded-lg bg-[var(--color-surface-700)] px-3 py-1.5 text-sm text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]">Deselect</button>
+						</div>
+					</div>
+
+					<div class="grid grid-cols-2 gap-2 border-t border-[var(--color-surface-border)] pt-3 sm:flex sm:flex-wrap sm:items-center sm:border-t-0 sm:pt-0 xl:justify-end">
+						<button type="button" disabled={saving || selectedItems.every((item) => item.unavailable)} onclick={() => void queueSelectedItems()} class="flex items-center justify-center gap-2 rounded-lg bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none">
+							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h10M3 12h7M3 18h5"/><path d="M17 13v8m-4-4h8"/></svg>
+							<span>Add to Queue</span>
+						</button>
+						<button type="button" disabled={saving} onclick={() => void openPlaylistPicker()} class="accent-action flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium">
+							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h9M4 11h9M4 16h6"/><path d="M17 9v9m-3-3h6"/></svg>
+							<span>Add to Playlist</span>
+						</button>
+						<div class="relative w-full sm:w-auto">
+							<button type="button" disabled={saving} aria-haspopup="menu" aria-expanded={showTypeMenu} onclick={() => showTypeMenu = !showTypeMenu} class="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 sm:w-auto">
+								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h10M4 12h7M4 17h4"/><path d="m15 14 3 3 3-3M18 17V7"/></svg>
+								<span>Change Type</span>
+							</button>
+							{#if showTypeMenu}
+								<div class="floating-surface absolute bottom-full left-0 z-20 mb-2 w-64 overflow-hidden rounded-lg border sm:left-auto sm:right-0" role="menu">
+									{#each ['audiobook', 'music', 'podcast'] as category}
+										<button type="button" role="menuitem" disabled={activeTab === category || saving} onclick={() => void classify(category as Category)} class="block w-full px-4 py-3 text-left text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] disabled:cursor-default disabled:text-[var(--color-surface-text-muted)]">
+											<span class="font-medium">{categoryLabel(category as Category)}</span>{#if activeTab === category}<span class="ml-2 text-xs">Current type</span>{/if}
+										</button>
+									{/each}
+								</div>
+							{/if}
+						</div>
+						{#if activeTab === 'audiobook'}
+							<button type="button" disabled={saving || !canGroupAudiobook} title={canGroupAudiobook ? 'Group selected records into one audiobook' : 'Select tracks from at least two separate audiobook records'} onclick={() => { showTypeMenu = false; void groupAudiobook(); }} class="flex items-center justify-center gap-2 rounded-lg bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none">
+								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 7h12M8 12h12M8 17h8M4 7h.01M4 12h.01M4 17h.01"/></svg>
+								<span>Group Audiobook</span>
+							</button>
+						{/if}
+					</div>
+				</div>
+			</div>
+		</div>
 	</div>
 {/if}
 
@@ -383,3 +453,14 @@
 {#if showPlaylistPicker}
 	<div class="fixed inset-0 z-[11000] flex items-center justify-center bg-black/70 p-4" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) showPlaylistPicker = false; }}><div class="w-full max-w-sm rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-4 shadow-2xl backdrop-blur-xl"><div class="flex items-center justify-between"><h2 class="font-semibold text-[var(--color-surface-text)]">Add to playlist</h2><button type="button" class="rounded p-1.5 text-[var(--color-surface-text-muted)]" onclick={() => showPlaylistPicker = false}>✕</button></div><div class="mt-3 max-h-72 space-y-1 overflow-y-auto">{#each playlists as playlist}<button type="button" class="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left hover:bg-[var(--color-surface-700)]" onclick={() => void addSelectedToPlaylist(playlist)}><span class="truncate text-sm text-[var(--color-surface-text)]">{playlist.name}</span><span class="text-xs text-[var(--color-surface-text-muted)]">{playlist.item_count}</span></button>{/each}{#if !playlists.length}<p class="py-4 text-center text-sm text-[var(--color-surface-text-muted)]">No playlists yet.</p>{/if}</div><button type="button" class="accent-action mt-3 w-full rounded-lg px-3 py-2 text-sm" onclick={() => { showPlaylistPicker = false; showPlaylistForm = true; }}>Create new playlist</button></div></div>
 {/if}
+
+<style>
+	@keyframes audio-bulk-slide-up {
+		from { transform: translateY(100%); }
+		to { transform: translateY(0); }
+	}
+
+	.animate-slide-up {
+		animation: audio-bulk-slide-up 200ms ease-out;
+	}
+</style>
