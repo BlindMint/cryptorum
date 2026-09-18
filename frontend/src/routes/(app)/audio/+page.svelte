@@ -40,6 +40,8 @@
 	let showPlaylistForm = $state(false);
 	let showPlaylistPicker = $state(false);
 	let showTypeMenu = $state(false);
+	let typeMenuContainer = $state<HTMLDivElement | null>(null);
+	let typeMenuButton = $state<HTMLButtonElement | null>(null);
 	let showGroupAudiobookModal = $state(false);
 	let groupAudiobookBookIDs = $state<number[]>([]);
 	let bulkSelectionAnchorID = $state<number | null>(null);
@@ -164,6 +166,17 @@
 
 	function selectAllResults() { selectedIDs = items.map((item) => item.id); bulkSelectionAnchorID = null; }
 	function deselectAll() { selectedIDs = []; bulkSelectionAnchorID = null; showTypeMenu = false; }
+
+	function handleWindowClick(event: MouseEvent) {
+		if (!showTypeMenu || !typeMenuContainer) return;
+		if (event.target instanceof Node && !typeMenuContainer.contains(event.target)) showTypeMenu = false;
+	}
+
+	function handleWindowKeydown(event: KeyboardEvent) {
+		if (event.key !== 'Escape' || !showTypeMenu) return;
+		showTypeMenu = false;
+		typeMenuButton?.focus();
+	}
 
 	function handleAudioClick(event: MouseEvent) {
 		const id = Number((event.currentTarget as HTMLElement).dataset.audioId);
@@ -383,6 +396,8 @@
 	});
 </script>
 
+<svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} />
+
 <svelte:head><title>{activeLibrary?.name || 'All Audio'} · Cryptorum</title></svelte:head>
 
 <div class="min-h-full bg-transparent px-3 py-4 sm:px-5 lg:px-7" style:padding-bottom={selectedIDs.length ? `calc(1rem + ${$bulkActionBarHeight}px)` : undefined}>
@@ -536,8 +551,8 @@
 							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h9M4 11h9M4 16h6"/><path d="M17 9v9m-3-3h6"/></svg>
 							<span>Add to Playlist</span>
 						</button>
-						<div class="relative w-full sm:w-auto">
-							<button type="button" disabled={saving} aria-haspopup="menu" aria-expanded={showTypeMenu} onclick={() => showTypeMenu = !showTypeMenu} class="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 sm:w-auto">
+						<div class="relative w-full sm:w-auto" bind:this={typeMenuContainer}>
+							<button bind:this={typeMenuButton} type="button" disabled={saving} aria-haspopup="menu" aria-expanded={showTypeMenu} onclick={() => showTypeMenu = !showTypeMenu} class="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-surface-700)] px-4 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[var(--color-surface-600)] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] disabled:opacity-50 sm:w-auto">
 								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h10M4 12h7M4 17h4"/><path d="m15 14 3 3 3-3M18 17V7"/></svg>
 								<span>Change Type</span>
 							</button>
