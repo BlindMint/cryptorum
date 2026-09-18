@@ -184,6 +184,7 @@ func performInitialScan() {
 		if !validAudioCategory(audioDefaultCategory) {
 			audioDefaultCategory = "audiobook"
 		}
+		mediaScope := normalizeLibraryMediaScope(lib.MediaScope)
 		// Get or create library
 		var libraryID int64
 		err := appDB.QueryRow("SELECT id FROM library WHERE name = ? AND owner_user_id = ?", lib.Name, 1).Scan(&libraryID)
@@ -193,7 +194,7 @@ func performInitialScan() {
 				slog.Error("Failed to find available library ID", "name", lib.Name, "error", err)
 				continue
 			}
-			_, err = appDB.Exec("INSERT INTO library (id, name, owner_user_id, audio_default_category) VALUES (?, ?, ?, ?)", libraryID, lib.Name, 1, audioDefaultCategory)
+			_, err = appDB.Exec("INSERT INTO library (id, name, owner_user_id, audio_default_category, media_scope) VALUES (?, ?, ?, ?, ?)", libraryID, lib.Name, 1, audioDefaultCategory, mediaScope)
 			if err != nil {
 				slog.Error("Failed to create library", "name", lib.Name, "error", err)
 				continue
@@ -202,6 +203,12 @@ func performInitialScan() {
 			// Add paths
 			for _, path := range lib.Paths {
 				appDB.Exec("INSERT INTO library_path (library_id, path) VALUES (?, ?)", libraryID, path)
+			}
+		}
+		if strings.TrimSpace(lib.MediaScope) != "" {
+			if _, err := appDB.Exec("UPDATE library SET media_scope = ? WHERE id = ?", mediaScope, libraryID); err != nil {
+				slog.Error("Failed to update configured library media scope", "name", lib.Name, "error", err)
+				continue
 			}
 		}
 

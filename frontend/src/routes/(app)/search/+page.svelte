@@ -810,7 +810,7 @@
 	}
 
 	async function addToShelf(shelfId: number) {
-		if (!confirmBulkAction({ action: 'add {count} books to this shelf', count: selectedBooks.size })) return;
+		if (!confirmBulkAction({ action: 'add {count} books to this collection', count: selectedBooks.size })) return;
 		actionInProgress = true;
 		try {
 			const res = await fetch(`/api/shelves/${shelfId}/books/bulk`, {
@@ -823,10 +823,10 @@
 				showShelfPicker = false;
 				deselectAll();
 			} else {
-				console.error('Failed to add books to shelf');
+				console.error('Failed to add books to collection');
 			}
 		} catch (error) {
-			console.error('Failed to add books to shelf:', error);
+			console.error('Failed to add books to collection:', error);
 		} finally {
 			actionInProgress = false;
 		}
@@ -1491,7 +1491,7 @@
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
 								</svg>
-							<span>Add to Shelf</span>
+							<span>Add to Collection</span>
 						</button>
 						<button
 							onclick={deleteSelectedBooks}
@@ -1519,15 +1519,15 @@
 
 {#if showShelfPicker}
 	<div class="fixed inset-0 z-[60] flex items-center justify-center">
-		<button type="button" class="absolute inset-0 bg-black/60" aria-label="Close shelf picker" onclick={() => showShelfPicker = false}></button>
+		<button type="button" class="absolute inset-0 bg-black/60" aria-label="Close collection picker" onclick={() => showShelfPicker = false}></button>
 		<div class="relative bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)] w-full max-w-md max-h-[80vh] overflow-hidden shadow-2xl">
 			<div class="px-6 py-4 border-b border-[var(--color-surface-border)]">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add to Shelf</h3>
-				<p class="text-sm text-[var(--color-surface-text-muted)] mt-1">Add {selectedBooks.size} book(s) to shelf</p>
+				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add to Collection</h3>
+				<p class="text-sm text-[var(--color-surface-text-muted)] mt-1">Add {selectedBooks.size} book(s) to a collection</p>
 			</div>
 			<div class="p-4 max-h-64 overflow-y-auto">
 				{#if manualShelves.length === 0}
-					<p class="text-center text-[var(--color-surface-text-muted)] py-4">No manual shelves yet. Create one first.</p>
+					<p class="text-center text-[var(--color-surface-text-muted)] py-4">No manual collections yet. Create one first.</p>
 				{:else}
 					<div class="space-y-2">
 						{#each manualShelves as shelf}
@@ -1546,7 +1546,7 @@
 					onclick={() => showCreateShelfModal = true}
 					class="block w-full text-center px-4 py-2 text-sm rounded-lg border border-dashed border-[var(--color-surface-border)] text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] transition-colors"
 				>
-					+ Create New Shelf
+					+ Create New Collection
 				</button>
 			</div>
 		</div>

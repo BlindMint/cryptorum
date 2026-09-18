@@ -89,7 +89,8 @@ func (s *Scanner) ScanLibraryWithProgress(libraryID int64, paths []string, onPro
 
 func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []string, onProgress ScanProgressFunc, shouldCancel ScanCancelFunc) (int, error) {
 	var ownerUserID int64 = 1
-	_ = s.db.QueryRow(`SELECT COALESCE(owner_user_id, 1) FROM library WHERE id = ?`, libraryID).Scan(&ownerUserID)
+	mediaScope := "mixed"
+	_ = s.db.QueryRow(`SELECT COALESCE(owner_user_id, 1), COALESCE(media_scope, 'mixed') FROM library WHERE id = ?`, libraryID).Scan(&ownerUserID, &mediaScope)
 
 	progress := ScanProgress{Phase: "inventory"}
 	files, err := collectProcessableFiles(paths, shouldCancel)
@@ -103,6 +104,7 @@ func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []stri
 	if err != nil {
 		slog.Warn("Library inventory completed with errors", "libraryID", libraryID, "error", err)
 	}
+	files = filterFilesForMediaScope(files, mediaScope)
 	progress.TotalFiles = len(files)
 	if onProgress != nil {
 		onProgress(progress)
@@ -199,6 +201,20 @@ func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []stri
 	}
 
 	return imported, nil
+}
+
+func filterFilesForMediaScope(files []fileInventoryItem, mediaScope string) []fileInventoryItem {
+	if mediaScope != "audio" && mediaScope != "books" {
+		return files
+	}
+	filtered := make([]fileInventoryItem, 0, len(files))
+	for _, file := range files {
+		isAudio := audiometa.Supported(file.Format)
+		if (mediaScope == "audio" && isAudio) || (mediaScope == "books" && !isAudio) {
+			filtered = append(filtered, file)
+		}
+	}
+	return filtered
 }
 
 type fileInventoryItem struct {

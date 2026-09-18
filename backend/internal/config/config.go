@@ -40,6 +40,7 @@ type LibraryConfig struct {
 	Name                 string   `mapstructure:"name"`
 	Paths                []string `mapstructure:"paths"`
 	AudioDefaultCategory string   `mapstructure:"audio_default_category"`
+	MediaScope           string   `mapstructure:"media_scope"`
 }
 
 // BookdropConfig holds BookDrop configuration

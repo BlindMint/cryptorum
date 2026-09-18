@@ -922,13 +922,13 @@
 				body: JSON.stringify({ book_id: book.id })
 			});
 			if (res.ok) {
-				shelfActionMessage = 'Added to shelf';
+				shelfActionMessage = 'Added to collection';
 				await fetchShelves();
 			} else {
 				shelfActionMessage = await res.text() || 'Failed to add book';
 			}
 		} catch (e) {
-			console.error('Failed to add book to shelf:', e);
+			console.error('Failed to add book to collection:', e);
 			shelfActionMessage = 'Failed to add book';
 		} finally {
 			shelfActionInProgress = false;
@@ -1588,7 +1588,7 @@
 									<svg class="mr-2 h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[var(--color-primary-300)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
 									</svg>
-									Add to Shelf
+									Add to Collection
 								</button>
 						</div>
 					</div>
@@ -2149,18 +2149,18 @@
 		<button
 			type="button"
 			class="absolute inset-0 bg-black/70"
-			aria-label="Close shelf picker"
+			aria-label="Close collection picker"
 			onclick={() => showShelfPicker = false}
 		></button>
 		<div class="relative w-full max-w-md overflow-hidden rounded-2xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
 			<div class="border-b border-[var(--color-surface-border)] px-5 py-4">
-				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add to Shelf</h3>
+				<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">Add to Collection</h3>
 				<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">{book.title || 'This book'}</p>
 			</div>
 			<div class="max-h-[60vh] overflow-y-auto p-4">
 							{#if manualShelves.length === 0}
 								<div class="py-6 text-center text-sm text-[var(--color-surface-text-muted)]">
-									No manual shelves yet.
+									No manual collections yet.
 								</div>
 							{:else}
 								<div class="space-y-2">
@@ -2178,7 +2178,7 @@
 						{#if shelfActionMessage}
 							<p class="text-sm text-[var(--color-surface-text-muted)]">{shelfActionMessage}</p>
 						{:else}
-							<span class="text-sm text-[var(--color-surface-text-muted)]">Choose a shelf to add this book.</span>
+							<span class="text-sm text-[var(--color-surface-text-muted)]">Choose a collection to add this book.</span>
 						{/if}
 						<div class="flex items-center gap-3">
 							<button
@@ -2186,7 +2186,7 @@
 								onclick={() => showCreateShelfModal = true}
 								class="text-sm text-[var(--color-primary-400)] transition-colors duration-200 hover:text-[var(--color-primary-300)] focus-visible:outline-none focus-visible:underline"
 							>
-								New shelf
+								New collection
 							</button>
 							<button
 								type="button"

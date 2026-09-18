@@ -43,7 +43,7 @@
 		<span class="min-w-0">
 			<span class="block truncate text-sm font-medium text-[var(--color-surface-text)]">{shelf.name}</span>
 			<span class="block text-xs text-[var(--color-surface-text-muted)]">
-				{shelf.book_count ?? 0} books{#if shelf.is_magic === 1} · Magic{:else} · Manual{/if}
+				{shelf.book_count ?? 0} items{#if shelf.is_magic === 1} · Smart{:else} · Manual{/if}
 			</span>
 		</span>
 	</span>

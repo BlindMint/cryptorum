@@ -257,7 +257,7 @@
 			});
 
 			if (!response.ok) {
-				errorMessage = await response.text() || `Failed to ${isEditing ? 'update' : 'create'} shelf`;
+				errorMessage = await response.text() || `Failed to ${isEditing ? 'update' : 'create'} collection`;
 				return;
 			}
 
@@ -266,8 +266,8 @@
 			onSaved?.(saved);
 			onClose?.();
 		} catch (error) {
-			console.error('Failed to save shelf:', error);
-			errorMessage = `Failed to ${isEditing ? 'update' : 'create'} shelf`;
+			console.error('Failed to save collection:', error);
+			errorMessage = `Failed to ${isEditing ? 'update' : 'create'} collection`;
 		} finally {
 			isSubmitting = false;
 		}
@@ -297,16 +297,16 @@
 		<button
 			type="button"
 			class="absolute inset-0 z-0"
-			aria-label="Close shelf modal"
+			aria-label="Close collection modal"
 			onclick={closeModal}
 		></button>
 
 		<div class="relative z-10 flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
 			<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-5 py-3.5">
 				<div>
-					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">{isEditing ? 'Edit Shelf' : isMagicShelf ? 'Create Magic Shelf' : 'Create Shelf'}</h3>
+					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">{isEditing ? 'Edit Collection' : isMagicShelf ? 'Create Smart Collection' : 'Create Collection'}</h3>
 					<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">
-						{isMagicShelf ? 'Automatically organize books based on rules.' : 'Manually organize books into a collection.'}
+						{isMagicShelf ? 'Automatically organize items based on rules.' : 'Manually organize items into a collection.'}
 					</p>
 				</div>
 				<button
@@ -330,7 +330,7 @@
 							onclick={() => setShelfKind(false)}
 							class="inline-flex items-center rounded-md border px-3 py-2 text-sm font-medium transition-colors {isMagicShelf ? 'border-transparent text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]' : 'border-[var(--color-primary-500)]/45 bg-[var(--color-primary-500)]/10 text-[var(--color-primary-400)]'}"
 						>
-							Regular Shelf
+							Regular Collection
 						</button>
 						<button
 							type="button"
@@ -340,7 +340,7 @@
 							<svg class="h-4 w-4 {isMagicShelf ? 'text-purple-300' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
 							</svg>
-							Magic Shelf
+							Smart Collection
 						</button>
 					</div>
 				{:else}
@@ -359,7 +359,7 @@
 				<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 					<div>
 						<label for="shelf-modal-name" class="mb-2 block text-sm font-medium text-[var(--color-surface-text)]">
-							Shelf Name
+							Collection Name
 						</label>
 						<input
 							id="shelf-modal-name"
@@ -487,20 +487,20 @@
 						</div>
 
 						<p class="mt-2 text-xs text-[var(--color-surface-text-muted)]">
-							All conditions must be met. Books are added and removed automatically by the shelf rules.
+							All conditions must be met. Items are added and removed automatically by the collection rules.
 						</p>
 					</div>
 
 					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
 						<div class="mb-3">
 							<h4 class="text-base font-medium text-[var(--color-surface-text)]">Default Sort</h4>
-							<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Controls the initial order when this smart shelf opens.</p>
+							<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Controls the initial order when this smart collection opens.</p>
 						</div>
 						<div class="inline-flex max-w-full overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)]">
 							<select
 								bind:value={shelfSortBy}
 								class="min-w-0 bg-transparent px-3 py-2 text-sm text-[var(--color-surface-text)] focus:outline-none"
-								aria-label="Smart shelf default sort"
+								aria-label="Smart collection default sort"
 							>
 								{#each shelfSortOptions as option}
 									<option value={option.value}>{option.label}</option>
@@ -520,7 +520,7 @@
 				{:else}
 					<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
 						<p class="text-sm text-[var(--color-surface-text-muted)]">
-							Manual shelves are edited from the shelf page. Use Add Books there to search, filter, and select books.
+							Manual collections are edited from the collection page. Use Add Books there to search, filter, and select items.
 						</p>
 					</div>
 				{/if}
@@ -544,7 +544,7 @@
 					disabled={!shelfName.trim() || isSubmitting}
 					class="accent-action rounded-lg px-4 py-2 font-medium transition-colors disabled:opacity-50"
 				>
-					{isSubmitting ? 'Saving...' : isEditing ? 'Save Shelf' : isMagicShelf ? 'Create Magic Shelf' : 'Create Shelf'}
+					{isSubmitting ? 'Saving...' : isEditing ? 'Save Collection' : isMagicShelf ? 'Create Smart Collection' : 'Create Collection'}
 				</button>
 			</div>
 		</div>

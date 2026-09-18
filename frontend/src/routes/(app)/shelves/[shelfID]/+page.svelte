@@ -319,7 +319,7 @@
 
 	async function deleteShelf() {
 		if (!shelf?.id || deletingShelf) return;
-		if (!confirm(`Delete shelf "${shelf.name}"? Books will remain in your libraries.`)) return;
+		if (!confirm(`Delete collection "${shelf.name}"? Items will remain in your libraries.`)) return;
 
 		deletingShelf = true;
 		try {
@@ -369,7 +369,7 @@
 	}
 
 	function getShelfTypeLabel(): string {
-		return shelf?.is_magic === 1 ? 'Magic' : 'Manual';
+		return shelf?.is_magic === 1 ? 'Smart' : 'Manual';
 	}
 
 	function getShelfTypeClass(): string {
@@ -541,7 +541,7 @@
 	async function removeSelectedFromShelf() {
 		if (selectedBooks.size === 0 || !shelf) return;
 		if (shelf.is_magic === 1) return;
-		if (!confirmBulkAction({ action: 'remove {count} books from this shelf', count: selectedBooks.size, destructive: true, alwaysConfirm: true })) return;
+		if (!confirmBulkAction({ action: 'remove {count} books from this collection', count: selectedBooks.size, destructive: true, alwaysConfirm: true })) return;
 
 		actionInProgress = true;
 		try {
@@ -639,7 +639,7 @@
 					<input
 						type="search"
 						bind:value={shelfSearch}
-						placeholder="Search this shelf"
+						placeholder="Search this collection"
 						class="h-10 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] py-2 pl-9 pr-9 text-sm text-[var(--color-surface-text)] placeholder-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 					>
 					{#if shelfSearch}
@@ -647,7 +647,7 @@
 							type="button"
 							onclick={clearShelfSearch}
 							class="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-surface-text)]"
-							aria-label="Clear shelf search"
+							aria-label="Clear collection search"
 						>
 							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 								<path d="M18 6 6 18"></path>
@@ -662,14 +662,14 @@
 					<button
 						type="button"
 						class="fixed inset-0 z-20"
-						aria-label="Close shelf settings menu"
+						aria-label="Close collection settings menu"
 						onclick={() => showSettingsMenu = false}
 					></button>
 				{/if}
 				<button
 					type="button"
 					onclick={() => showSettingsMenu = !showSettingsMenu}
-					aria-label="Shelf settings"
+					aria-label="Collection settings"
 					aria-expanded={showSettingsMenu}
 					class="toolbar-action inline-flex h-10 w-10 items-center justify-center rounded-lg border transition-colors"
 				>
@@ -751,7 +751,7 @@
 					<button
 						type="button"
 						class="fixed inset-0 z-20"
-						aria-label="Close shelf sort menu"
+						aria-label="Close collection sort menu"
 						onclick={() => showSortMenu = false}
 					></button>
 				{/if}
@@ -759,7 +759,7 @@
 					<button
 						type="button"
 						onclick={() => showSortMenu = !showSortMenu}
-						aria-label="Sort shelf books by {shelfSortLabel()}"
+						aria-label="Sort collection items by {shelfSortLabel()}"
 						class="inline-flex min-w-0 items-center px-3 text-sm font-medium text-[var(--color-surface-text)] transition-colors hover:bg-[var(--color-surface-overlay)]"
 					>
 						<span class="hidden min-w-0 truncate sm:inline">{shelfSortLabel()}</span>
@@ -810,15 +810,15 @@
 				<svg class="w-16 h-16 text-[var(--color-surface-text-muted)] mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path>
 				</svg>
-				<h3 class="text-lg font-medium text-[var(--color-surface-text)] mb-2">No books on this shelf</h3>
+				<h3 class="text-lg font-medium text-[var(--color-surface-text)] mb-2">No items in this collection</h3>
 				<p class="text-[var(--color-surface-text-muted)]">
-					{shelf.is_magic === 1 ? 'No books currently match these smart rules.' : 'Use Add Books to build this shelf.'}
+					{shelf.is_magic === 1 ? 'No items currently match these smart rules.' : 'Use Add Books to build this collection.'}
 				</p>
 			</div>
 		{:else if visibleBooks.length === 0}
 			<div class="text-center py-16 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">
-				<h3 class="text-lg font-medium text-[var(--color-surface-text)] mb-2">No books match your shelf search</h3>
-				<p class="text-[var(--color-surface-text-muted)]">Clear the shelf search to see all books on this shelf.</p>
+				<h3 class="text-lg font-medium text-[var(--color-surface-text)] mb-2">No items match your collection search</h3>
+				<p class="text-[var(--color-surface-text-muted)]">Clear the search to see every item in this collection.</p>
 			</div>
 		{:else if viewMode === 'list'}
 			<div class="space-y-2">
@@ -969,7 +969,7 @@
 		{/if}
 	{:else}
 		<div class="text-center py-16 bg-[var(--color-surface-overlay)] rounded-lg border border-[var(--color-surface-border)]">
-			<p class="text-[var(--color-surface-text-muted)]">Shelf not found</p>
+			<p class="text-[var(--color-surface-text-muted)]">Collection not found</p>
 		</div>
 	{/if}
 </div>
@@ -1054,7 +1054,7 @@
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 6h14M10 6V4h4v2m-5 4v6m4-6v6M6 6l1 14h10l1-14"></path>
 									</svg>
 								{/if}
-								<span>Remove from Shelf</span>
+								<span>Remove from Collection</span>
 							</button>
 						{/if}
 					</div>

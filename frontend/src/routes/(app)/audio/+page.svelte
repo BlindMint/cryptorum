@@ -18,6 +18,7 @@
 	}
 
 	interface Playlist { id: number; name: string; description: string; item_count: number; duration_seconds: number; created_at: number; updated_at: number; }
+	interface AudioLibrary { id: number; name: string; media_scope: 'mixed' | 'books' | 'audio'; }
 
 	let activeTab = $state<Tab>('audiobook');
 	let musicView = $state<MusicView>('albums');
@@ -36,8 +37,13 @@
 	let playlistName = $state('');
 	let showPlaylistForm = $state(false);
 	let showPlaylistPicker = $state(false);
+	let activeLibraryID = $state<number | null>(null);
+	let activeLibrary = $state<AudioLibrary | null>(null);
 
 	const selectedSet = $derived(new Set(selectedIDs));
+	const tabOptions = $derived(activeLibraryID === null
+		? [['audiobook', 'Audiobooks'], ['music', 'Music'], ['podcast', 'Podcasts'], ['playlists', 'Playlists']]
+		: [['audiobook', 'Audiobooks'], ['music', 'Music'], ['podcast', 'Podcasts']]);
 	const groupedItems = $derived.by(() => {
 		const groups = new Map<string, AudioItem[]>();
 		for (const item of items) {
@@ -80,6 +86,7 @@
 				playlists = await response.json();
 			} else {
 				const params = new URLSearchParams({ category: activeTab, sort });
+				if (activeLibraryID !== null) params.set('library_id', String(activeLibraryID));
 				if (query.trim()) params.set('q', query.trim());
 				if (statusFilter) params.set('status', statusFilter);
 				const response = await fetch(`/api/audio/items?${params}`, { credentials: 'same-origin' });
@@ -88,6 +95,19 @@
 			}
 		} catch (reason) { error = reason instanceof Error ? reason.message : 'Unable to load audio'; }
 		finally { loading = false; }
+	}
+
+	async function loadActiveLibrary() {
+		activeLibrary = null;
+		if (activeLibraryID === null) return;
+		try {
+			const response = await fetch(`/api/libraries/${activeLibraryID}`, { credentials: 'same-origin', cache: 'no-store' });
+			if (!response.ok) throw new Error('Unable to load the audio library');
+			const library = await response.json();
+			activeLibrary = { id: library.id, name: library.name, media_scope: library.media_scope || 'mixed' };
+		} catch (reason) {
+			error = reason instanceof Error ? reason.message : 'Unable to load the audio library';
+		}
 	}
 
 	function toggleSelected(id: number) { selectedIDs = selectedSet.has(id) ? selectedIDs.filter((value) => value !== id) : [...selectedIDs, id]; }
@@ -204,23 +224,27 @@
 	}
 
 	afterNavigate(() => {
+		const libraryID = Number.parseInt($page.url.searchParams.get('library') || '', 10);
+		activeLibraryID = Number.isNaN(libraryID) || libraryID <= 0 ? null : libraryID;
 		const tab = $page.url.searchParams.get('tab');
-		activeTab = tab === 'music' || tab === 'podcast' || tab === 'playlists' ? tab : 'audiobook';
+		activeTab = tab === 'music' || tab === 'podcast' || (tab === 'playlists' && activeLibraryID === null) ? tab : 'audiobook';
 		if (activeTab === 'podcast' && sort === 'title') sort = 'published';
 		else if (activeTab !== 'podcast' && sort === 'published') sort = 'title';
 		selectedIDs = [];
+		void loadActiveLibrary();
 		void load();
 	});
 </script>
 
-<svelte:head><title>Audio · Cryptorum</title></svelte:head>
+<svelte:head><title>{activeLibrary?.name || 'All Audio'} · Cryptorum</title></svelte:head>
 
 <div class="min-h-full bg-transparent px-3 py-4 sm:px-5 lg:px-7">
 	<header class="mx-auto mb-5 flex max-w-7xl flex-wrap items-end justify-between gap-4">
 		<div>
-			<p class="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-primary-400)]">Local library</p>
-			<h1 class="mt-1 text-2xl font-semibold text-[var(--color-surface-text)] sm:text-3xl">Audio</h1>
-			<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">Audiobooks, music, and podcast files stored in your libraries.</p>
+			<p class="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-primary-400)]">{activeLibraryID === null ? 'Local audio' : 'Audio library'}</p>
+			<h1 class="mt-1 text-2xl font-semibold text-[var(--color-surface-text)] sm:text-3xl">{activeLibrary?.name || (activeLibraryID === null ? 'All Audio' : 'Audio Library')}</h1>
+			<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">{activeLibraryID === null ? 'Audiobooks, music, and podcast files across all of your libraries.' : 'Audiobooks, music, and podcast files from this folder-backed library.'}</p>
+			{#if activeLibraryID !== null}<a href="/audio" class="mt-2 inline-flex text-xs font-medium text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]">View all audio</a>{/if}
 		</div>
 		{#if activeTab !== 'playlists'}
 			<form class="flex w-full gap-2 sm:w-auto" onsubmit={(event) => { event.preventDefault(); void load(); }}>
@@ -232,7 +256,7 @@
 
 	<div class="mx-auto max-w-7xl">
 		<nav class="mb-4 flex gap-1 overflow-x-auto rounded-xl border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-1" aria-label="Audio sections">
-			{#each [['audiobook', 'Audiobooks'], ['music', 'Music'], ['podcast', 'Podcasts'], ['playlists', 'Playlists']] as option}
+			{#each tabOptions as option}
 				<button type="button" class="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition {activeTab === option[0] ? 'bg-[var(--color-primary-500)]/18 text-[var(--color-primary-300)]' : 'text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)]'}" onclick={() => void setTab(option[0] as Tab)}>{option[1]}</button>
 			{/each}
 		</nav>

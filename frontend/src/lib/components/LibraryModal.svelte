@@ -12,6 +12,7 @@
 		exclude_from_suggestions?: boolean;
 		comic_spread_fallback?: string;
 		audio_default_category?: 'audiobook' | 'music' | 'podcast';
+		media_scope?: 'mixed' | 'books' | 'audio';
 		metadata_protection_enabled?: boolean;
 		is_importing?: boolean;
 		paths?: string[];
@@ -20,9 +21,10 @@
 	type Props = {
 		open: boolean;
 		library?: LibraryModalLibrary | null;
+		initialMediaScope?: 'mixed' | 'books' | 'audio';
 		isScanActive?: (library: LibraryModalLibrary) => boolean;
 		onClose?: () => void;
-		onSaved?: (result: { library: LibraryModalLibrary; isEditing: boolean; foldersChanged: boolean }) => void | Promise<void>;
+		onSaved?: (result: { library: LibraryModalLibrary; isEditing: boolean; foldersChanged: boolean; scopeChanged: boolean }) => void | Promise<void>;
 		onScan?: (library: LibraryModalLibrary) => void | Promise<void>;
 		onRegenerateCovers?: (library: LibraryModalLibrary, mode: CoverMode) => void | Promise<void>;
 		onMetadataProtectionChanged?: (library: LibraryModalLibrary, enabled: boolean) => void | Promise<void>;
@@ -31,6 +33,7 @@
 	let {
 		open,
 		library = null,
+		initialMediaScope = 'mixed',
 		isScanActive,
 		onClose,
 		onSaved,
@@ -52,6 +55,7 @@
 		exclude_from_suggestions: false,
 		comic_spread_fallback: 'inherit',
 		audio_default_category: 'audiobook' as 'audiobook' | 'music' | 'podcast',
+		media_scope: 'mixed' as 'mixed' | 'books' | 'audio',
 		paths: ['']
 	});
 	let originalLibraryPaths = $state<string[]>([]);
@@ -79,6 +83,7 @@
 			exclude_from_suggestions: !!library?.exclude_from_suggestions,
 			comic_spread_fallback: library?.comic_spread_fallback || 'inherit',
 			audio_default_category: library?.audio_default_category || 'audiobook',
+			media_scope: library?.media_scope || initialMediaScope,
 			paths: paths.length ? [...paths] : ['']
 		};
 		originalLibraryPaths = normalizeLibraryPaths(paths);
@@ -125,9 +130,10 @@
 		directoryContents = [];
 		directoryLoading = true;
 		try {
-			const response = await fetch('/api/directories?path=/books');
+			const preferredRoot = form.media_scope === 'audio' ? '/audio' : '/books';
+			const response = await fetch(`/api/directories?path=${encodeURIComponent(preferredRoot)}`);
 			if (response.ok) {
-				await loadDirectoryContents('/books');
+				await loadDirectoryContents(preferredRoot);
 			} else {
 				await loadDirectoryContents('/');
 			}
@@ -177,12 +183,14 @@
 		errorMessage = '';
 		const wasEditing = isEditing;
 		const foldersChanged = wasEditing && libraryFolderSetChanged(filteredPaths);
+		const scopeChanged = wasEditing && form.media_scope !== (library?.media_scope || 'mixed');
 		const payload = {
 			name: form.name.trim(),
 			icon: form.icon.trim(),
 			exclude_from_suggestions: form.exclude_from_suggestions,
 			comic_spread_fallback: form.comic_spread_fallback,
 			audio_default_category: form.audio_default_category,
+			media_scope: form.media_scope,
 			paths: filteredPaths
 		};
 
@@ -206,7 +214,7 @@
 				id: Number(responseData?.id ?? library?.id),
 				book_count: Number(responseData?.book_count ?? library?.book_count ?? 0)
 			};
-			await onSaved?.({ library: savedLibrary, isEditing: wasEditing, foldersChanged });
+			await onSaved?.({ library: savedLibrary, isEditing: wasEditing, foldersChanged, scopeChanged });
 			closeModal();
 		} catch (error) {
 			console.error('Failed to save library:', error);
@@ -296,9 +304,9 @@
 		<div class="relative z-10 flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] shadow-2xl">
 			<div class="flex items-center justify-between gap-4 border-b border-[var(--color-surface-border)] px-5 py-3.5">
 				<div>
-					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">{isEditing ? 'Edit Library' : 'Add Library'}</h3>
+					<h3 class="text-lg font-semibold text-[var(--color-surface-text)]">{isEditing ? `Edit ${form.media_scope === 'audio' ? 'Audio Library' : 'Library'}` : `Add ${form.media_scope === 'audio' ? 'Audio Library' : 'Library'}`}</h3>
 					<p class="mt-1 text-sm text-[var(--color-surface-text-muted)]">
-						{isEditing ? 'Update library folders, covers, and display settings.' : 'Create a library from one or more book folders.'}
+						{isEditing ? 'Update library folders, covers, and display settings.' : form.media_scope === 'audio' ? 'Create an audio library from one or more folders.' : 'Create a library from one or more folders.'}
 					</p>
 				</div>
 				<button
@@ -362,6 +370,16 @@
 							{/if}
 						</div>
 					</div>
+				</div>
+
+				<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
+					<label for="library-media-scope" class="block text-sm font-semibold text-[var(--color-surface-text)]">Library content</label>
+					<select id="library-media-scope" bind:value={form.media_scope} class="mt-2 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-sm text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]">
+						<option value="mixed">Books and audio</option>
+						<option value="books">Books only</option>
+						<option value="audio">Audio only</option>
+					</select>
+					<p class="mt-2 text-xs leading-5 text-[var(--color-surface-text-muted)]">This controls which supported files are imported and where the library appears in the sidebar.</p>
 				</div>
 
 				<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-5 py-3.5">
@@ -429,7 +447,7 @@
 
 				<div>
 					<div class="mb-2 flex items-center justify-between gap-3">
-						<div class="block text-sm font-medium text-[var(--color-surface-text)]">Book Folders</div>
+						<div class="block text-sm font-medium text-[var(--color-surface-text)]">{form.media_scope === 'audio' ? 'Audio Folders' : 'Library Folders'}</div>
 						<button
 							type="button"
 							onclick={openDirectoryModal}
@@ -542,7 +560,7 @@
 					disabled={!form.name.trim() || form.paths.filter((path) => path.trim()).length === 0 || isSaving}
 					class="accent-action rounded-lg px-4 py-2 font-medium transition-colors disabled:opacity-50"
 				>
-					{isSaving ? 'Saving...' : isEditing ? 'Save Library' : 'Create Library'}
+					{isSaving ? 'Saving...' : isEditing ? 'Save Library' : form.media_scope === 'audio' ? 'Create Audio Library' : 'Create Library'}
 				</button>
 			</div>
 		</div>

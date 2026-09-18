@@ -379,6 +379,10 @@ func TestMigration28BackfillsAudioLibraryAndRollsBack(t *testing.T) {
 	if title != "Local Audio" || !queueAudioID.Valid {
 		t.Fatalf("backfill title=%q queue audio=%v", title, queueAudioID)
 	}
+	var mediaScope string
+	if err := conn.QueryRow(`SELECT media_scope FROM library WHERE id = 1`).Scan(&mediaScope); err != nil || mediaScope != "mixed" {
+		t.Fatalf("library media scope=%q, %v", mediaScope, err)
+	}
 
 	if err := goose.DownTo(conn, "migrations", 27); err != nil {
 		t.Fatalf("roll back migration 28: %v", err)

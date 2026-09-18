@@ -343,17 +343,17 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		editingLibrary = null;
 	}
 
-	async function handleLibrarySaved(result: { library: any; isEditing: boolean; foldersChanged: boolean }) {
+	async function handleLibrarySaved(result: { library: any; isEditing: boolean; foldersChanged: boolean; scopeChanged: boolean }) {
 		closeLibraryModal();
 		await loadSettings();
 		if ((window as any).refreshSidebar) {
 			(window as any).refreshSidebar();
 		}
-		if (result.isEditing && result.foldersChanged) {
+		if (result.isEditing && (result.foldersChanged || result.scopeChanged)) {
 			const scanTarget = { ...result.library, id: Number(result.library.id) };
 			if (isLibraryScanActive(scanTarget)) {
 				setActiveTab('jobs');
-			} else if (confirm('Library folders changed. Scan this library now?')) {
+			} else if (confirm('Library folders or content type changed. Scan this library now?')) {
 				await scanLibrary(scanTarget);
 			}
 		}
