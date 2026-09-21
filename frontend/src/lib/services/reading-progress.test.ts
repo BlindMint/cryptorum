@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	ReadingProgressController,
 	readingPositionAsLegacy,
+	shouldApplyLocalCheckpoint,
 	type ReadingPosition
 } from './reading-progress';
 
@@ -151,6 +152,100 @@ describe('ReadingProgressController', () => {
 		]);
 		expect(controller.state).toBe('synced');
 		controller.destroy();
+	});
+
+	it('does not flush a near-zero local outbox over substantial remote progress', async () => {
+		const bodies: any[] = [];
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url.endsWith('/reading-sessions')) {
+				return jsonResponse({
+					session: { id: 44 },
+					position: position({
+						percent: 44.3537,
+						revision: 272,
+						updated_at_ms: 1_000,
+						locators: {
+							pdf: { revision: 272, locator: { type: 'pdf_page', page: 327, total_pages: 736 } }
+						}
+					})
+				}, 201);
+			}
+			if (url.endsWith('/position')) {
+				bodies.push(JSON.parse(String(init?.body)));
+				return jsonResponse({ status: 'ok', position: position({ percent: 0, revision: 273 }) });
+			}
+			return jsonResponse({ status: 'ok' });
+		}));
+
+		const failedRestore = new ReadingProgressController({
+			bookId: 1226,
+			file: { id: 10, format: 'pdf', hash: 'hash-one' },
+			channel: 'standard',
+			readerMode: 'pdf'
+		});
+		await failedRestore.start();
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			if (String(input).endsWith('/reading-sessions')) {
+				return jsonResponse({ session: { id: 45 }, position: position({ percent: 0 }) }, 201);
+			}
+			throw new Error('offline');
+		}));
+		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		await failedRestore.checkpoint({
+			readerMode: 'pdf',
+			percent: 0,
+			locator: { type: 'pdf_page', page: 1, total_pages: 1 }
+		});
+
+		const reopened = new ReadingProgressController({
+			bookId: 1226,
+			file: { id: 10, format: 'pdf', hash: 'hash-one' },
+			channel: 'standard',
+			readerMode: 'pdf'
+		});
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url.endsWith('/reading-sessions')) {
+				return jsonResponse({
+					session: { id: 46 },
+					position: position({
+						percent: 44.3537,
+						revision: 272,
+						updated_at_ms: 1_000,
+						locators: {
+							pdf: { revision: 272, locator: { type: 'pdf_page', page: 327, total_pages: 736 } }
+						}
+					})
+				}, 201);
+			}
+			if (url.endsWith('/position')) {
+				bodies.push(JSON.parse(String(init?.body)));
+				return jsonResponse({ status: 'ok', position: position({ percent: 0, revision: 273 }) });
+			}
+			return jsonResponse({ status: 'ok' });
+		}));
+		const restored = await reopened.start();
+		expect(restored.percent).toBe(44.3537);
+		expect(bodies).toEqual([]);
+		expect(reopened.state).toBe('synced');
+		failedRestore.destroy();
+		reopened.destroy();
+	});
+
+	it('still flushes a newer local checkpoint that moved forward', async () => {
+		expect(shouldApplyLocalCheckpoint(
+			position({ percent: 42, updated_at_ms: 100 }),
+			{ checkpoint: { readerMode: 'pdf', percent: 50 }, updatedAt: 200 }
+		)).toBe(true);
+		expect(shouldApplyLocalCheckpoint(
+			position({ percent: 42, updated_at_ms: 300 }),
+			{ checkpoint: { readerMode: 'pdf', percent: 50 }, updatedAt: 200 }
+		)).toBe(false);
+		expect(shouldApplyLocalCheckpoint(
+			position({ percent: 44.3537, updated_at_ms: 100 }),
+			{ checkpoint: { readerMode: 'pdf', percent: 0 }, updatedAt: 999 }
+		)).toBe(false);
 	});
 
 	it('ignores a mode locator captured at an older shared revision', () => {

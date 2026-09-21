@@ -126,6 +126,21 @@ function clampPercent(percent: number): number {
 	return Number(Math.max(0, Math.min(100, percent)).toFixed(4));
 }
 
+export function shouldApplyLocalCheckpoint(
+	remote: Pick<ReadingPosition, 'percent' | 'updated_at_ms'>,
+	local: { checkpoint: ReadingCheckpoint; updatedAt: number } | null
+): boolean {
+	if (!local?.checkpoint) return false;
+	if ((local.updatedAt ?? 0) < (remote.updated_at_ms ?? 0)) return false;
+	const localPercent = clampPercent(local.checkpoint.percent);
+	// A near-zero local checkpoint is the usual leftover from a failed resume.
+	// Never let it clobber substantial remote progress, even if its timestamp is newer.
+	if (remote.percent >= 1 && localPercent < 1 && remote.percent - localPercent >= 1) {
+		return false;
+	}
+	return true;
+}
+
 function dispatchConflict(detail: ConflictDetail) {
 	if (!browser) return;
 	window.dispatchEvent(new CustomEvent<ConflictDetail>('cryptorum-progress-conflict', { detail }));
@@ -352,14 +367,16 @@ export class ReadingProgressController {
 			this.resetSessionActivity();
 			this.position = data.position as ReadingPosition;
 			this.position.locators ||= {};
-			if (local?.checkpoint) {
+			if (local && shouldApplyLocalCheckpoint(this.position, local)) {
 				this.pending = local.checkpoint;
 				await this.flush();
+			} else if (local) {
+				await deleteOutbox(this.outboxKey);
 			}
 			this.setState(this.pending ? 'saving' : 'synced');
 			return this.position;
 		} catch (error) {
-			if (local?.checkpoint) {
+			if (local && shouldApplyLocalCheckpoint(this.position, local)) {
 				this.pending = local.checkpoint;
 				this.position = positionFromCheckpoint(this.position, local.checkpoint);
 			}

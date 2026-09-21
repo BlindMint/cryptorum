@@ -499,6 +499,26 @@ func validLocator(locator json.RawMessage) bool {
 	return ok && strings.TrimSpace(typeValue) != ""
 }
 
+func isIncompleteZeroProgressClobber(existing readingPosition, req saveReadingPositionRequest) bool {
+	if existing.Percent < 1 || req.Percent >= 1 {
+		return false
+	}
+	var locator struct {
+		Type       string  `json:"type"`
+		Page       float64 `json:"page"`
+		TotalPages float64 `json:"total_pages"`
+	}
+	if len(req.Locator) == 0 || json.Unmarshal(req.Locator, &locator) != nil {
+		return false
+	}
+	if locator.Type != "pdf_page" && locator.Type != "comic_page" {
+		return false
+	}
+	// A 1-page (or 2-page) total against a book already well underway is the
+	// signature of a viewer that reported an incomplete document during resume.
+	return locator.Page <= 1 && locator.TotalPages > 0 && locator.TotalPages < 3
+}
+
 func readingPositionConflict(w http.ResponseWriter, reason string, position readingPosition) {
 	jsonResponse(w, http.StatusConflict, map[string]any{
 		"error": reason, "reason": reason, "position": position,
@@ -639,6 +659,22 @@ func SaveReadingPositionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if position.Revision != req.BaseRevision {
 		readingPositionConflict(w, "revision_conflict", position)
+		return
+	}
+	if isIncompleteZeroProgressClobber(position, req) {
+		_, err = tx.Exec(`
+			UPDATE reading_session SET last_client_sequence = ?
+			WHERE id = ? AND owner_user_id = ? AND superseded_at IS NULL
+		`, req.ClientSequence, sessionID, current.ID)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to acknowledge reading checkpoint")
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			errorResponse(w, http.StatusInternalServerError, "Failed to save reading position")
+			return
+		}
+		jsonResponse(w, http.StatusOK, map[string]any{"status": "ok", "position": position})
 		return
 	}
 

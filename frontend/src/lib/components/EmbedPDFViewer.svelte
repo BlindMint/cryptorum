@@ -16,6 +16,7 @@
 	import { eventPathIncludesSelector } from './embedpdf/dom';
 	import { focusEmbedPdfSearchInput, getEmbedPdfSearchInput } from './embedpdf/search';
 	import { createEmbedPdfScrollActivityController } from './embedpdf/scrollActivity';
+	import { didRestoreLand, pageToRestore } from './embedpdf/restore';
 
 	interface Props {
 		src: string;
@@ -73,7 +74,6 @@
 	let embedPdfCurrentPage = $state(1);
 
 	const documentId = EMBEDPDF_DOCUMENT_ID;
-	const maxRestoreAttempts = 48;
 	const MIN_PDF_ZOOM = 0.25;
 	const MAX_PDF_ZOOM = 5;
 	const scrollActivity = createEmbedPdfScrollActivityController((delta, scrollTop) => {
@@ -303,7 +303,7 @@
 		}
 
 		if (!restoredInitialPage && targetPage > 1) {
-			if (measuredPage !== Math.min(targetPage, totalPages || targetPage)) {
+			if (!didRestoreLand(measuredPage, targetPage)) {
 				return false;
 			}
 
@@ -312,7 +312,7 @@
 		}
 
 		embedPdfCurrentPage = measuredPage;
-		onPageChange?.(measuredPage, totalPages || scopedScroll.getTotalPages());
+		onPageChange?.(measuredPage, scopedScroll.getTotalPages() || totalPages || 0);
 		return true;
 	}
 
@@ -320,15 +320,18 @@
 		const targetPage = Math.max(1, Math.floor(initialPage || 1));
 		if (restoredInitialPage || targetPage <= 1) return;
 
-		const clampedPage = totalPages && totalPages > 0
-			? Math.min(targetPage, totalPages)
-			: targetPage;
+		const restorePage = pageToRestore(targetPage, totalPages);
 
 		const retryRestore = () => {
-			if (restoreAttempts < maxRestoreAttempts) {
-				const retryDelay = restoreAttempts < 10 ? 120 : restoreAttempts < 24 ? 250 : 500;
-				restoreInitialPage(scroll, totalPages, retryDelay);
+			clearRestoreTimers();
+			const retryDelay = restoreAttempts < 10 ? 120 : restoreAttempts < 24 ? 250 : 500;
+			let latestTotal = totalPages;
+			try {
+				latestTotal = scroll.forDocument(documentId).getTotalPages() || totalPages;
+			} catch {
+				// Keep the last known total until the document scope is ready.
 			}
+			restoreInitialPage(scroll, latestTotal, retryDelay);
 		};
 
 		const timer = setTimeout(() => {
@@ -344,7 +347,7 @@
 			try {
 				scopedScroll = scroll.forDocument(documentId);
 				scopedScroll.scrollToPage({
-					pageNumber: clampedPage,
+					pageNumber: restorePage,
 					behavior: 'auto',
 					alignY: 0
 				});

@@ -159,6 +159,79 @@ func TestStartingAlternateFileDoesNotResetBookSummaryProgress(t *testing.T) {
 	}
 }
 
+func TestReadingPositionIgnoresIncompleteZeroPageClobber(t *testing.T) {
+	setupReadingPositionHandlerTestDB(t)
+	sessionID, _ := startPositionSession(t, 10, "standard", "pdf")
+
+	firstSave := savePosition(t, sessionID, 1, 0, 44.3537, false)
+	if firstSave.Code != http.StatusOK {
+		t.Fatalf("seed save status = %d: %s", firstSave.Code, firstSave.Body.String())
+	}
+
+	clobber := httptest.NewRecorder()
+	body := `{
+		"client_sequence":2,
+		"base_revision":1,
+		"reader_mode":"pdf",
+		"percent":0,
+		"locator":{"type":"pdf_page","page":1,"total_pages":1},
+		"source_hash":"hash-one",
+		"reached_end":false
+	}`
+	req := readingPositionRequest(
+		http.MethodPut,
+		fmt.Sprintf("/api/books/1/reading-sessions/%d/position", sessionID),
+		body,
+		map[string]string{"bookID": "1", "sessionID": fmt.Sprint(sessionID)},
+	)
+	SaveReadingPositionHandler(clobber, req)
+	if clobber.Code != http.StatusOK {
+		t.Fatalf("clobber status = %d: %s", clobber.Code, clobber.Body.String())
+	}
+
+	var percent float64
+	var page int64
+	if err := appDB.QueryRow(`
+		SELECT percent, json_extract(locators_json, '$.pdf.locator.page')
+		FROM reading_position WHERE book_id = 1 AND owner_user_id = 1
+	`).Scan(&percent, &page); err != nil {
+		t.Fatalf("load position: %v", err)
+	}
+	if percent < 44 || page != 228 {
+		t.Fatalf("incomplete resume clobber overwrote progress: percent=%v page=%d", percent, page)
+	}
+
+	home := httptest.NewRecorder()
+	homeBody := `{
+		"client_sequence":3,
+		"base_revision":1,
+		"reader_mode":"pdf",
+		"percent":0,
+		"locator":{"type":"pdf_page","page":1,"total_pages":736},
+		"source_hash":"hash-one",
+		"reached_end":false
+	}`
+	homeReq := readingPositionRequest(
+		http.MethodPut,
+		fmt.Sprintf("/api/books/1/reading-sessions/%d/position", sessionID),
+		homeBody,
+		map[string]string{"bookID": "1", "sessionID": fmt.Sprint(sessionID)},
+	)
+	SaveReadingPositionHandler(home, homeReq)
+	if home.Code != http.StatusOK {
+		t.Fatalf("explicit start-of-book save status = %d: %s", home.Code, home.Body.String())
+	}
+	if err := appDB.QueryRow(`
+		SELECT percent, json_extract(locators_json, '$.pdf.locator.page')
+		FROM reading_position WHERE book_id = 1 AND owner_user_id = 1
+	`).Scan(&percent, &page); err != nil {
+		t.Fatalf("load home position: %v", err)
+	}
+	if percent != 0 || page != 1 {
+		t.Fatalf("explicit page 1 save rejected: percent=%v page=%d", percent, page)
+	}
+}
+
 func TestReadingPositionRejectsSupersededAndOutOfOrderSessions(t *testing.T) {
 	setupReadingPositionHandlerTestDB(t)
 	firstSession, _ := startPositionSession(t, 10, "standard", "pdf")

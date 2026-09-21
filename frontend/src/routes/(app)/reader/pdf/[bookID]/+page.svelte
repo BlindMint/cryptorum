@@ -11,6 +11,7 @@
 	import { toggleReaderFullscreen } from '$lib/utils/fullscreen';
 	import { isBottomSystemGestureStart } from '$lib/utils/system-gesture-guard';
 	import EmbedPDFViewer from '$lib/components/EmbedPDFViewer.svelte';
+	import { shouldAdoptDocumentPageCount } from '$lib/components/embedpdf/restore';
 	import ReaderProgressTrack from '$lib/components/ReaderProgressTrack.svelte';
 	import {
 		ReadingProgressController,
@@ -58,6 +59,7 @@
 	let handlePageExit: (() => void) | null = null;
 	let pdfReaderEl = $state<HTMLDivElement | null>(null);
 	let isRestoringProgress = false;
+	let pdfResumeSettled = false;
 	let progressSaveTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastSavedPage = 0;
 	let closeTasksStarted = false;
@@ -102,8 +104,7 @@
 
 	function getSavedProgressPage() {
 		if (savedProgress?.page > 0) {
-			// The renderer's document total is authoritative; metadata may be stale.
-			return clampPage(savedProgress.page, 0);
+			return clampPage(savedProgress.page, numPages);
 		}
 
 		if (
@@ -201,7 +202,7 @@
 	}
 
 	function queueProgressSave() {
-		if (!book || isRestoringProgress || embedPdfRestoringInitialPage || currentPage === lastSavedPage) return;
+		if (!book || isRestoringProgress || embedPdfRestoringInitialPage || !pdfResumeSettled || currentPage === lastSavedPage) return;
 		clearProgressSaveTimer();
 		progressSaveTimer = setTimeout(() => {
 			progressSaveTimer = null;
@@ -355,6 +356,7 @@
 
 		clearEmbedPdfRestoreTimers();
 		embedPdfRestoringInitialPage = false;
+		pdfResumeSettled = true;
 		try {
 			embedPdfScroll?.forDocument?.(embedPdfDocumentId)?.scrollToPage?.({
 				pageNumber: targetPage,
@@ -719,9 +721,16 @@
 		}
 	}
 
+	function applyDocumentPageCount(total?: number) {
+		if (!shouldAdoptDocumentPageCount(total, Math.max(numPages, book?.page_count || 0))) return;
+		if (total && total !== numPages) {
+			numPages = total;
+		}
+	}
+
 	async function saveProgress(_keepalive = false, _timeoutMs = 0) {
 		if (!book || !progressController) return;
-		if (!progressLoaded || !embedPdfProgressReady || embedPdfRestoringInitialPage) return;
+		if (!progressLoaded || !embedPdfProgressReady || embedPdfRestoringInitialPage || !pdfResumeSettled) return;
 		clearProgressSaveTimer();
 		const percent = numPages > 1 ? ((currentPage - 1) / (numPages - 1)) * 100 : 0;
 		await progressController.checkpoint({
@@ -734,14 +743,9 @@
 	}
 
 	function handleEmbedPdfPageChange(pageNum: number, total?: number) {
-		if (embedPdfRestoringInitialPage && total && total > 0) {
-			embedPdfInitialPage = Math.min(embedPdfInitialPage, total);
-		}
+		applyDocumentPageCount(total);
 
 		if (embedPdfRestoringInitialPage && pageNum !== embedPdfInitialPage) {
-			if (total && total > 0 && total !== numPages) {
-				numPages = total;
-			}
 			return;
 		}
 
@@ -749,24 +753,17 @@
 			if (pageNum !== currentPage) {
 				currentPage = pageNum;
 			}
-			if (total && total > 0 && total !== numPages) {
-				numPages = total;
-			}
 			embedPdfViewerReady = true;
 			topBarVisible = true;
 			clearEmbedPdfRestoreTimers();
 			embedPdfRestoringInitialPage = false;
+			pdfResumeSettled = true;
 			return;
 		}
 
 		if (pageNum !== currentPage) {
 			currentPage = pageNum;
-			if (total && total > 0) {
-				numPages = total;
-			}
 			queueProgressSave();
-		} else if (total && total > 0 && total !== numPages) {
-			numPages = total;
 		}
 	}
 
@@ -809,6 +806,9 @@
 		pdfLoadRetryAttempts = 0;
 		topBarVisible = true;
 		resetTopBarBehavior();
+		if (embedPdfRestoringInitialPage) {
+			restoreEmbedPdfSavedPage();
+		}
 	}
 
 	function handleEmbedPdfError(message: string) {
@@ -872,6 +872,7 @@
 					currentPage = getSavedProgressPage();
 					embedPdfInitialPage = currentPage;
 					embedPdfRestoringInitialPage = embedPdfInitialPage > 1;
+					pdfResumeSettled = embedPdfInitialPage <= 1;
 					embedPdfProgressReady = true;
 					} else {
 						error = `Failed to load book details: ${bookRes.status}`;
