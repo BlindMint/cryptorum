@@ -14,8 +14,8 @@ const files = [
 ];
 
 describe('getReadableBookFiles', () => {
-	it('omits unsupported comic archives', () => {
-		expect(getReadableBookFiles(files).map((file) => file.id)).toEqual([1, 2, 3]);
+	it('includes supported comic archives', () => {
+		expect(getReadableBookFiles(files).map((file) => file.id)).toEqual([1, 2, 3, 4]);
 	});
 });
 

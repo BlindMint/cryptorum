@@ -198,7 +198,7 @@ func isJobNotificationKind(kind string) bool {
 }
 
 func isActiveJobStatus(status string) bool {
-	return status == "queued" || status == "running" || status == "cancelling"
+	return status == "queued" || status == "running" || status == "cancelling" || status == "pausing" || status == "paused"
 }
 
 func jobNotificationMessage(job AdminJob) string {
@@ -1129,19 +1129,18 @@ func CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().Unix()
-	if job.Status == "queued" {
-		_, err = appDB.Exec(`
-			UPDATE metadata_job
-			SET status = 'cancelled', cancel_requested_at = ?, completed_at = ?
-			WHERE id = ? AND status = 'queued'
-		`, now, now, jobID)
-	} else {
-		_, err = appDB.Exec(`
-			UPDATE metadata_job
-			SET status = 'cancelling', cancel_requested_at = ?
-			WHERE id = ? AND status IN ('running', 'cancelling')
-		`, now, jobID)
+	result, err := appDB.Exec(`
+        UPDATE metadata_job
+        SET status=CASE WHEN status IN ('queued','paused') THEN 'cancelled' ELSE 'cancelling' END,
+            cancel_requested_at=?, completed_at=CASE WHEN status IN ('queued','paused') THEN ? ELSE NULL END
+        WHERE id=? AND status IN ('queued','paused','running','pausing','cancelling')`, now, now, jobID)
+	if err == nil {
+		if n, _ := result.RowsAffected(); n == 0 {
+			errorResponse(w, http.StatusConflict, "Job is no longer active")
+			return
+		}
 	}
+
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to cancel job")
 		return
@@ -1398,7 +1397,7 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if includeUnreadOnly {
-		jobConditions = append(jobConditions, "status IN ('queued', 'running', 'cancelling')")
+		jobConditions = append(jobConditions, "status IN ('queued', 'running', 'cancelling', 'pausing', 'paused')")
 	}
 	if len(jobConditions) > 0 {
 		jobQuery += " WHERE " + strings.Join(jobConditions, " AND ")
@@ -1470,7 +1469,7 @@ func ListNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 		  AND kind NOT LIKE 'cover_regeneration_%'
 	`).Scan(&unreadCount)
 	var activeJobCount int64
-	_ = appDB.QueryRow(`SELECT COUNT(*) FROM metadata_job WHERE status IN ('queued', 'running', 'cancelling')`).Scan(&activeJobCount)
+	_ = appDB.QueryRow(`SELECT COUNT(*) FROM metadata_job WHERE status IN ('queued', 'running', 'cancelling', 'pausing', 'paused')`).Scan(&activeJobCount)
 	unreadCount += activeJobCount
 
 	jsonResponse(w, http.StatusOK, map[string]any{

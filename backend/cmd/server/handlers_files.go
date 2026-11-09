@@ -26,14 +26,14 @@ import (
 func serveFileWithRange(w http.ResponseWriter, r *http.Request, filePath string) {
 	file, err := os.Open(filePath)
 	if err != nil {
-		http.ServeFile(w, r, filePath)
+		writeFileAccessError(w, availabilityForError(err))
 		return
 	}
 	defer file.Close()
 
 	stat, err := file.Stat()
 	if err != nil {
-		http.ServeFile(w, r, filePath)
+		writeFileAccessError(w, availabilityForError(err))
 		return
 	}
 
@@ -492,7 +492,7 @@ func countCbxPages(filePath, format string) (int, error) {
 	switch strings.ToLower(format) {
 	case "cbz":
 		return countCbzPages(filePath)
-	case "cbr":
+	case "cbr", "cb7", "cbt":
 		return countCbrPages(filePath)
 	default:
 		return 0, fmt.Errorf("unsupported comic archive format %q", format)
@@ -596,6 +596,9 @@ func ServeBookFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Translate host path to container path if needed
 	filePath = translateHostPathToContainerPath(filePath)
+	if !requireAvailableFile(w, filePath) {
+		return
+	}
 	info, err := os.Stat(filePath)
 	if err != nil || info.IsDir() {
 		errorResponse(w, http.StatusNotFound, "Book file not found")
@@ -669,6 +672,9 @@ func serveBookFileByID(w http.ResponseWriter, r *http.Request, disposition strin
 	}
 
 	filePath = translateHostPathToContainerPath(filePath)
+	if !requireAvailableFile(w, filePath) {
+		return
+	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, filepath.Base(filePath)))
 
 	serveFileWithRange(w, r, filePath)
@@ -728,6 +734,9 @@ func ConvertBookFileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filePath = translateHostPathToContainerPath(filePath)
+	if !requireAvailableFile(w, filePath) {
+		return
+	}
 	sourceFormat = strings.ToLower(sourceFormat)
 
 	if sourceFormat == format {
@@ -807,6 +816,9 @@ func ServeEpubResourceHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Translate host path to container path if needed
 	filePath = translateHostPathToContainerPath(filePath)
+	if !requireAvailableFile(w, filePath) {
+		return
+	}
 
 	// Open the EPUB as a ZIP file
 	reader, err := zip.OpenReader(filePath)
@@ -892,10 +904,10 @@ func ServeCbxPageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filePath, format, err := selectBookFileForRequest(r, bookIDInt, requestedFormat)
-	if err != nil || (requestedFormat == "" && format != "cbz" && format != "cbr" && format != "cb7") {
+	if err != nil || (requestedFormat == "" && format != "cbz" && format != "cbr" && format != "cb7" && format != "cbt") {
 		err = appDB.QueryRow(`
 			SELECT path, format FROM book_file
-			WHERE book_id = ? AND missing_at IS NULL AND format IN ('cbz', 'cbr', 'cb7')
+			WHERE book_id = ? AND missing_at IS NULL AND format IN ('cbz', 'cbr', 'cb7', 'cbt')
 			ORDER BY id
 			LIMIT 1
 		`, bookIDInt).Scan(&filePath, &format)
@@ -904,21 +916,22 @@ func ServeCbxPageHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusNotFound, "CBX file not found")
 		return
 	}
-	if format != "cbz" && format != "cbr" && format != "cb7" {
+	if format != "cbz" && format != "cbr" && format != "cb7" && format != "cbt" {
 		errorResponse(w, http.StatusBadRequest, fmt.Sprintf("Format '%s' is not supported for comic reading.", format))
 		return
 	}
 
 	// Translate host path to container path if needed
 	filePath = translateHostPathToContainerPath(filePath)
+	if !requireAvailableFile(w, filePath) {
+		return
+	}
 
 	switch format {
 	case "cbz":
 		serveCbzPage(w, r, filePath, pageNum)
-	case "cbr":
+	case "cbr", "cb7", "cbt":
 		serveCbrPage(w, filePath, pageNum)
-	case "cb7":
-		errorResponse(w, http.StatusNotImplemented, "CB7 reading is not supported yet")
 	default:
 		errorResponse(w, http.StatusNotImplemented, "Format not supported")
 	}
@@ -1301,6 +1314,9 @@ func ServeContinuousBookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filePath = translateHostPathToContainerPath(filePath)
+	if !requireAvailableFile(w, filePath) {
+		return
+	}
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		errorResponse(w, http.StatusNotFound, "Book file not found at path: "+filePath)
@@ -1383,6 +1399,9 @@ func ServeContinuousMediaHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filePath = translateHostPathToContainerPath(filePath)
+	if !requireAvailableFile(w, filePath) {
+		return
+	}
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		errorResponse(w, http.StatusNotFound, "Book file not found at path: "+filePath)
 		return
@@ -1441,6 +1460,9 @@ func ServeContinuousTocHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filePath = translateHostPathToContainerPath(filePath)
+	if !requireAvailableFile(w, filePath) {
+		return
+	}
 
 	var toc []TocItem
 
@@ -1569,6 +1591,9 @@ func ServeContinuousStylesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filePath = translateHostPathToContainerPath(filePath)
+	if !requireAvailableFile(w, filePath) {
+		return
+	}
 	if _, err := ensureProcessedTextBook(bookID, filePath, format); err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to process book: "+err.Error())
 		return
@@ -1629,6 +1654,9 @@ func ServeProcessedBookFileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filePath = translateHostPathToContainerPath(filePath)
+	if !requireAvailableFile(w, filePath) {
+		return
+	}
 	result, err := ensureProcessedTextBook(bookID, filePath, format)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to process book: "+err.Error())

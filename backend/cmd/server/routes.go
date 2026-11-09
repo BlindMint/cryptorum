@@ -483,6 +483,8 @@ func initRoutes(r *chi.Mux) {
 			r.Get("/", ListJobsHandler)
 			r.Get("/{jobID}", GetJobHandler)
 			r.Post("/{jobID}/cancel", CancelJobHandler)
+			r.Post("/{jobID}/pause", PauseScanJobHandler)
+			r.Post("/{jobID}/resume", ResumeScanJobHandler)
 			r.Post("/metadata-lookup", QueueMetadataLookupJobHandler)
 			r.Post("/metadata-apply", QueueMetadataApplyJobHandler)
 			r.Delete("/{jobID}", DeleteJobHandler)
@@ -1917,8 +1919,8 @@ func getBookFilesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := appDB.Query(`
-		SELECT id, path, format, size, hash, last_modified
-		FROM book_file WHERE book_id = ? AND missing_at IS NULL
+		SELECT id, path, format, size, hash, last_modified, missing_at
+		FROM book_file WHERE book_id = ?
 		ORDER BY id
 	`, bookID)
 	if err != nil {
@@ -1928,23 +1930,34 @@ func getBookFilesHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type FileResponse struct {
-		ID           int64  `json:"id"`
-		Path         string `json:"path"`
-		Format       string `json:"format"`
-		Size         int64  `json:"size"`
-		Hash         string `json:"hash"`
-		LastModified int64  `json:"last_modified"`
+		Availability fileAvailability `json:"availability"`
+		ID           int64            `json:"id"`
+		Path         string           `json:"path"`
+		Format       string           `json:"format"`
+		Size         int64            `json:"size"`
+		Hash         string           `json:"hash"`
+		LastModified int64            `json:"last_modified"`
 	}
 
 	files := []FileResponse{}
 	for rows.Next() {
 		var f FileResponse
-		if err := rows.Scan(&f.ID, &f.Path, &f.Format, &f.Size, &f.Hash, &f.LastModified); err != nil {
+		var missingAt sql.NullInt64
+		if err := rows.Scan(&f.ID, &f.Path, &f.Format, &f.Size, &f.Hash, &f.LastModified, &missingAt); err != nil {
 			continue
+		}
+		f.Availability = checkFileAvailability(f.Path)
+		if missingAt.Valid && f.Availability.Code == "available" {
+			f.Availability = fileAvailability{"scan_required", "This file was marked missing by a previous scan. Rescan its library to restore reading access."}
 		}
 		files = append(files, f)
 	}
 
+	if err := rows.Err(); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to fetch files")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	jsonResponse(w, http.StatusOK, files)
 }
 
@@ -2545,7 +2558,7 @@ func activeLibraryScanJobForLibrary(libraryID int64) (int64, bool) {
 		SELECT id
 		FROM metadata_job
 		WHERE dedupe_key = ?
-		  AND status IN ('queued', 'running', 'cancelling')
+		  AND status IN ('queued', 'running', 'cancelling', 'pausing', 'paused')
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
 	`, libraryScanDedupeKey(libraryID)).Scan(&jobID)
@@ -2556,7 +2569,7 @@ func activeLibraryScanJobForLibrary(libraryID int64) (int64, bool) {
 	rows, err := appDB.Query(`
 		SELECT id, COALESCE(payload_json, '')
 		FROM metadata_job
-		WHERE job_type = ? AND status IN ('queued', 'running', 'cancelling')
+		WHERE job_type = ? AND dedupe_key IS NULL AND status IN ('queued', 'running', 'cancelling', 'pausing', 'paused')
 		ORDER BY created_at DESC
 		LIMIT 100
 	`, "library_scan")
@@ -2586,7 +2599,7 @@ func queueLibraryScan(libraryID int64, paths []string) (int64, bool, bool, error
 }
 
 func queueLibraryScanWithWorker(libraryID int64, paths []string, startWorker bool) (int64, bool, bool, error) {
-	if jobID, ok := activeLibraryScanJobForLibrary(libraryID); ok || isLibraryScanning(libraryID) {
+	if jobID, ok := activeLibraryScanJobForLibrary(libraryID); ok {
 		return jobID, false, ok, nil
 	}
 
@@ -2654,9 +2667,9 @@ func requeueInterruptedLibraryScans() {
 	}
 	_, err := appDB.Exec(`
 		UPDATE metadata_job
-		SET status = 'queued', started_at = NULL
+		SET status = CASE WHEN status = 'pausing' THEN 'paused' ELSE 'queued' END, started_at = NULL, recovered_at = strftime('%s','now'), result_json=json_set(COALESCE(result_json,'{}'),'$.recovered_after_restart',json('true'))
 		WHERE job_type = 'library_scan'
-		  AND status = 'running'
+		  AND status IN ('running','pausing')
 		  AND completed_at IS NULL
 	`)
 	if err != nil {
@@ -2668,21 +2681,30 @@ func signalLibraryScanWorker() {
 	if appDB == nil || appScanner == nil {
 		return
 	}
+	scanWorkerMu.Lock()
+	defer scanWorkerMu.Unlock()
+	if scanShutdown.Load() {
+		return
+	}
 	if !libraryScanWorker.CompareAndSwap(false, true) {
 		return
 	}
-	go runLibraryScanWorker()
+	scanWorkerWait.Add(1)
+	go func() { defer scanWorkerWait.Done(); runLibraryScanWorker() }()
 }
 
 func runLibraryScanWorker() {
 	defer func() {
 		libraryScanWorker.Store(false)
-		if hasQueuedLibraryScanJobs() {
+		if !scanShutdown.Load() && hasQueuedLibraryScanJobs() {
 			signalLibraryScanWorker()
 		}
 	}()
 
 	for {
+		if scanShutdown.Load() {
+			return
+		}
 		jobID, libraryID, libraryName, paths, title, ok := claimNextLibraryScanJob()
 		if !ok {
 			return
@@ -2763,6 +2785,19 @@ func claimNextLibraryScanJob() (int64, int64, string, []string, string, bool) {
 }
 
 func processLibraryScanJob(jobID, libraryID int64, libraryName string, paths []string, title string) {
+	var payloadRaw string
+	var recoveredAt sql.NullInt64
+	if err := appDB.QueryRow(`SELECT COALESCE(payload_json,'{}'), recovered_at FROM metadata_job WHERE id=?`, jobID).Scan(&payloadRaw, &recoveredAt); err != nil {
+		return
+	}
+	var options struct {
+		Partial    bool  `json:"partial"`
+		BookdropID int64 `json:"bookdrop_id"`
+	}
+	if err := json.Unmarshal([]byte(payloadRaw), &options); err != nil {
+		return
+	}
+
 	markLibraryScanning(libraryID, true)
 	defer markLibraryScanning(libraryID, false)
 
@@ -2798,21 +2833,23 @@ func processLibraryScanJob(jobID, libraryID int64, libraryName string, paths []s
 			recentItems = recentItems[len(recentItems)-50:]
 		}
 		payload := map[string]any{
-			"library_id":      libraryID,
-			"library_name":    libraryName,
-			"imported_books":  progress.ImportedBooks,
-			"scanned_files":   progress.ScannedFiles,
-			"failed_files":    progress.FailedFiles,
-			"total_files":     progress.TotalFiles,
-			"current_path":    progress.CurrentPath,
-			"unchanged_files": progress.UnchangedFiles,
-			"missing_files":   progress.MissingFiles,
-			"changed_files":   progress.ChangedFiles,
-			"relinked_files":  progress.RelinkedFiles,
-			"duplicate_files": progress.DuplicateFiles,
-			"status_counts":   statusCounts,
-			"recent_items":    recentItems,
-			"phase":           progress.Phase,
+			"timings":                 progress.Timings,
+			"recovered_after_restart": recoveredAt.Valid,
+			"library_id":              libraryID,
+			"library_name":            libraryName,
+			"imported_books":          progress.ImportedBooks,
+			"scanned_files":           progress.ScannedFiles,
+			"failed_files":            progress.FailedFiles,
+			"total_files":             progress.TotalFiles,
+			"current_path":            progress.CurrentPath,
+			"unchanged_files":         progress.UnchangedFiles,
+			"missing_files":           progress.MissingFiles,
+			"changed_files":           progress.ChangedFiles,
+			"relinked_files":          progress.RelinkedFiles,
+			"duplicate_files":         progress.DuplicateFiles,
+			"status_counts":           statusCounts,
+			"recent_items":            recentItems,
+			"phase":                   progress.Phase,
 		}
 		if includeAllItems {
 			payload["items"] = scanItems
@@ -2837,21 +2874,44 @@ func processLibraryScanJob(jobID, libraryID int64, libraryName string, paths []s
 		`, progress.TotalFiles, progress.ScannedFiles, progress.FailedFiles, nullString(resultPayload), jobID)
 	}
 
-	cancelRequested := false
-	lastCancelCheck := time.Time{}
-	shouldCancel := func() bool {
-		if cancelRequested {
+	stopReason := ""
+	shouldStop := func() bool {
+		var status string
+		if err := appDB.QueryRow(`SELECT status FROM metadata_job WHERE id=?`, jobID).Scan(&status); err != nil {
+			stopReason = "interrupted"
 			return true
 		}
-		if time.Since(lastCancelCheck) < time.Second {
-			return false
+		switch status {
+		case "cancelling":
+			stopReason = "cancelled"
+			return true
+		case "pausing":
+			stopReason = "paused"
+			return true
 		}
-		lastCancelCheck = time.Now()
-		cancelRequested = isJobCancelRequested(jobID)
-		return cancelRequested
+		if scanShutdown.Load() {
+			stopReason = "interrupted"
+			return true
+		}
+		return false
 	}
-	imported, err := appScanner.ScanLibraryWithProgressAndCancel(libraryID, paths, updateProgress, shouldCancel)
+	imported, err := appScanner.ScanLibraryWithOptions(libraryID, paths, updateProgress, shouldStop, scanner.ScanOptions{JobID: jobID, Reconcile: !options.Partial})
+	// A stop may occur inside the progress throttle interval. Persist the final
+	// counters before recording its state, even when the last file was not final.
+	lastJobUpdate = time.Time{}
+	updateProgress(lastProgress)
+
 	completedAt := time.Now().Unix()
+	if err == scanner.ErrScanCancelled && stopReason != "cancelled" {
+		lastProgress.Phase = stopReason
+		resultPayload := buildResultPayload(lastProgress, true)
+		status := "paused"
+		if stopReason == "interrupted" {
+			status = "queued"
+		}
+		_, _ = appDB.Exec(`UPDATE metadata_job SET status=CASE WHEN status='cancelling' THEN 'cancelled' WHEN status='pausing' THEN 'paused' ELSE ? END,result_json=?,completed_at=CASE WHEN status='cancelling' THEN ? ELSE NULL END, recovered_at=CASE WHEN ?='queued' THEN strftime('%s','now') ELSE recovered_at END WHERE id=?`, status, nullString(resultPayload), time.Now().Unix(), status, jobID)
+		return
+	}
 	if err == scanner.ErrScanCancelled {
 		resultPayload := buildResultPayload(lastProgress, true)
 		_, _ = appDB.Exec(`
@@ -2893,12 +2953,21 @@ func processLibraryScanJob(jobID, libraryID int64, libraryName string, paths []s
 		return
 	}
 
+	if options.BookdropID > 0 {
+		_, _ = appDB.Exec(`UPDATE bookdrop_file SET status='imported' WHERE id=?`, options.BookdropID)
+	}
+
 	resultPayload := buildResultPayload(lastProgress, true)
 	_, _ = appDB.Exec(`
 		UPDATE metadata_job
-		SET status = ?, result_json = ?, completed_at = ?
+		SET status = CASE WHEN rescan_requested=1 THEN 'queued' ELSE ? END, result_json = ?, completed_at = CASE WHEN rescan_requested=1 THEN NULL ELSE ? END, rescan_requested=0
 		WHERE id = ?
 	`, "completed", nullString(resultPayload), completedAt, jobID)
+	var finalStatus string
+	if err := appDB.QueryRow(`SELECT status FROM metadata_job WHERE id=?`, jobID).Scan(&finalStatus); err != nil || finalStatus != "completed" {
+		return
+	}
+
 	createAdminNotification(
 		"library_scan_completed",
 		title,
@@ -4360,10 +4429,10 @@ func getCbxPageCountHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filePath, format, err := selectBookFileForRequest(r, bookIDInt, requestedFormat)
-	if err != nil || (requestedFormat == "" && format != "cbz" && format != "cbr" && format != "cb7") {
+	if err != nil || (requestedFormat == "" && format != "cbz" && format != "cbr" && format != "cb7" && format != "cbt") {
 		err = appDB.QueryRow(`
 			SELECT path, format FROM book_file
-			WHERE book_id = ? AND missing_at IS NULL AND format IN ('cbz', 'cbr', 'cb7')
+			WHERE book_id = ? AND missing_at IS NULL AND format IN ('cbz', 'cbr', 'cb7', 'cbt')
 			ORDER BY id
 			LIMIT 1
 		`, bookIDInt).Scan(&filePath, &format)
@@ -4372,15 +4441,18 @@ func getCbxPageCountHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusNotFound, "CBX file not found")
 		return
 	}
-	if format != "cbz" && format != "cbr" && format != "cb7" {
+	if format != "cbz" && format != "cbr" && format != "cb7" && format != "cbt" {
 		errorResponse(w, http.StatusBadRequest, fmt.Sprintf("Format '%s' is not supported for comic reading.", format))
 		return
 	}
 
 	filePath = translateHostPathToContainerPath(filePath)
+	if !requireAvailableFile(w, filePath) {
+		return
+	}
 	count, err := countCbxPages(filePath, format)
 	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to count pages")
+		jsonResponse(w, http.StatusUnprocessableEntity, map[string]string{"code": "document_unreadable", "error": "This comic archive could not be read. It may be damaged, password protected, or unsupported."})
 		return
 	}
 
@@ -4427,9 +4499,12 @@ func getPdfPageCountHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filePath = translateHostPathToContainerPath(filePath)
+	if !requireAvailableFile(w, filePath) {
+		return
+	}
 	count, err := countPdfPages(filePath)
 	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "Failed to count PDF pages")
+		jsonResponse(w, http.StatusUnprocessableEntity, map[string]string{"code": "document_unreadable", "error": "This PDF could not be read. It may be damaged, password protected, or unsupported."})
 		return
 	}
 
@@ -4527,24 +4602,31 @@ func importBookdropFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Run import in background
-	ownerID := current.ID
-	if userCanAccessAllData(current) {
-		ownerID = 1
+	bookdropID, parseErr := strconv.ParseInt(fileID, 10, 64)
+	if parseErr != nil {
+		errorResponse(w, 400, "Invalid BookDrop ID")
+		return
 	}
-	go func() {
-		for _, lib := range appConfig.Libraries {
-			var libraryID int64
-			if err := appDB.QueryRow("SELECT id FROM library WHERE name = ? AND owner_user_id = ?", lib.Name, ownerID).Scan(&libraryID); err != nil {
-				continue
-			}
-			appScanner.ScanLibrary(libraryID, []string{filePath})
-			break // import into first library
-		}
-		appDB.Exec("UPDATE bookdrop_file SET status = 'imported' WHERE id = ?", fileID)
-	}()
-
-	jsonResponse(w, http.StatusOK, map[string]string{"status": "importing"})
+	var request struct {
+		LibraryID int64 `json:"library_id"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&request)
+	}
+	if request.LibraryID == 0 {
+		_ = appDB.QueryRow(`SELECT id FROM library ORDER BY sort_order,id LIMIT 1`).Scan(&request.LibraryID)
+	}
+	var exists bool
+	if err := appDB.QueryRow(`SELECT EXISTS(SELECT 1 FROM library WHERE id=?)`, request.LibraryID).Scan(&exists); err != nil || !exists {
+		errorResponse(w, 400, "Choose a valid destination library")
+		return
+	}
+	jobID, err := queueFileImport(request.LibraryID, filePath, bookdropID)
+	if err != nil {
+		errorResponse(w, 500, "Unable to queue import")
+		return
+	}
+	jsonResponse(w, http.StatusAccepted, map[string]any{"status": "queued", "job_id": jobID})
 }
 
 func deleteBookdropFileHandler(w http.ResponseWriter, r *http.Request) {

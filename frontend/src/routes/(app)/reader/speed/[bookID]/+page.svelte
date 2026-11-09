@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { requireReadableFile, fileResponseError } from '$lib/utils/file-availability';
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -241,17 +242,21 @@
 						fetch(`/api/books/${bookId}`),
 						fetch(`/api/books/${bookId}/files`)
 					]);
+					if (!res.ok) throw new Error(await fileResponseError(res));
 					if (res.ok) {
 						book = await res.json();
+						if (!filesRes.ok) throw new Error(await fileResponseError(filesRes));
 						if (filesRes.ok) {
 							readerFiles = await filesRes.json();
 						}
 						activeFile = selectReaderFile(readerFiles, requestedFormat, ['epub', 'pdf', 'txt', 'html', 'mobi', 'azw3', 'fb2']);
+						requireReadableFile(activeFile);
 						await startSession();
 						await loadText();
 				}
 			} catch (e) {
 				console.error('Failed to load book:', e);
+				loadError = e instanceof Error ? e.message : 'Failed to load book. Check your connection and try again.';
 			} finally {
 				loading = false;
 			}
@@ -1017,6 +1022,7 @@
 			</div>
 		{:else}
 			<p class="max-w-xl px-6 text-center text-white/60">{loadError || 'No text available for speed reading'}</p>
+			{#if loadError}<button type="button" class="mt-3 underline" onclick={() => window.location.reload()}>Try again</button>{/if}
 		{/if}
 	</div>
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ChoiceChips from '$lib/components/ChoiceChips.svelte';
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { readerSettings, epubThemes, fontFamilies, fontWeightOptions, cbxFitModes, cbxScrollModes, skipIntervalOptions, type ReaderSettings } from '$lib/stores/readerSettings';
 	import { currentTheme, primaryColors, surfaceColors, addCustomTheme, updateCustomTheme, removeCustomTheme, resetPrimaryToDefault, resetSurfaceToDefault, generateId, updateGlowEnabled, updateGlowAutoMode, updateGlowColor, updateGlowIntensity, updateBgImageEnabled, updateBgImageTransparency, updateBgImageDisplay, updateSelectedBgImage, addBackgroundImage, removeBackgroundImage, DEFAULT_THEME_PRIMARY, DEFAULT_THEME_SURFACE } from '$lib/stores/theme';
@@ -26,8 +27,8 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 		showCurrentSection: true,
 		settingsUpdatedAt: 0,
 		epub: { fontFamily: 'serif', fontSize: 18, fontWeight: 400, fontStyle: 'normal' as const, lineHeight: 1.6, letterSpacing: 0, paragraphSpacing: 0, paragraphIndent: 0, justify: true, hyphenate: false, hyphenationLanguage: 'en', maxColumnCount: 1, gap: 5, theme: 'catppuccin', isDark: true, flow: 'paginated' as const, maxInlineSize: 680, maxBlockSize: 1440, margin: 5, continuousMaxWidth: 720, brightness: 100, contrast: 100, pageAnimation: 'slide' as const, autoAdvance: false, autoAdvanceTimer: 0, fullscreenLock: false, useStandardFullscreen: false, autoHideControls: true, customCss: '', showTextLayer: true, originalLayout: false, continuousMode: true, showImages: true, imageSize: 'fit-width' as const, imageGrayscale: false },
-		pdf: { autoHideControls: true, viewMode: 'dark' as const, useStandardFullscreen: false },
-		cbx: { pageSpread: 'auto' as const, pageLayout: 'single' as const, fitMode: 'fit-width' as const, scrollMode: 'paginated' as const, backgroundColor: '#111111', readingDirection: 'ltr' as const, stripMaxWidthPercent: 100, mangaMode: false, panelViewEnabled: false, spreadHandling: 'auto' as const, pageTransitionSound: false, autoHideControls: true, useStandardFullscreen: false, vibrance: 100, saturation: 100 },
+		pdf: { openingFitMode: 'fit-page', autoHideControls: true, viewMode: 'dark' as const, useStandardFullscreen: false },
+		cbx: { openingFitMode: 'fit-page', pageSpread: 'off' as const, pageLayout: 'single' as const, fitMode: 'fit-page' as const, scrollMode: 'paginated' as const, backgroundColor: '#111111', readingDirection: 'ltr' as const, stripMaxWidthPercent: 100, mangaMode: false, panelViewEnabled: false, spreadHandling: 'auto' as const, pageTransitionSound: false, autoHideControls: true, useStandardFullscreen: false, vibrance: 100, saturation: 100 },
 		audio: { playbackSpeed: 1.0, musicPlaybackSpeed: 1.0, volume: 1, muted: false, skipForward: 15, skipBackward: 15, autoAdvance: true, confirmQueueDuplicates: true, autoHideControls: true, gaplessPlayback: true, sleepTimer: 'off' as const, sleepTimerCustom: 30, theme: 'cover-focused' as const, waveformStyle: 'line' as const, backgroundStyle: 'cover-blur' as const, voiceBoost: false, equalizerLow: 50, equalizerMid: 50, equalizerHigh: 50 },
 		speedReader: { wpm: 300, wordSize: 48, fontFamily: 'serif', fontWeight: 400, focalPoint: 0.38, centerWord: false, accentEnabled: true, accentColor: '#ef4444', accentOpacity: 1.0, focusIndicator: 'lines' as const, focusIndicatorDistance: 20, horizontalBars: true, horizontalBarsColor: '#666666', horizontalBarsOpacity: 1.0, verticalIndicator: 'off' as const, sentencePause: 350, autoSentencePause: true, keepScreenOn: true, theme: 'catppuccin', letterSpacing: 0, focusIndicatorLength: 20, showWordCount: false }
 	});
@@ -444,7 +445,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	}
 
 	function updateCbxSetting(key: string, value: any) {
-		localReaderSettings.cbx = { ...localReaderSettings.cbx, [key]: value };
+		localReaderSettings.cbx = { ...localReaderSettings.cbx, [key]: value, ...(key === 'fitMode' && value === 'fit-width' ? { stripMaxWidthPercent: 100 } : {}), ...(key === 'stripMaxWidthPercent' ? { fitMode: 'fit-width' as const } : {}), mangaMode: false };
 	}
 
 	function updateAudioSetting(key: string, value: any) {
@@ -696,7 +697,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 
 	async function loadActiveLibraryScanJobs() {
 		try {
-			const res = await fetch('/api/jobs?status=queued,running,cancelling&type=library_scan&limit=100', { cache: 'no-store' });
+			const res = await fetch('/api/jobs?status=queued,running,cancelling,pausing,paused&type=library_scan&limit=100', { cache: 'no-store' });
 			if (!res.ok) {
 				activeLibraryScanJobs = [];
 				return [];
@@ -1588,6 +1589,15 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 								</select>
 							</div>
 
+							<div>
+								<label for="pdf-global-opening-size" class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Opening size</label>
+								<select id="pdf-global-opening-size" value={localReaderSettings.pdf.openingFitMode}
+									onchange={(e) => updatePdfSetting('openingFitMode', e.currentTarget.value)}
+									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]">
+									<option value="fit-page">Fit page</option><option value="fit-width">Fit width</option>
+								</select>
+							</div>
+
 							<label for="pdfAutoHideControls" class="settings-toggle-row">
 								<span class="text-sm font-medium text-[var(--color-surface-text)]">Auto-hide Controls</span>
 								<input type="checkbox" id="pdfAutoHideControls" checked={localReaderSettings.pdf.autoHideControls} onchange={(e) => updatePdfSetting('autoHideControls', e.currentTarget.checked)} class="settings-switch">
@@ -1612,7 +1622,7 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					</div>
 					<div>
 						<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Comic Book Reader</h2>
-						<p class="mt-0.5 text-sm leading-5 text-[var(--color-surface-text-muted)]">Settings for CBZ, CBR, CB7, CBT archives</p>
+						<p class="mt-0.5 text-sm leading-5 text-[var(--color-surface-text-muted)]">Global defaults for CBZ, CBR, CB7 and CBT. Comics with saved reading settings keep their own choices.</p>
 					</div>
 				</div>
 				
@@ -1621,61 +1631,31 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 					<div class="settings-subsection">
 						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Display</h3>
 						<div class="settings-field-grid">
+							{#if localReaderSettings.cbx.scrollMode === 'paginated'}
 							<!-- Page Spread -->
 							<div>
 								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page Spread</div>
-								<select 
-									value={localReaderSettings.cbx.pageSpread} 
-									onchange={(e) => updateCbxSetting('pageSpread', e.currentTarget.value)}
-									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-								>
-									<option value="auto">Auto</option>
-									<option value="off">None</option>
-									<option value="even">Even</option>
-									<option value="odd">Odd</option>
-								</select>
+								<ChoiceChips label="Page spread" value={localReaderSettings.cbx.pageSpread} options={[{ id: 'off', name: 'Off' }, { id: 'even', name: 'Even' }, { id: 'odd', name: 'Odd' }]} onchange={(value) => updateCbxSetting('pageSpread', value)} />
 							</div>
+
+							{/if}
 
 							<!-- Fit Mode -->
 							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Fit Mode</div>
-								<select 
-									value={localReaderSettings.cbx.fitMode} 
-									onchange={(e) => updateCbxSetting('fitMode', e.currentTarget.value)}
-									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-								>
-									{#each cbxFitModes as mode}
-										<option value={mode.id}>{mode.name}</option>
-									{/each}
-								</select>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Page size</div>
+								<ChoiceChips label="Page size" value={localReaderSettings.cbx.fitMode} options={cbxFitModes.filter(mode => mode.id !== 'automatic')} onchange={(value) => updateCbxSetting('fitMode', value)} />
 							</div>
 
 							<!-- Scroll Mode -->
 							<div>
 								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Scroll Mode</div>
-								<select 
-									value={localReaderSettings.cbx.scrollMode} 
-									onchange={(e) => updateCbxSetting('scrollMode', e.currentTarget.value)}
-									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-								>
-									{#each cbxScrollModes as mode}
-										<option value={mode.id}>{mode.name}</option>
-									{/each}
-								</select>
+								<ChoiceChips label="Scroll mode" value={localReaderSettings.cbx.scrollMode} options={cbxScrollModes} onchange={(value) => updateCbxSetting('scrollMode', value)} />
 							</div>
 
 							<!-- Reading Direction -->
 							<div>
 								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Reading Direction</div>
-								<select 
-									value={localReaderSettings.cbx.readingDirection} 
-									onchange={(e) => updateCbxSetting('readingDirection', e.currentTarget.value)}
-									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-								>
-									<option value="ltr">Left to Right</option>
-									<option value="rtl">Right to Left (Manga)</option>
-									<option value="webtoon">Webtoon (Vertical)</option>
-								</select>
+								<ChoiceChips label="Reading direction" value={localReaderSettings.cbx.readingDirection} options={[{ id: 'ltr', name: 'Left to right' }, { id: 'rtl', name: 'Right to left' }]} onchange={(value) => updateCbxSetting('readingDirection', value)} />
 							</div>
 
 							<!-- Background Color -->
@@ -1694,46 +1674,12 @@ import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 						</div>
 					</div>
 
-					<!-- Comic-Specific -->
-					<div class="settings-subsection">
-						<h3 class="text-sm font-semibold text-[var(--color-surface-text)] mb-4">Reading Behavior</h3>
-						<div class="settings-field-grid">
-							<!-- Manga Mode -->
-							<label for="mangaMode" class="settings-toggle-row">
-								<span class="text-sm font-medium text-[var(--color-surface-text)]">Manga Mode (RTL)</span>
-								<input type="checkbox" id="mangaMode" checked={localReaderSettings.cbx.mangaMode} onchange={(e) => updateCbxSetting('mangaMode', e.currentTarget.checked)} class="settings-switch">
-							</label>
-
-							<!-- Panel View -->
-							<label for="panelView" class="settings-toggle-row">
-								<span class="text-sm font-medium text-[var(--color-surface-text)]">Guided Panel Zoom</span>
-								<input type="checkbox" id="panelView" checked={localReaderSettings.cbx.panelViewEnabled} onchange={(e) => updateCbxSetting('panelViewEnabled', e.currentTarget.checked)} class="settings-switch">
-							</label>
-
-							<!-- Spread Handling -->
-							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Spread Handling</div>
-								<select 
-									value={localReaderSettings.cbx.spreadHandling} 
-									onchange={(e) => updateCbxSetting('spreadHandling', e.currentTarget.value)}
-									class="w-full px-3 py-2 bg-[var(--color-surface-base)] border border-[var(--color-surface-border)] rounded-lg text-[var(--color-surface-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
-								>
-									<option value="auto">Auto</option>
-									<option value="force-single">Force Single</option>
-									<option value="force-double">Force Double</option>
-									<option value="never-split">Never Split</option>
-								</select>
-							</div>
-
-						</div>
-					</div>
-
 					<div class="settings-subsection">
 						<h3 class="mb-4 text-sm font-semibold text-[var(--color-surface-text)]">Image Adjustments</h3>
 						<div class="settings-field-grid">
 							<!-- Vibrance -->
 							<div>
-								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Vibrance: {localReaderSettings.cbx.vibrance}%</div>
+								<div class="block text-sm font-medium text-[var(--color-surface-text)] mb-2">Brightness: {localReaderSettings.cbx.vibrance}%</div>
 								<input
 									type="range"
 									min="0"

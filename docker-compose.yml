@@ -9,8 +9,12 @@ services:
       - ./data:/data          # SQLite DB, covers, cache
       - /olympus/books:/books        # Book library (read-only or read-write)
       - ./bookdrop:/bookdrop  # Auto-import folder
-      - /home/steven/default_sync/Comics:/default_sync_comics 
+      # - /home/steven/default_sync/Comics:/default_sync_comics 
       - ./config.yaml:/app/config.yaml
+      - /olympus/comics/DC Comics:/DC_Comics
+      - /olympus/comics/Marvel Comics:/Marvel_Comics
+      - /olympus/comics/Other Comics:/Other_Comics
+      - /olympus/comics/Manga:/Manga
     environment:
       - TZ=America/Boise
       - PUID=1000

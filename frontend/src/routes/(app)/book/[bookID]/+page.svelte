@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { isFileAvailable } from '$lib/utils/file-availability';
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -431,7 +432,7 @@
 	}
 
 	function getReadableFormats(): string[] {
-		return uniqueBookFormats(files).filter((format) => {
+		return uniqueBookFormats(files.filter(isFileAvailable)).filter((format) => {
 			if (format === 'cb7') return false;
 			return getReaderRouteKind(format) !== null;
 		});
@@ -442,7 +443,7 @@
 	}
 
 	function getSpeedReadableFormats(): string[] {
-		return uniqueBookFormats(files).filter((format) => format === 'pdf' || getReaderRouteKind(format) === 'epub');
+		return uniqueBookFormats(files.filter(isFileAvailable)).filter((format) => format === 'pdf' || getReaderRouteKind(format) === 'epub');
 	}
 
 	function getPrimaryReadFormat(): string | null {
@@ -499,7 +500,7 @@
 	const readableFormats = $derived(getReadableFormats());
 	const readableFiles = $derived(getReadableFiles());
 	const primaryReadFormat = $derived(getPrimaryReadFormat());
-	const primaryReadFile = $derived(getPrimaryReadableFile(files, book?.resume_file_id, book?.resume_format || primaryReadFormat));
+	const primaryReadFile = $derived(getPrimaryReadableFile(files.filter(isFileAvailable), book?.resume_file_id, book?.resume_format || primaryReadFormat));
 	const primarySpeedReadFormat = $derived(getPrimarySpeedReadFormat());
 	const coverFormat = $derived(primaryReadFile?.format || primaryReadFormat || getPreferredBookFormat(files) || book?.format || book?.resume_format);
 	const isAudioItem = $derived(getReaderRouteKind(coverFormat) === 'audio');
@@ -1477,6 +1478,15 @@
 					{/if}
 
 					<div class="mt-3 mb-4 md:mb-0 flex flex-col gap-2">
+						{#if files.some((file) => !isFileAvailable(file))}
+							<div role="status" class="rounded-lg border border-[var(--color-surface-600)] p-3 text-sm text-[var(--color-surface-text)]">
+								<p class="font-medium">Some book files are unavailable</p>
+								{#each files.filter((file) => !isFileAvailable(file)) as file}
+									<details class="mt-2 break-words"><summary>{getFileName(file.path)} — unavailable</summary><p>{file.availability.message}</p><p class="mt-1 text-xs">{file.path}</p></details>
+								{/each}
+								<button type="button" disabled={loading} onclick={() => void fetchBook({ mode: 'quiet', resetRelated: false })} class="mt-2 underline focus-visible:outline-2">Check again</button>
+							</div>
+						{/if}
 						<div class="relative">
 							<div class="flex w-full overflow-hidden rounded-lg {primaryReadFormat ? 'read-action-control' : ''}">
 								{#if primaryReadFormat}
@@ -1570,7 +1580,7 @@
 							{/if}
 							{#if primarySpeedReadFormat}
 									<a
-											href={getSpeedReaderHref(book.id, book.speed_reader_format || primarySpeedReadFormat, getCurrentBookDetailUrl(), book.speed_reader_file_id)}
+											href={getSpeedReaderHref(book.id, primarySpeedReadFormat, getCurrentBookDetailUrl(), files.find((file) => isFileAvailable(file) && file.format === primarySpeedReadFormat)?.id)}
 											onclick={handleReaderLaunch}
 											class="group flex w-full items-center justify-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-2 text-sm font-medium text-[var(--color-surface-text)] transition-colors duration-200 ease-out hover:border-[var(--color-surface-500)] hover:bg-[var(--color-surface-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] sm:px-4"
 										>
@@ -1975,6 +1985,7 @@
 														</a>
 													{/if}
 													<button
+														disabled={!isFileAvailable(file)}
 														onclick={() => downloadFile(file)}
 													class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-surface-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 													>
@@ -1982,6 +1993,7 @@
 													</button>
 													<div class="relative">
 														<button
+															disabled={!isFileAvailable(file)}
 															onclick={() => toggleConvertMenu(file.id)}
 															class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-700)] px-3 py-1.5 text-sm font-medium text-[var(--color-surface-text)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--color-surface-600)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)]"
 														>

@@ -5,6 +5,7 @@ export type ReaderMode = 'epub_paginated' | 'continuous_text' | 'pdf' | 'comic' 
 export type ProgressSyncState = 'restoring' | 'saving' | 'synced' | 'offline' | 'conflict' | 'error';
 
 export interface ReaderFile {
+	availability?: import('$lib/utils/file-availability').FileAvailability;
 	id: number;
 	format: string;
 	hash?: string;

@@ -22,7 +22,7 @@
 		bare?: boolean;
 	}>();
 
-	const activeStatuses = ['starting', 'queued', 'running', 'cancelling'];
+	const activeStatuses = ['starting', 'queued', 'running', 'cancelling', 'pausing', 'paused'];
 
 	function isActive(status: string) {
 		return activeStatuses.includes(status);
@@ -55,6 +55,8 @@
 				return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
 			case 'running':
 				return 'bg-blue-500/15 text-blue-300 border-blue-500/30';
+			case 'pausing':
+			case 'paused':
 			case 'cancelling':
 				return 'bg-orange-500/15 text-orange-300 border-orange-500/30';
 			case 'queued':
@@ -127,7 +129,7 @@
 	<div class="flex items-start justify-between gap-3">
 		<div class="min-w-0 flex-1">
 			<div class="flex min-w-0 items-center gap-2">
-				{#if isActive(job.status)}
+				{#if isActive(job.status) && job.status !== 'paused'}
 					<svg class="h-4 w-4 shrink-0 animate-scan-spin text-[var(--color-primary-400)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
 					</svg>
@@ -138,6 +140,9 @@
 				<span class="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase {statusClass(job.status)}">{job.status}</span>
 				<span class="text-xs text-[var(--color-surface-text-muted)]">{formatJobType(job.job_type)}</span>
 			</div>
+			{#if job.result?.recovered_after_restart}<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Recovered after restart; completed files are checkpointed.</p>{/if}
+			{#if job.status === 'paused'}<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Paused until you resume. Completed imports are retained.</p>{/if}
+			{#if job.status === 'pausing'}<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Finishing the current file before pausing.</p>{/if}
 			{#if getDetail(job)}
 				<div class="mt-1 text-xs text-[var(--color-surface-text-muted)] {compact ? 'line-clamp-2' : 'break-all'}">{getDetail(job)}</div>
 			{/if}

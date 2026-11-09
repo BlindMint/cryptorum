@@ -64,6 +64,9 @@ server:
   port: 6060
   data_path: /data
 
+scan:
+  preparation_workers: 2  # 1–4; archive extraction and database writes stay serial
+
 auth:
   mode: password            # Required: "password" or "none"
   username: username

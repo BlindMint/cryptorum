@@ -32,6 +32,23 @@ describe('didRestoreLand', () => {
 	it('has nothing to restore when the saved page is the start of the book', () => {
 		expect(didRestoreLand(1, 1)).toBe(true);
 	});
+
+	it('accepts the saved page at the top when a following page dominates the viewport', () => {
+		expect(didRestoreLand(5, 4, [
+			{ pageNumber: 4, viewportY: 0, scaled: { pageY: 10.35, visibleHeight: 277.9 } },
+			{ pageNumber: 5, viewportY: 281.86, scaled: { pageY: 0, visibleHeight: 288.25 } }
+		])).toBe(true);
+	});
+
+	it('rejects a saved page that is merely visible elsewhere or mostly scrolled past', () => {
+		for (const position of [
+			{ viewportY: 200, scaled: { pageY: 0, visibleHeight: 100 } },
+			{ viewportY: 0, scaled: { pageY: 200, visibleHeight: 20 } },
+			{ viewportY: 0, scaled: { pageY: 0, visibleHeight: 0 } }
+		]) {
+			expect(didRestoreLand(5, 4, [{ pageNumber: 4, ...position }])).toBe(false);
+		}
+	});
 });
 
 describe('shouldAdoptDocumentPageCount', () => {

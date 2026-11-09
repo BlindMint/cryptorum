@@ -3,6 +3,7 @@
 	import { PDFViewer } from '@embedpdf/svelte-pdf-viewer';
 	import type { EmbedPdfContainer, PluginRegistry } from '@embedpdf/snippet';
 	import type { ScrollCapability } from '@embedpdf/plugin-scroll/preact';
+	import { ZoomMode } from '@embedpdf/plugin-zoom/preact';
 	import type { ZoomCapability, ZoomScope } from '@embedpdf/plugin-zoom/preact';
 	import type { DocumentManagerCapability } from '@embedpdf/plugin-document-manager/preact';
 	import type { IPlugin } from '@embedpdf/core';
@@ -22,6 +23,7 @@
 		src: string;
 		title?: string;
 		initialPage?: number;
+		openingFitMode?: 'fit-page' | 'fit-width';
 		toolbarVisible?: boolean;
 		onScrollActivity?: (delta: number, scrollTop: number) => void;
 		onPageChange?: (page: number, totalPages: number) => void;
@@ -44,6 +46,7 @@
 		src,
 		title = '',
 		initialPage = 1,
+		openingFitMode = 'fit-page',
 		toolbarVisible = true,
 		onScrollActivity,
 		onPageChange,
@@ -114,7 +117,7 @@
 	}
 
 	function isSearchSidebarOpen() {
-		return !!embedPdfUiScope?.isSidebarOpen?.('right', 'main', 'search-panel');
+		return !!embedPdfUiScope?.isSidebarOpen?.('left', 'main', 'search-panel');
 	}
 
 	function toggleEmbedPdfSearchSidebar() {
@@ -122,9 +125,9 @@
 
 		if (isSearchSidebarOpen()) {
 			clearSearchFocusTimers();
-			embedPdfUiScope.closeSidebarSlot('right', 'main');
+			embedPdfUiScope.closeSidebarSlot('left', 'main');
 		} else {
-			embedPdfUiScope.setActiveSidebar('right', 'main', 'search-panel');
+			embedPdfUiScope.setActiveSidebar('left', 'main', 'search-panel');
 			scheduleSearchInputFocus(true);
 		}
 
@@ -176,7 +179,7 @@
 			closed = true;
 		}
 		if (embedPdfUiScope.isSidebarOpen?.('right', 'main')) {
-			embedPdfUiScope.closeSidebarSlot('right', 'main');
+			embedPdfUiScope.closeSidebarSlot('left', 'main');
 			closed = true;
 		}
 		return closed;
@@ -258,7 +261,7 @@
 		const activeSidebars = uiScope?.getState?.()?.activeSidebars ?? {};
 		const leftOpen = !!uiScope?.isSidebarOpen?.('left', 'main');
 		const rightOpen = !!uiScope?.isSidebarOpen?.('right', 'main');
-		const searchOpen = !!uiScope?.isSidebarOpen?.('right', 'main', 'search-panel');
+		const searchOpen = !!uiScope?.isSidebarOpen?.('left', 'main', 'search-panel');
 		const thumbnailOpen = !!uiScope?.isSidebarOpen?.('left', 'main', 'sidebar-panel');
 
 		return {
@@ -293,22 +296,27 @@
 	) {
 		const targetPage = Math.max(1, Math.floor(initialPage || 1));
 		let measuredPage: number;
+		let metrics: ReturnType<typeof scopedScroll.getMetrics>;
 
 		try {
 			// EmbedPDF updates getCurrentPage() before its deferred DOM scroll runs.
 			// Viewport-derived metrics reflect the page that is actually on screen.
-			measuredPage = scopedScroll.getMetrics().currentPage;
+			metrics = scopedScroll.getMetrics();
+			measuredPage = metrics.currentPage;
 		} catch {
 			return false;
 		}
 
 		if (!restoredInitialPage && targetPage > 1) {
-			if (!didRestoreLand(measuredPage, targetPage)) {
+			if (!didRestoreLand(measuredPage, targetPage, metrics.pageVisibilityMetrics)) {
 				return false;
 			}
 
 			restoredInitialPage = true;
 			clearRestoreTimers();
+			// Report the verified restore target so the parent can settle resume
+			// without replacing saved progress with the adjacent dominant page.
+			measuredPage = targetPage;
 		}
 
 		embedPdfCurrentPage = measuredPage;
@@ -379,6 +387,10 @@
 		const thumbnail = getCapability<any>(registry, 'thumbnail');
 		const documentManager = getCapability<DocumentManagerCapability>(registry, 'document-manager');
 		const ui = getCapability<any>(registry, 'ui');
+		const searchPanel = ui?.getSchema?.().sidebars?.['search-panel'];
+		if (searchPanel) {
+			ui.mergeSchema({ sidebars: { 'search-panel': { ...searchPanel, position: { ...searchPanel.position, placement: 'left', slot: 'main' } } } });
+		}
 		embedPdfZoomScope = zoom?.forDocument?.(documentId) ?? null;
 		embedPdfThumbnailScope = thumbnail?.forDocument?.(documentId) ?? null;
 
@@ -414,7 +426,7 @@
 			setEmbedPdfSidebarOpen(getEmbedPdfSidebarState(uiScope));
 			unsubscribeSidebarChange = uiScope.onSidebarChanged?.((event: any) => {
 				setEmbedPdfSidebarOpen(getEmbedPdfSidebarState(uiScope));
-				if (event?.sidebarId === 'search-panel' && uiScope.isSidebarOpen?.('right', 'main', 'search-panel')) {
+				if (event?.sidebarId === 'search-panel' && uiScope.isSidebarOpen?.('left', 'main', 'search-panel')) {
 					scheduleSearchInputFocus(true);
 				}
 				if (event?.sidebarId === 'sidebar-panel' && uiScope.isSidebarOpen?.('left', 'main', 'sidebar-panel')) {
@@ -533,6 +545,7 @@
 					defaultPageGap: 8
 				},
 				zoom: {
+					defaultZoomLevel: openingFitMode === 'fit-width' ? ZoomMode.FitWidth : ZoomMode.FitPage,
 					minZoom: MIN_PDF_ZOOM,
 					maxZoom: MAX_PDF_ZOOM
 				},

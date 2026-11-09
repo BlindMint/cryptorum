@@ -1,3 +1,5 @@
+import { isFileAvailable, type FileAvailability } from './file-availability';
+
 export const SUPPORTED_AUDIO_FORMATS = ['mp3', 'm4a', 'm4b', 'flac', 'ogg', 'wav'] as const;
 
 const AUDIO_FORMATS = new Set<string>(SUPPORTED_AUDIO_FORMATS);
@@ -11,6 +13,7 @@ export type ReaderRouteKind = 'epub' | 'pdf' | 'cbx' | 'audio' | null;
 export type BookMediaKind = 'book' | 'audio';
 
 export type BookFile = {
+	availability?: FileAvailability;
 	id?: number;
 	format?: string;
 	path?: string;
@@ -122,7 +125,7 @@ export function bookFileName(path: string | null | undefined): string {
 
 export function isReadableBookFile(file: BookFile): boolean {
 	const format = normalizeBookFormat(file?.format);
-	if (!format || format === 'cb7') return false;
+	if (!isFileAvailable(file) || !format) return false;
 	return getReaderRouteKind(format) !== null;
 }
 

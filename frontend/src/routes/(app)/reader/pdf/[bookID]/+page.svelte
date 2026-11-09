@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { requireReadableFile, fileResponseError, checkReaderDelivery } from '$lib/utils/file-availability';
 	import { onMount, onDestroy } from 'svelte';
+	import ReaderSizingControls from '$lib/components/ReaderSizingControls.svelte';
 	import { ZoomMode } from '@embedpdf/plugin-zoom';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -24,6 +26,7 @@
 	let readerFiles = $state<any[]>([]);
 	let loading = $state(true);
 	let error = $state('');
+	let readerErrorDetails = $state('');
 	let currentPage = $state(1);
 	let numPages = $state(0);
 	let savedProgress = $state<any>(null);
@@ -47,12 +50,20 @@
 	let embedPdfSearchOpen = $state(false);
 	let rightSidebarOpen = $state(false);
 	let pdfLoadRetryToken = $state(0);
-	let pdfLoadRetryAttempts = 0;
 	let progressLoaded = false;
 	let wasPageInterrupted = false;
 
 	let settings = $state<PdfReaderSetting>({ ...defaultReaderSettings.pdf });
 	let topBarHideTimeout: ReturnType<typeof setTimeout> | null = null;
+	let bottomBarHeight = $state(86);
+	$effect(() => {
+		const element = pdfProgressBarEl;
+		if (!element) return;
+		const observer = new ResizeObserver(() => bottomBarHeight = element.getBoundingClientRect().height);
+		observer.observe(element);
+		return () => observer.disconnect();
+	});
+
 	let topBarVisible = $state(false);
 	let preserveChromeAfterSeekUntil = 0;
 	let sessionEnded = false;
@@ -596,7 +607,7 @@
 		if (!embedPdfUiScope) return;
 		rightSidebarOpen = false;
 		showTopBar(false);
-		embedPdfUiScope.toggleSidebar?.('right', 'main', 'search-panel');
+		embedPdfUiScope.toggleSidebar?.('left', 'main', 'search-panel');
 	}
 
 	function toggleRightSidebar() {
@@ -631,10 +642,6 @@
 		showTopBar(false);
 	}
 
-	function fitPdfToWidth() {
-		embedPdfZoomScope?.requestZoom?.(ZoomMode.FitWidth);
-		showTopBar(false);
-	}
 
 	function rotatePdf() {
 		embedPdfRotateScope?.rotateForward?.();
@@ -729,7 +736,7 @@
 	}
 
 	async function saveProgress(_keepalive = false, _timeoutMs = 0) {
-		if (!book || !progressController) return;
+		if (!book || !progressController || error || !embedPdfViewerReady) return;
 		if (!progressLoaded || !embedPdfProgressReady || embedPdfRestoringInitialPage || !pdfResumeSettled) return;
 		clearProgressSaveTimer();
 		const percent = numPages > 1 ? ((currentPage - 1) / (numPages - 1)) * 100 : 0;
@@ -803,7 +810,6 @@
 			updateEmbedPdfZoomPercent();
 		}) ?? null;
 		embedPdfViewerReady = embedPdfInitialPage <= 1;
-		pdfLoadRetryAttempts = 0;
 		topBarVisible = true;
 		resetTopBarBehavior();
 		if (embedPdfRestoringInitialPage) {
@@ -811,31 +817,15 @@
 		}
 	}
 
-	function handleEmbedPdfError(message: string) {
-		const normalized = String(message || '');
-		const retryable =
-			normalized.includes('FPDF_LoadMemDocument') ||
-			normalized.toLowerCase().includes('failed to load document');
-
-		if (retryable && pdfLoadRetryAttempts < 1) {
-			pdfLoadRetryAttempts += 1;
-			embedPdfViewerReady = false;
-			unsubscribeEmbedPdfZoomState?.();
-			unsubscribeEmbedPdfZoomState = null;
-			embedPdfUiScope = null;
-			embedPdfZoomScope = null;
-			embedPdfRotateScope = null;
-			embedPdfExportScope = null;
-			embedPdfPrintScope = null;
-			currentZoomPercent = null;
-			currentZoomLevel = null;
-			clearEmbedPdfRestoreTimers();
-			error = '';
-			pdfLoadRetryToken = Date.now();
+	async function handleEmbedPdfError(message: string) {
+		try {
+			await checkReaderDelivery(getPdfSourceUrl());
+		} catch (failure) {
+			error = failure instanceof Error ? failure.message : 'Unable to reach the library. Check your connection and try again.';
 			return;
 		}
-
-		error = normalized || 'Failed to load PDF';
+		error = 'This document could not be opened. It may be damaged, password protected, or unsupported by this reader.';
+		readerErrorDetails = message;
 	}
 
 	onMount(() => {
@@ -857,10 +847,12 @@
 					]);
 					if (bookRes.ok) {
 						book = await bookRes.json();
+					if (!filesRes.ok) throw new Error(await fileResponseError(filesRes));
 					if (filesRes.ok) {
 						readerFiles = await filesRes.json();
 					}
 					activeFile = selectReaderFile(readerFiles, requestedFormat, ['pdf']);
+					requireReadableFile(activeFile);
 					numPages = book.page_count || 0;
 					await startSession();
 					if (
@@ -875,11 +867,11 @@
 					pdfResumeSettled = embedPdfInitialPage <= 1;
 					embedPdfProgressReady = true;
 					} else {
-						error = `Failed to load book details: ${bookRes.status}`;
+						error = await fileResponseError(bookRes);
 					}
 			} catch (e) {
 				console.error('Failed to load book:', e);
-				error = 'Failed to load book';
+				error = e instanceof Error ? e.message : 'Failed to load book. Check your connection and try again.';
 			} finally {
 				loading = false;
 			}
@@ -943,7 +935,7 @@
 
 <div
 	bind:this={pdfReaderEl}
-	class="pdf-reader"
+	class="pdf-reader" style:--reader-bottom-bar-height={`${bottomBarHeight}px`}
 	class:controls-hidden={!topBarVisible}
 	class:reader-loading={!readerChromeReady}
 	style="background-color: {viewModeBgColors[settings.viewMode]};"
@@ -985,17 +977,9 @@
 						<rect x="3" y="14" width="7" height="7"></rect>
 					</svg>
 				</button>
-			</div>
-
-			<div class="nav-center">
-				<span class="book-title">{getPdfDisplayTitle()}</span>
-				<span class="chapter-title">Page {currentPage} / {Math.max(numPages, currentPage)}</span>
-			</div>
-
-			<div class="nav-right">
 				<button
 					onclick={togglePdfSearch}
-					class="nav-btn mobile-secondary"
+					class="nav-btn"
 					class:active={embedPdfSearchOpen}
 					disabled={!embedPdfUiScope}
 					title="Search (Ctrl+F)"
@@ -1005,47 +989,24 @@
 						<line x1="21" y1="21" x2="16.65" y2="16.65"></line>
 					</svg>
 				</button>
+			</div>
 
-				<div class="zoom-controls">
-					<button onclick={zoomPdfOut} class="nav-btn mobile-secondary" disabled={!embedPdfZoomScope} title="Zoom out">
-						<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<line x1="5" y1="12" x2="19" y2="12"></line>
-						</svg>
-					</button>
+			<div class="nav-center">
+				<span class="book-title">{getPdfDisplayTitle()}</span>
+				<span class="chapter-title">Page {currentPage} / {Math.max(numPages, currentPage)}</span>
+			</div>
 
-					<span class="zoom-label" aria-label="Zoom level">{currentZoomPercent === null ? 'Fit' : `${currentZoomPercent}%`}</span>
+			<div class="nav-right">
 
-					<button onclick={zoomPdfIn} class="nav-btn mobile-secondary" disabled={!embedPdfZoomScope} title="Zoom in">
-						<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<line x1="12" y1="5" x2="12" y2="19"></line>
-							<line x1="5" y1="12" x2="19" y2="12"></line>
-						</svg>
-					</button>
 
-					<button
-						onclick={fitPdfToWidth}
-						class="nav-btn"
-						class:active={currentZoomLevel === ZoomMode.FitWidth}
-						disabled={!embedPdfZoomScope}
-						title="Fit to width"
-						aria-label="Fit to width"
-					>
-						<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<path d="M6 3H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h2"></path>
-							<path d="M18 3h2a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-2"></path>
-							<path d="M8 12h8"></path>
-							<path d="m10 9-3 3 3 3"></path>
-							<path d="m14 9 3 3-3 3"></path>
-						</svg>
-					</button>
-				</div>
-
-				<button onclick={rotatePdf} class="nav-btn mobile-secondary" disabled={!embedPdfRotateScope} title="Rotate">
-					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<path d="M21 12a9 9 0 1 1-3-6.7"></path>
-						<polyline points="21 3 21 9 15 9"></polyline>
-					</svg>
-				</button>
+				<ReaderSizingControls
+					currentMode={currentZoomLevel}
+					disabled={!embedPdfZoomScope}
+					onfit={(mode) => { embedPdfZoomScope?.requestZoom?.(mode === 'fit-page' ? ZoomMode.FitPage : mode === 'fit-width' ? ZoomMode.FitWidth : 1); showTopBar(false); }}
+					onzoomout={zoomPdfOut} onzoomin={zoomPdfIn} zoomPercent={currentZoomPercent}
+					onrotate={rotatePdf} rotateDisabled={!embedPdfRotateScope}
+					onopenchange={() => showTopBar(false)}
+				/>
 
 				<button onclick={toggleRightSidebar} class="nav-btn" class:active={rightSidebarOpen} title="Settings">
 					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1054,7 +1015,7 @@
 					</svg>
 				</button>
 
-				<button onclick={toggleFullscreen} class="nav-btn mobile-secondary" title="Fullscreen">
+				<button onclick={toggleFullscreen} class="nav-btn" title="Fullscreen">
 					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<polyline points="15 3 21 3 21 9"></polyline>
 						<polyline points="9 21 3 21 3 15"></polyline>
@@ -1076,11 +1037,13 @@
 		</header>
 	{/if}
 
-	<div class="embedpdf-wrapper">
+	<div class="embedpdf-wrapper" class:settings-open={rightSidebarOpen}>
 		{#if error}
 			<div class="error-message">
 				<p>{error}</p>
-				<a href={getReaderReturnUrl()} class="btn">Return to Library</a>
+				{#if readerErrorDetails}<details><summary>Technical details</summary><p>{readerErrorDetails}</p></details>{/if}
+				<button type="button" class="btn" onclick={() => window.location.reload()}>Try again</button>
+				<a href={getReaderReturnUrl()} class="btn">Back to book</a>
 			</div>
 		{:else if book && embedPdfProgressReady}
 			<div class="embedpdf-viewer-container">
@@ -1090,6 +1053,7 @@
 					title={getPdfDisplayTitle()}
 					initialPage={embedPdfInitialPage}
 					toolbarVisible={false}
+					openingFitMode={settings.openingFitMode}
 					onScrollActivity={handleEmbedPdfScrollActivity}
 					onPageChange={handleEmbedPdfPageChange}
 					onReady={handleEmbedPdfReady}
@@ -1141,6 +1105,14 @@
 				</div>
 
 				<div class="settings-content">
+					<div class="settings-section">
+						<label class="settings-label" for="pdf-opening-size">Opening size</label>
+						<select id="pdf-opening-size" class="settings-select" value={settings.openingFitMode}
+							onchange={(e) => updatePdfSetting('openingFitMode', e.currentTarget.value as 'fit-page' | 'fit-width')}>
+							<option value="fit-page">Fit page</option><option value="fit-width">Fit width</option>
+						</select>
+					</div>
+
 					<div class="settings-section">
 						<label class="settings-label" for="pdf-view-mode">View mode</label>
 						<select
@@ -1220,7 +1192,7 @@
 		left: 0;
 		right: 0;
 		display: grid;
-		grid-template-columns: auto minmax(0, 1fr) auto;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
 		align-items: center;
 		column-gap: 16px;
 		height: var(--reader-top-bar-height);
@@ -1259,11 +1231,6 @@
 		justify-content: flex-end;
 	}
 
-	.zoom-controls {
-		display: flex;
-		align-items: center;
-		gap: 0;
-	}
 
 	.nav-btn {
 		display: flex;
@@ -1319,16 +1286,6 @@
 		white-space: nowrap;
 	}
 
-	.zoom-label {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		min-width: 44px;
-		height: 32px;
-		color: var(--color-surface-text-muted, #94a3b8);
-		font-size: 12px;
-		font-weight: 600;
-	}
 
 	.reader-loading-overlay {
 		position: absolute;
@@ -1520,17 +1477,24 @@
 		}
 	}
 
+	@media (max-width: 900px) {
+		.nav-center { display: none; }
+		.top-nav { grid-template-columns: auto minmax(0, 1fr); }
+	}
+
 	@media (max-width: 640px) {
-		.mobile-secondary,
-		.zoom-label {
-			display: none;
-		}
 
 		.right-sidebar {
 			left: 0;
 			width: auto;
 		}
 	}
+
+	@media (min-width: 901px) {
+		.embedpdf-wrapper.settings-open { right: 360px; }
+	}
+
+	.pdf-reader:not(.controls-hidden) .embedpdf-wrapper { top: var(--reader-top-bar-height); bottom: var(--reader-bottom-bar-height); }
 
 	/* EmbedPDF minimal layout */
 	.embedpdf-wrapper {

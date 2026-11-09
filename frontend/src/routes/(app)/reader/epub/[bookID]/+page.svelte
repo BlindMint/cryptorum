@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { requireReadableFile, fileResponseError } from '$lib/utils/file-availability';
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -204,27 +205,29 @@
 			if (bookRes.ok) {
 				book = await bookRes.json();
 			} else {
-				error = 'Failed to load book details';
-				}
-				if (filesRes.ok) {
-					const files = await filesRes.json();
-					readerFiles = files;
-					const requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
-					const preferredFormat = getPreferredTextFormat(files);
+				throw new Error(await fileResponseError(bookRes));
+			}
+			if (!filesRes.ok) throw new Error(await fileResponseError(filesRes));
+			if (filesRes.ok) {
+				const files = await filesRes.json();
+				readerFiles = files;
+				const requestedFormat = normalizeBookFormat($page.url.searchParams.get('format'));
+				const preferredFormat = getPreferredTextFormat(files);
 				bookFormat = requestedFormat && getReaderRouteKind(requestedFormat) === 'epub'
 					? requestedFormat
 					: preferredFormat || 'epub';
 				activeFile = selectReaderFile(files, bookFormat, preferredFormat ? [preferredFormat, 'epub'] : ['epub']);
+				requireReadableFile(activeFile);
 			}
 		} catch (e) {
 			console.error('Failed to load book:', e);
-			error = 'Failed to load book';
+			error = e instanceof Error ? e.message : 'Failed to load book. Check your connection and try again.';
 		} finally {
 			loading = false;
 			bookLoaded = true;
 		}
 
-		if (book && book.id) {
+		if (book && book.id && !error) {
 			await startSession();
 		}
 
@@ -1511,7 +1514,7 @@
 	}
 
 	async function saveProgressNow(cfi?: string, _timeoutMs = 3500) {
-		if (!book || !progressController) return;
+		if (!book || !progressController || error) return;
 		const percent = currentProgress;
 		const paginated = bookFormat === 'epub' && !settings.continuousMode;
 		const mode: ReaderMode = paginated ? 'epub_paginated' : 'continuous_text';
@@ -1793,7 +1796,7 @@
 
 	$effect(() => {
 		if (readerReady || initialProcessing || error) return;
-		if (bookLoaded && book && !loading) {
+		if (bookLoaded && book && !loading && !error) {
 			tick().then(async () => {
 				initialProcessing = true;
 				processingMessage = 'Loading book content...';
@@ -1882,7 +1885,8 @@
 		<div class="initial-loading-overlay" aria-live="polite">
 			<div class="initial-loading-content">
 				<p class="error-text">{error}</p>
-				<a href={getReaderReturnUrl()} class="btn">Return to Library</a>
+				<button type="button" class="btn" onclick={() => window.location.reload()}>Try again</button>
+				<a href={getReaderReturnUrl()} class="btn">Back to book</a>
 			</div>
 		</div>
 	{/if}
@@ -2158,7 +2162,8 @@
 			{:else if error}
 				<div class="error-message">
 					<p>{error}</p>
-					<a href={getReaderReturnUrl()} class="btn">Return to Library</a>
+					<button type="button" class="btn" onclick={() => window.location.reload()}>Try again</button>
+				<a href={getReaderReturnUrl()} class="btn">Back to book</a>
 				</div>
 			{:else}
 				<!-- Tap zones for navigation in paged mode -->

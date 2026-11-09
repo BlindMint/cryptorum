@@ -134,7 +134,7 @@ export function createEmbedPdfChromePatchController(options: ChromePatchOptions)
 
 		const documentContent = queryFirstDeep('#document-content', root);
 		if (documentContent) {
-			if (sidebarOpen) {
+			if (sidebarOpen && toolbarVisible) {
 				setStyle(documentContent, 'margin-top', 'var(--reader-top-bar-height, 56px)', 'important');
 				setStyle(documentContent, 'height', 'calc(100% - var(--reader-top-bar-height, 56px))', 'important');
 				setStyle(documentContent, 'flex', '0 0 calc(100% - var(--reader-top-bar-height, 56px))', 'important');

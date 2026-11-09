@@ -1,3 +1,4 @@
+import { pickComicReading, resolveComicSettings, type ComicReadingSettings } from '$lib/utils/comic-settings';
 import { writable, derived } from 'svelte/store';
 import { browser } from '$app/environment';
 import { isAudioFormat, SUPPORTED_AUDIO_FORMATS } from '$lib/utils/book-formats';
@@ -46,13 +47,17 @@ export interface EpubReaderSetting {
 
 export type PdfViewMode = 'light' | 'dark' | 'trueDark';
 
+export type OpeningFitMode = 'fit-page' | 'fit-width';
+
 export interface PdfReaderSetting {
+	openingFitMode: OpeningFitMode;
 	autoHideControls: boolean;
 	viewMode: PdfViewMode;
 	useStandardFullscreen: boolean;
 }
 
 export interface CbxReaderSetting {
+	openingFitMode: OpeningFitMode;
 	pageSpread: 'off' | 'even' | 'odd' | 'auto';
 	pageLayout: 'single' | 'double';
 	fitMode: 'fit-page' | 'fit-width' | 'fit-height' | 'actual-size' | 'automatic';
@@ -118,6 +123,8 @@ export interface SpeedReaderSetting {
 }
 
 export interface ReaderSettings {
+	comicOverrides?: Record<string, ComicReadingSettings>;
+	comicPreferencesVersion?: number;
 	keepScreenOnWhileReading: boolean;
 	keepScreenOnWhileAppOpen: boolean;
 	readerTheme: string;
@@ -174,14 +181,16 @@ export const defaultReaderSettings: ReaderSettings = {
 		imageGrayscale: false
 	},
 	pdf: {
+		openingFitMode: 'fit-page',
 		autoHideControls: true,
 		viewMode: 'dark',
 		useStandardFullscreen: false
 	},
 	cbx: {
-		pageSpread: 'auto',
+		openingFitMode: 'fit-page',
+		pageSpread: 'off',
 		pageLayout: 'single',
-		fitMode: 'fit-width',
+		fitMode: 'fit-page',
 		scrollMode: 'paginated',
 		backgroundColor: '#111111',
 		readingDirection: 'ltr',
@@ -261,6 +270,7 @@ function loadSettings(): ReaderSettings {
 }
 
 function migrateSettings(settings: ReaderSettings): ReaderSettings {
+	settings = normalizeComicPreferences(settings);
 	const version = Number(localStorage.getItem(READER_SETTINGS_VERSION_KEY) || '0');
 	if (version >= READER_SETTINGS_VERSION) {
 		const readerTheme = settings.readerTheme || settings.epub?.theme || settings.speedReader?.theme || DEFAULT_READER_THEME;
@@ -298,8 +308,26 @@ function migrateSettings(settings: ReaderSettings): ReaderSettings {
 	};
 }
 
+function normalizeComicPreferences(value: ReaderSettings): ReaderSettings {
+	const legacy = value.comicPreferencesVersion !== 1;
+	const cbx = { ...value.cbx };
+	if (legacy) {
+		if (cbx.openingFitMode === 'fit-width' && cbx.fitMode === 'fit-page') cbx.fitMode = 'fit-width';
+		if (cbx.mangaMode) cbx.readingDirection = 'rtl';
+		if (cbx.readingDirection === 'webtoon') {
+			cbx.readingDirection = 'ltr';
+			cbx.scrollMode = 'infinite';
+		}
+	}
+	if (cbx.pageSpread === 'auto') cbx.pageSpread = 'off';
+	if (cbx.fitMode === 'automatic') cbx.fitMode = 'fit-page';
+	cbx.mangaMode = false;
+	return { ...value, cbx, comicPreferencesVersion: 1 };
+}
+
 function normalizePdfSettings(settings: (Partial<PdfReaderSetting> & Record<string, any>) | undefined): PdfReaderSetting {
 	return {
+		openingFitMode: settings?.openingFitMode === 'fit-width' ? 'fit-width' : 'fit-page',
 		autoHideControls: settings?.autoHideControls ?? defaultReaderSettings.pdf.autoHideControls,
 		viewMode: settings?.viewMode ?? defaultReaderSettings.pdf.viewMode,
 		useStandardFullscreen: settings?.useStandardFullscreen ?? defaultReaderSettings.pdf.useStandardFullscreen
@@ -324,6 +352,7 @@ function createReaderSettingsStore() {
 	let pendingBackendSave: ReaderSettings | null = null;
 
 	function normalizeSettings(value: ReaderSettings): ReaderSettings {
+		value = normalizeComicPreferences(value);
 		const readerTheme = value.readerTheme || value.epub?.theme || value.speedReader?.theme || DEFAULT_READER_THEME;
 		return {
 			...value,
@@ -428,6 +457,32 @@ function createReaderSettingsStore() {
 				persistLocal(newSettings);
 				scheduleSaveToBackend(newSettings);
 				return newSettings;
+			});
+		},
+		setComicOverride: (bookId: string, enabled: boolean) => {
+			update(s => {
+				const overrides = { ...s.comicOverrides };
+				if (enabled) overrides[bookId] = pickComicReading(resolveComicSettings(s.cbx, overrides[bookId]));
+				else delete overrides[bookId];
+				const next = touchSettings({ ...s, comicOverrides: overrides });
+				persistLocal(next);
+				scheduleSaveToBackend(next);
+				return next;
+			});
+		},
+		updateComic: (bookId: string, patch: Partial<CbxReaderSetting>) => {
+			update(s => {
+				const override = s.comicOverrides?.[bookId];
+				const reading = Object.keys(pickComicReading(s.cbx));
+				const globalPatch = Object.fromEntries(Object.entries(patch).filter(([key]) => !override || !reading.includes(key)));
+				const next = touchSettings({
+					...s,
+					cbx: { ...s.cbx, ...globalPatch },
+					...(override ? { comicOverrides: { ...s.comicOverrides, [bookId]: pickComicReading({ ...resolveComicSettings(s.cbx, override), ...patch }) } } : {})
+				});
+				persistLocal(next);
+				scheduleSaveToBackend(next);
+				return next;
 			});
 		},
 		updateAudio: (audioSettings: Partial<AudioReaderSetting>) => {

@@ -1,3 +1,4 @@
+import { checkReaderDelivery } from '$lib/utils/file-availability';
 import { browser } from '$app/environment';
 import { get, writable } from 'svelte/store';
 import { readerSettings } from '$lib/stores/readerSettings';
@@ -385,6 +386,16 @@ function createAudioPlayerStore() {
 			audio.removeAttribute('src');
 			audio.load();
 			update((state) => ({ ...state, isLoading: false, error: 'This queued file is currently unavailable.' }));
+			return;
+		}
+		try {
+			await checkReaderDelivery(source);
+			if (currentItem()?.id !== item.id) return;
+		} catch (failure) {
+			if (currentItem()?.id !== item.id) return;
+			audio.removeAttribute('src');
+			audio.load();
+			update((state) => ({ ...state, isLoading: false, error: failure instanceof Error ? failure.message : 'Unable to reach the library. Check your connection and try again.' }));
 			return;
 		}
 		const speed = item.playback_speed ?? (item.category === 'music' ? get(readerSettings).audio.musicPlaybackSpeed : get(readerSettings).audio.playbackSpeed);

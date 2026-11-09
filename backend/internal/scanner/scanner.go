@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"cryptorum/internal/audiometa"
@@ -44,9 +46,12 @@ var supportedFormats = map[string]bool{
 
 // Scanner handles library scanning
 type Scanner struct {
-	db         *sql.DB
-	dataPath   string
-	coversPath string
+	db                 *sql.DB
+	dataPath           string
+	coversPath         string
+	preparationWorkers int
+	extractionSlot     chan struct{}
+	scanMu             sync.Mutex
 }
 
 type ScanProgress struct {
@@ -63,6 +68,7 @@ type ScanProgress struct {
 	RelinkedFiles  int
 	DuplicateFiles int
 	Phase          string
+	Timings        ScanTimings
 }
 
 type ScanProgressFunc func(progress ScanProgress)
@@ -70,11 +76,17 @@ type ScanCancelFunc func() bool
 
 // New creates a new scanner
 func New(db *sql.DB, dataPath string, coversPath string) *Scanner {
-	return &Scanner{
-		db:         db,
-		dataPath:   dataPath,
-		coversPath: coversPath,
+	return NewWithWorkers(db, dataPath, coversPath, DefaultPreparationWorkers)
+}
+
+func NewWithWorkers(db *sql.DB, dataPath, coversPath string, workers int) *Scanner {
+	if workers < 1 {
+		workers = DefaultPreparationWorkers
 	}
+	if workers > MaxPreparationWorkers {
+		workers = MaxPreparationWorkers
+	}
+	return &Scanner{db: db, dataPath: dataPath, coversPath: coversPath, preparationWorkers: workers, extractionSlot: make(chan struct{}, 1)}
 }
 
 // ScanLibrary scans a library path and imports new books
@@ -88,27 +100,46 @@ func (s *Scanner) ScanLibraryWithProgress(libraryID int64, paths []string, onPro
 }
 
 func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []string, onProgress ScanProgressFunc, shouldCancel ScanCancelFunc) (int, error) {
+	return s.ScanLibraryWithOptions(libraryID, paths, onProgress, shouldCancel, ScanOptions{Reconcile: true})
+}
+
+func (s *Scanner) ScanLibraryWithOptions(libraryID int64, paths []string, onProgress ScanProgressFunc, shouldCancel ScanCancelFunc, options ScanOptions) (int, error) {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+	started := time.Now()
+
+	if shouldCancel != nil && shouldCancel() {
+		return 0, ErrScanCancelled
+	}
 	var ownerUserID int64 = 1
 	mediaScope := "mixed"
 	_ = s.db.QueryRow(`SELECT COALESCE(owner_user_id, 1), COALESCE(media_scope, 'mixed') FROM library WHERE id = ?`, libraryID).Scan(&ownerUserID, &mediaScope)
 
-	progress := ScanProgress{Phase: "inventory"}
-	files, err := collectProcessableFiles(paths, shouldCancel)
-	if errors.Is(err, ErrScanCancelled) {
-		progress.Phase = "cancelled"
+	if err := validateScanRoots(paths); err != nil {
+		return 0, err
+	}
+	progress := ScanProgress{Phase: "inventory", Timings: ScanTimings{Workers: s.preparationWorkers}}
+	defer func() {
+		slog.Info("Scan stage timings", "library_id", libraryID, "preparation_workers", s.preparationWorkers, "inventory_ms", progress.Timings.InventoryMS, "hash_ms", progress.Timings.HashMS, "metadata_ms", progress.Timings.MetadataMS, "cover_ms", progress.Timings.CoverMS, "commit_ms", progress.Timings.CommitMS, "checkpoint_ms", progress.Timings.CheckpointMS, "elapsed_ms", elapsedMS(started))
+	}()
+	emit := func() {
+		progress.Timings.ElapsedMS = elapsedMS(started)
 		if onProgress != nil {
 			onProgress(progress)
 		}
+	}
+	files, err := collectProcessableFiles(paths, shouldCancel)
+	if errors.Is(err, ErrScanCancelled) {
+		progress.Phase = "cancelled"
+		emit()
 		return 0, ErrScanCancelled
 	}
 	if err != nil {
-		slog.Warn("Library inventory completed with errors", "libraryID", libraryID, "error", err)
+		return 0, fmt.Errorf("library inventory incomplete; check mounted folders and permissions: %w", err)
 	}
 	files = filterFilesForMediaScope(files, mediaScope)
 	progress.TotalFiles = len(files)
-	if onProgress != nil {
-		onProgress(progress)
-	}
+	emit()
 
 	imported := 0
 	scanStartedAt := time.Now().Unix()
@@ -122,83 +153,109 @@ func (s *Scanner) ScanLibraryWithProgressAndCancel(libraryID int64, paths []stri
 		return 0, err
 	}
 
-	missing, err := s.markMissingFiles(libraryID, seenPaths, scanStartedAt)
+	checkpoints, err := s.loadCheckpoints(options.JobID)
 	if err != nil {
-		slog.Warn("Failed to pre-mark missing files", "libraryID", libraryID, "error", err)
-	} else {
-		progress.MissingFiles = missing
+		return imported, err
 	}
-
+	progress.Timings.InventoryMS = elapsedMS(started)
 	progress.Phase = "processing"
-	if onProgress != nil {
-		onProgress(progress)
-	}
-	for _, file := range files {
-		if shouldCancel != nil && shouldCancel() {
-			progress.Phase = "cancelled"
-			if onProgress != nil {
-				onProgress(progress)
+	emit()
+	prepare := func(ctx context.Context, file fileInventoryItem) preparedFile {
+		if record, ok := checkpoints[file.Path]; ok && record.Status != "failed" && record.Size == file.Size && record.ModifiedNS == file.ModTimeNS {
+			if known, ok := existing[file.Path]; ok && known.IndexingComplete && known.HasMetadata && known.MissingAt == 0 && known.Size == file.Size && known.LastModified == file.ModTimeUnix {
+				return preparedFile{file: file, fastStatus: record.Status, checkpointed: true}
 			}
-			return imported, ErrScanCancelled
 		}
-		if record, ok := existing[file.Path]; ok &&
-			record.Size == file.Size &&
-			record.LastModified == file.ModTimeUnix &&
-			record.MissingAt == 0 &&
-			record.HashAlgorithm == fullFileHashAlgorithm {
+		_, checkpointExists := checkpoints[file.Path]
+		if record, ok := existing[file.Path]; ok && !checkpointExists && record.Size == file.Size && record.LastModified == file.ModTimeUnix && record.MissingAt == 0 && record.HashAlgorithm == fullFileHashAlgorithm && record.IndexingComplete && record.HasMetadata {
+			return preparedFile{file: file, fastStatus: "unchanged"}
+		}
+		return s.prepareFile(ctx, libraryID, file)
+	}
+	consume := func(value preparedFile) error {
+		file := value.file
+		progress.Timings.HashMS += value.timings.HashMS
+		progress.Timings.MetadataMS += value.timings.MetadataMS
+		progress.Timings.CoverMS += value.timings.CoverMS
+		status := value.fastStatus
+		result := processFileResult{}
+		fileErr := value.err
+		if fileErr == nil && status != "" {
+			fileErr = unchangedSinceInventory(file)
+		}
+		if fileErr != nil {
+			value.checkpointed = false
+		}
+
+		commitStart := time.Now()
+		if fileErr == nil && status == "" {
+			result, fileErr = s.processPreparedFile(libraryID, value, ownerUserID, scanStartedAt)
+			status = result.Status
+		} else if fileErr == nil && status == "unchanged" && !value.checkpointed {
+			record := existing[file.Path]
 			if shouldUseFilenameMetadata(record.Title, record.AuthorsRaw) {
 				if err := s.saveFilenameFallbackMetadataIfWeak(record.BookID, file.Path, ownerUserID); err != nil {
 					slog.Debug("Skipped filename metadata fallback", "path", file.Path, "error", err)
 				}
 			}
-			progress.ScannedFiles++
-			progress.UnchangedFiles++
-			progress.CurrentPath = file.Path
-			progress.CurrentStatus = "unchanged"
-			progress.CurrentError = ""
-			if onProgress != nil {
-				onProgress(progress)
-			}
-			continue
 		}
-
-		result, err := s.processFileWithInfo(libraryID, file, ownerUserID, scanStartedAt)
+		progress.Timings.CommitMS += elapsedMS(commitStart)
 		progress.ScannedFiles++
 		progress.CurrentPath = file.Path
-		if err != nil {
-			progress.FailedFiles++
-			progress.CurrentStatus = "failed"
-			progress.CurrentError = err.Error()
-			slog.Error("Failed to process file", "path", file.Path, "error", err)
-			if onProgress != nil {
-				onProgress(progress)
-			}
-			continue
-		}
-		if result.Imported {
-			imported++
-			progress.ImportedBooks++
-		}
-		switch result.Status {
-		case scanStatusChanged:
-			progress.ChangedFiles++
-		case scanStatusRelinked, scanStatusMovedLibrary, scanStatusRestored:
-			progress.RelinkedFiles++
-		case scanStatusDuplicate:
-			progress.DuplicateFiles++
-		}
-		progress.CurrentStatus = result.Status
 		progress.CurrentError = ""
-		if onProgress != nil {
-			onProgress(progress)
+		if fileErr != nil {
+			status = "failed"
+			progress.FailedFiles++
+			progress.CurrentError = fileErr.Error()
+			slog.Error("Failed to process file", "path", file.Path, "error", fileErr)
+		} else {
+			if result.Imported || (value.checkpointed && status == scanStatusImported) {
+				imported++
+				progress.ImportedBooks++
+			}
+			countScanStatus(&progress, status)
 		}
-		time.Sleep(5 * time.Millisecond)
+		if !value.checkpointed {
+			checkpointStart := time.Now()
+			checkpointErr := s.saveCheckpoint(options.JobID, file, status, progress.CurrentError)
+			progress.Timings.CheckpointMS += elapsedMS(checkpointStart)
+			if checkpointErr != nil {
+				return checkpointErr
+			}
+		}
+		progress.CurrentStatus = status
+		emit()
+		return nil
+	}
+	err = runPreparationPipeline(context.Background(), s.preparationWorkers, files, prepare, consume, shouldCancel)
+	if err != nil {
+		if errors.Is(err, ErrScanCancelled) {
+			progress.Phase = "cancelled"
+			emit()
+		}
+		return imported, err
+	}
+	if shouldCancel != nil && shouldCancel() {
+		progress.Phase = "cancelled"
+		emit()
+		return imported, ErrScanCancelled
 	}
 
-	progress.Phase = "complete"
-	if onProgress != nil {
-		onProgress(progress)
+	if progress.FailedFiles > 0 {
+		return imported, fmt.Errorf("%d files could not be imported; resume to retry failed files", progress.FailedFiles)
 	}
+	if options.Reconcile {
+		// Revalidate roots before reconciling: a mount may have disappeared mid-scan.
+		if err := validateScanRoots(paths); err != nil {
+			return imported, err
+		}
+		progress.MissingFiles, err = s.markMissingFiles(libraryID, seenPaths, scanStartedAt, paths)
+		if err != nil {
+			return imported, err
+		}
+	}
+	progress.Phase = "complete"
+	emit()
 
 	return imported, nil
 }
@@ -222,6 +279,7 @@ type fileInventoryItem struct {
 	Format      string
 	Size        int64
 	ModTimeUnix int64
+	ModTimeNS   int64
 }
 
 type processFileResult struct {
@@ -240,9 +298,7 @@ const (
 )
 
 func (s *Scanner) extractMetadata(bookID, libraryID int64, path string) (*metadata.BookMetadata, error) {
-	return metadata.ExtractWithOptions(path, metadata.ExtractOptions{
-		ComicSpreadFallbackSide: s.resolveComicSpreadFallback(bookID, libraryID),
-	})
+	return s.extractMetadataContext(context.Background(), bookID, libraryID, path)
 }
 
 func (s *Scanner) resolveComicSpreadFallback(bookID, libraryID int64) string {
@@ -270,20 +326,23 @@ func (s *Scanner) resolveComicSpreadFallback(bookID, libraryID int64) string {
 }
 
 type existingFileRecord struct {
-	ID            int64
-	BookID        int64
-	Path          string
-	Size          int64
-	Hash          string
-	HashAlgorithm string
-	LastModified  int64
-	MissingAt     int64
-	Title         string
-	AuthorsRaw    string
+	ID               int64
+	BookID           int64
+	Path             string
+	Size             int64
+	Hash             string
+	HashAlgorithm    string
+	LastModified     int64
+	MissingAt        int64
+	Title            string
+	AuthorsRaw       string
+	IndexingComplete bool
+	HasMetadata      bool
 }
 
 func collectProcessableFiles(paths []string, shouldCancel ScanCancelFunc) ([]fileInventoryItem, error) {
 	files := []fileInventoryItem{}
+	seen := map[string]bool{}
 	var firstErr error
 	for _, root := range paths {
 		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
@@ -306,15 +365,24 @@ func collectProcessableFiles(paths []string, shouldCancel ScanCancelFunc) ([]fil
 				}
 				return nil
 			}
+			if !info.Mode().IsRegular() {
+				return nil
+			}
 			ext := strings.ToLower(filepath.Ext(path))
 			if ext != "" {
 				ext = ext[1:]
 			}
+			path = filepath.Clean(path)
+			if seen[path] {
+				return nil
+			}
+			seen[path] = true
 			files = append(files, fileInventoryItem{
 				Path:        path,
 				Format:      ext,
 				Size:        info.Size(),
 				ModTimeUnix: info.ModTime().Unix(),
+				ModTimeNS:   info.ModTime().UnixNano(),
 			})
 			return nil
 		})
@@ -332,7 +400,7 @@ func (s *Scanner) loadLibraryFileInventory(libraryID int64) (map[string]existing
 	rows, err := s.db.Query(`
 		SELECT bf.id, bf.book_id, bf.path, bf.size, bf.hash, COALESCE(bf.hash_algorithm, ''),
 		       bf.last_modified, COALESCE(bf.missing_at, 0),
-		       COALESCE(bm.title, ''), COALESCE(bm.authors, '[]')
+		       COALESCE(bm.title, ''), COALESCE(bm.authors, '[]'), bf.indexing_complete, bm.book_id IS NOT NULL
 		FROM book_file bf
 		JOIN book b ON b.id = bf.book_id
 		LEFT JOIN book_metadata bm ON bm.book_id = b.id
@@ -357,6 +425,8 @@ func (s *Scanner) loadLibraryFileInventory(libraryID int64) (map[string]existing
 			&record.MissingAt,
 			&record.Title,
 			&record.AuthorsRaw,
+			&record.IndexingComplete,
+			&record.HasMetadata,
 		); err != nil {
 			continue
 		}
@@ -366,7 +436,7 @@ func (s *Scanner) loadLibraryFileInventory(libraryID int64) (map[string]existing
 	return records, rows.Err()
 }
 
-func (s *Scanner) markMissingFiles(libraryID int64, seenPaths map[string]struct{}, scanStartedAt int64) (int, error) {
+func (s *Scanner) markMissingFiles(libraryID int64, seenPaths map[string]struct{}, scanStartedAt int64, roots []string) (int, error) {
 	rows, err := s.db.Query(`
 		SELECT bf.id, bf.path
 		FROM book_file bf
@@ -386,16 +456,32 @@ func (s *Scanner) markMissingFiles(libraryID int64, seenPaths map[string]struct{
 			continue
 		}
 		if _, ok := seenPaths[path]; !ok {
-			missingIDs = append(missingIDs, id)
+			if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+				missingIDs = append(missingIDs, id)
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
 	for _, id := range missingIDs {
-		if _, err := s.db.Exec(`UPDATE book_file SET missing_at = ? WHERE id = ?`, scanStartedAt, id); err != nil {
-			return len(missingIDs), err
+		if _, err := tx.Exec(`UPDATE book_file SET missing_at=? WHERE id=? AND missing_at IS NULL`, scanStartedAt, id); err != nil {
+			return 0, err
 		}
+	}
+	if err := validateScanRoots(roots); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
 	}
 	return len(missingIDs), nil
 }
@@ -551,6 +637,7 @@ func (s *Scanner) processFile(libraryID int64, path string, ownerUserID int64) (
 		Format:      ext,
 		Size:        info.Size(),
 		ModTimeUnix: info.ModTime().Unix(),
+		ModTimeNS:   info.ModTime().UnixNano(),
 	}, ownerUserID, time.Now().Unix())
 	return result.Imported, err
 }
@@ -561,11 +648,19 @@ func (s *Scanner) processFileWithInfo(
 	ownerUserID int64,
 	scanSeenAt int64,
 ) (processFileResult, error) {
-	hashes, err := computeFileHashes(file.Path)
-	if err != nil {
-		return processFileResult{}, fmt.Errorf("failed to compute hash: %w", err)
+	value := s.prepareFile(context.Background(), libraryID, file)
+	if value.err != nil {
+		return processFileResult{}, value.err
 	}
+	return s.processPreparedFile(libraryID, value, ownerUserID, scanSeenAt)
+}
 
+func (s *Scanner) processPreparedFile(libraryID int64, value preparedFile, ownerUserID, scanSeenAt int64) (processFileResult, error) {
+	file, hashes := value.file, value.hashes
+	if err := unchangedSinceInventory(file); err != nil {
+		return processFileResult{}, err
+	}
+	var err error
 	// Check if path already exists before duplicate detection so rescans can repair
 	// weak metadata from older extraction logic.
 	var existingFileID int64
@@ -599,6 +694,16 @@ func (s *Scanner) processFileWithInfo(
 		if existingHash != hashes.Full {
 			slog.Info("Updated file hash", "path", file.Path)
 		}
+		var hasMetadata bool
+		if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM book_metadata WHERE book_id = ?)`, existingBookID).Scan(&hasMetadata); err != nil {
+			return processFileResult{}, err
+		}
+		if !hasMetadata {
+			meta, _ := s.extractMetadata(existingBookID, libraryID, file.Path)
+			if err := s.saveMetadata(existingBookID, metadataWithFilenameTitleFallback(meta, file.Path), ownerUserID); err != nil {
+				return processFileResult{}, err
+			}
+		}
 		if repairsExtractedMetadata(file.Format) {
 			if repairErr := s.repairWeakExtractedMetadata(existingBookID, file.Path, ownerUserID); repairErr != nil {
 				slog.Debug("Skipped metadata repair", "path", file.Path, "error", repairErr)
@@ -608,9 +713,21 @@ func (s *Scanner) processFileWithInfo(
 			slog.Debug("Skipped filename metadata fallback", "path", file.Path, "error", repairErr)
 		}
 		if audioErr := audiometa.SyncFile(s.db, ownerUserID, existingBookID, existingFileID, file.Path, file.Format, hashes.Full); audioErr != nil {
-			slog.Warn("Failed to index audio metadata", "path", file.Path, "error", audioErr)
+			return processFileResult{}, fmt.Errorf("audio indexing: %w", audioErr)
 		}
+		s.syncFTSFromDB(existingBookID)
+		if err := unchangedSinceInventory(file); err != nil {
+			return processFileResult{}, err
+		}
+		if _, err := s.db.Exec(`UPDATE book_file SET indexing_complete = 1 WHERE id = ?`, existingFileID); err != nil {
+			return processFileResult{}, err
+		}
+
 		return processFileResult{Status: status}, nil
+	}
+
+	if !errors.Is(err, sql.ErrNoRows) {
+		return processFileResult{}, err
 	}
 
 	match, hasRelinkableMatch, hasActiveDuplicate, hasActiveDuplicateInLibrary, err := s.findRelinkableChecksumMatch(libraryID, file, hashes, scanSeenAt)
@@ -625,7 +742,18 @@ func (s *Scanner) processFileWithInfo(
 		if match.LibraryID != libraryID {
 			status = scanStatusMovedLibrary
 		}
+		if err := audiometa.SyncFile(s.db, ownerUserID, match.BookID, match.FileID, file.Path, file.Format, hashes.Full); err != nil {
+			return processFileResult{}, err
+		}
+		s.syncFTSFromDB(match.BookID)
+		if err := unchangedSinceInventory(file); err != nil {
+			return processFileResult{}, err
+		}
+		if _, err := s.db.Exec(`UPDATE book_file SET indexing_complete=1 WHERE id=?`, match.FileID); err != nil {
+			return processFileResult{}, err
+		}
 		slog.Info("Relinked moved book file", "path", file.Path, "bookID", match.BookID, "fromLibraryID", match.LibraryID, "toLibraryID", libraryID)
+
 		return processFileResult{Status: status}, nil
 	}
 	if hasActiveDuplicateInLibrary {
@@ -636,9 +764,28 @@ func (s *Scanner) processFileWithInfo(
 		slog.Debug("Importing duplicate content into a different library", "path", file.Path, "hash", hashes.Full)
 	}
 
-	now := time.Now().Unix()
+	meta := value.meta
+	preparedCover := value.cover
+	if !value.metadataReady {
+		var extractErr error
+		meta, extractErr = s.extractMetadata(0, libraryID, file.Path)
+		if extractErr != nil {
+			slog.Warn("Metadata extraction failed; using filename fallback", "path", file.Path, "error", extractErr)
+		}
+		meta = metadataWithFilenameTitleFallback(meta, file.Path)
+		preparedCover = prepareCover(meta, s.db)
+	}
 
-	result, err := s.db.Exec(`
+	if err := unchangedSinceInventory(file); err != nil {
+		return processFileResult{}, err
+	}
+	now := time.Now().Unix()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return processFileResult{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`
 		INSERT INTO book (library_id, added_at, last_scanned, owner_user_id) VALUES (?, ?, ?, ?)
 	`, libraryID, now, now, ownerUserID)
 	if err != nil {
@@ -650,28 +797,33 @@ func (s *Scanner) processFileWithInfo(
 		return processFileResult{}, fmt.Errorf("failed to get book ID: %w", err)
 	}
 
-	fileResult, err := s.db.Exec(`
-		INSERT INTO book_file (book_id, path, format, size, hash, hash_algorithm, last_modified, owner_user_id, scan_seen_at, missing_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+	fileResult, err := tx.Exec(`
+		INSERT INTO book_file (book_id, path, format, size, hash, hash_algorithm, last_modified, owner_user_id, scan_seen_at, missing_at, indexing_complete)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)
 	`, bookID, file.Path, file.Format, file.Size, hashes.Full, fullFileHashAlgorithm, file.ModTimeUnix, ownerUserID, scanSeenAt)
 	if err != nil {
 		return processFileResult{}, fmt.Errorf("failed to insert book file: %w", err)
 	}
 
-	// Extract and save metadata immediately
-	meta, err := s.extractMetadata(bookID, libraryID, file.Path)
-	if err != nil {
-		slog.Warn("Failed to extract metadata", "path", file.Path, "error", err)
+	if err := s.saveMetadataPrepared(tx, bookID, meta, ownerUserID, "scanner", preparedCover, true); err != nil {
+		return processFileResult{}, err
 	}
-	meta = metadataWithFilenameTitleFallback(meta, file.Path)
-	if saveErr := s.saveMetadata(bookID, meta, ownerUserID); saveErr != nil {
-		slog.Warn("Failed to save metadata", "path", file.Path, "error", saveErr)
+	if err := tx.Commit(); err != nil {
+		return processFileResult{}, err
 	}
+	s.syncFTSFromDB(bookID)
+
 	fileID, fileIDErr := fileResult.LastInsertId()
 	if fileIDErr == nil {
 		if audioErr := audiometa.SyncFile(s.db, ownerUserID, bookID, fileID, file.Path, file.Format, hashes.Full); audioErr != nil {
-			slog.Warn("Failed to index audio metadata", "path", file.Path, "error", audioErr)
+			return processFileResult{}, fmt.Errorf("audio indexing: %w", audioErr)
 		}
+	}
+	if err := unchangedSinceInventory(file); err != nil {
+		return processFileResult{}, err
+	}
+	if _, err := s.db.Exec(`UPDATE book_file SET indexing_complete = 1 WHERE id = ?`, fileID); err != nil {
+		return processFileResult{}, err
 	}
 
 	slog.Info("Imported new book", "path", file.Path, "bookID", bookID)
@@ -679,6 +831,7 @@ func (s *Scanner) processFileWithInfo(
 	if hasActiveDuplicate {
 		status = scanStatusDuplicate
 	}
+
 	return processFileResult{Imported: true, Status: status}, nil
 }
 
@@ -732,7 +885,7 @@ func (s *Scanner) updateKnownBookFile(
 	if _, err := tx.Exec(`
 		UPDATE book_file
 		SET path = ?, format = ?, size = ?, hash = ?, hash_algorithm = ?, last_modified = ?,
-		    scan_seen_at = ?, missing_at = NULL, owner_user_id = ?
+		    scan_seen_at = ?, missing_at = NULL, owner_user_id = ?, indexing_complete = 0
 		WHERE id = ?
 	`, file.Path, file.Format, file.Size, hashes.Full, fullFileHashAlgorithm, file.ModTimeUnix, scanSeenAt, ownerUserID, fileID); err != nil {
 		return err
@@ -937,17 +1090,32 @@ func (s *Scanner) saveMetadata(bookID int64, meta *metadata.BookMetadata, ownerU
 }
 
 func (s *Scanner) saveMetadataWithSource(bookID int64, meta *metadata.BookMetadata, ownerUserID int64, source string) error {
+	return s.saveMetadataInTransaction(nil, bookID, meta, ownerUserID, source)
+}
+
+func (s *Scanner) saveMetadataInTransaction(tx *sql.Tx, bookID int64, meta *metadata.BookMetadata, ownerUserID int64, source string) error {
+	return s.saveMetadataPrepared(tx, bookID, meta, ownerUserID, source, nil, false)
+}
+
+func (s *Scanner) saveMetadataPrepared(tx *sql.Tx, bookID int64, meta *metadata.BookMetadata, ownerUserID int64, source string, processedCover []byte, coverReady bool) error {
 	if meta == nil {
 		return nil
 	}
 
+	if !coverReady {
+		processedCover = prepareCover(meta, s.db)
+	}
 	authorsJSON, _ := json.Marshal(meta.Authors)
 	tagsJSON, _ := json.Marshal(meta.Genres)
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
+	ownTransaction := tx == nil
+	var err error
+	if ownTransaction {
+		tx, err = s.db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 	}
-	defer tx.Rollback()
 
 	current, exists, err := metaprotection.LoadSnapshot(tx, bookID)
 	if err != nil {
@@ -1015,18 +1183,14 @@ func (s *Scanner) saveMetadataWithSource(bookID int64, meta *metadata.BookMetada
 	applyInt(metaprotection.FieldPageCount, meta.PageCount, &current.PageCount)
 
 	newCoverPath := ""
-	if len(meta.CoverData) > 0 && !locked[metaprotection.FieldCover] && current.CoverSource != "custom" {
-		settings := covers.LoadSettings(s.db)
-		processed, processErr := covers.ProcessCover(meta.CoverData, settings)
-		if processErr == nil && len(processed) > 0 {
-			if savedPath, saveErr := covers.SaveCoverBytes(s.coversPath, bookID, processed); saveErr == nil {
-				newCoverPath = savedPath
-				if current.CoverPath != savedPath || current.CoverSource != "" {
-					current.CoverPath = savedPath
-					current.CoverSource = ""
-					current.CoverUpdatedOn = time.Now().Unix()
-					changed = append(changed, metaprotection.FieldCover)
-				}
+	if len(processedCover) > 0 && !locked[metaprotection.FieldCover] && current.CoverSource != "custom" {
+		if savedPath, saveErr := covers.SaveCoverBytes(s.coversPath, bookID, processedCover); saveErr == nil {
+			newCoverPath = savedPath
+			if current.CoverPath != savedPath || current.CoverSource != "" {
+				current.CoverPath = savedPath
+				current.CoverSource = ""
+				current.CoverUpdatedOn = time.Now().Unix()
+				changed = append(changed, metaprotection.FieldCover)
 			}
 		}
 	}
@@ -1103,6 +1267,9 @@ func (s *Scanner) saveMetadataWithSource(bookID int64, meta *metadata.BookMetada
 		return err
 	}
 
+	if !ownTransaction {
+		return nil
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -1493,6 +1660,10 @@ func computeFileHash(path string) (string, error) {
 // computeFileHashes computes the current full-file SHA-256 hash and the legacy
 // sampled fingerprint used by older scans for files over 10 MiB.
 func computeFileHashes(path string) (computedFileHashes, error) {
+	return computeFileHashesContext(context.Background(), path)
+}
+
+func computeFileHashesContext(ctx context.Context, path string) (computedFileHashes, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return computedFileHashes{}, err
@@ -1506,7 +1677,7 @@ func computeFileHashes(path string) (computedFileHashes, error) {
 
 	fullHash := sha256.New()
 	if info.Size() <= legacySampleMaxHashSize {
-		if _, err := io.Copy(fullHash, file); err != nil {
+		if _, err := io.Copy(fullHash, &contextReader{ctx: ctx, reader: file}); err != nil {
 			return computedFileHashes{}, err
 		}
 		sum := hex.EncodeToString(fullHash.Sum(nil))
@@ -1522,6 +1693,9 @@ func computeFileHashes(path string) (computedFileHashes, error) {
 	buf := make([]byte, 1024*1024)
 	offset := int64(0)
 	for {
+		if err := ctx.Err(); err != nil {
+			return computedFileHashes{}, err
+		}
 		n, readErr := file.Read(buf)
 		if n > 0 {
 			chunk := buf[:n]
@@ -1573,4 +1747,16 @@ func maxInt64(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }

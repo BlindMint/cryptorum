@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import BulkMetadataReviewModal from '$lib/components/BulkMetadataReviewModal.svelte';
 	import JobListItem from '$lib/components/JobListItem.svelte';
+	import ScanJobControls from '$lib/components/ScanJobControls.svelte';
 	import { appActivity, notificationEventPreferences, notificationVisualIndicator } from '$lib/stores';
 
 	type AdminJob = {
@@ -44,7 +45,7 @@
 
 	type ActivityScope = 'all' | 'jobs' | 'events';
 
-	const activeStatuses = ['queued', 'running', 'cancelling'];
+	const activeStatuses = ['queued', 'running', 'cancelling', 'pausing', 'paused'];
 	const typeOptions = [
 		{ value: '', label: 'All types' },
 		{ value: 'library_scan', label: 'Library scans' },
@@ -83,7 +84,7 @@
 	let refreshTimer: number | null = null;
 
 	function canCancelJob(job: AdminJob): boolean {
-		return job.status === 'queued' || (job.status === 'running' && job.job_type === 'library_scan');
+		return job.status === 'queued' || (['running', 'pausing', 'paused'].includes(job.status) && job.job_type === 'library_scan');
 	}
 
 	function canReviewJob(job: AdminJob): boolean {
@@ -109,6 +110,20 @@
 
 	function formatItemStatus(value: string): string {
 		return value.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+	}
+
+	const timingStages = [
+		['inventory_ms', 'Inventory'],
+		['hash_ms', 'Hashing'],
+		['metadata_ms', 'Metadata and extraction'],
+		['cover_ms', 'Cover preparation'],
+		['commit_ms', 'Catalog writer'],
+		['checkpoint_ms', 'Checkpoints']
+	];
+
+	function formatScanDuration(milliseconds: unknown): string {
+		const value = Number(milliseconds);
+		return Number.isFinite(value) && value >= 0 ? `${(value / 1000).toFixed(1)} s` : '—';
 	}
 
 	function formatTime(value: number) {
@@ -213,9 +228,12 @@
 	}
 
 	async function cancelJob(job: AdminJob) {
-		const action = job.status === 'queued' ? 'Cancel this queued job?' : 'Request cancellation for this running job?';
+		const action = ['queued', 'paused'].includes(job.status) ? 'Cancel this job? Completed imports will be retained.' : 'Request cancellation after the current file? Completed imports will be retained.';
 		if (!confirm(action)) return;
-		await fetch(`/api/jobs/${job.id}/cancel`, { method: 'POST' });
+		try {
+			const response = await fetch(`/api/jobs/${job.id}/cancel`, { method: 'POST' });
+			if (!response.ok) { const body = await response.json(); throw new Error(body.error || 'Unable to cancel scan.'); }
+		} catch (failure) { error = failure instanceof Error ? failure.message : 'Unable to reach the server.'; return; }
 		await loadActivity(true);
 	}
 
@@ -293,7 +311,7 @@
 			<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-surface-border)] px-5 py-3">
 				<div>
 					<h3 class="text-sm font-semibold text-[var(--color-surface-text)]">Running Jobs</h3>
-					<p class="text-xs text-[var(--color-surface-text-muted)]">Queued, running, and cancelling work.</p>
+					<p class="text-xs text-[var(--color-surface-text-muted)]">Queued, running, paused, and stopping work.</p>
 				</div>
 				<div class="inline-flex items-center gap-2 rounded-full border border-[var(--color-primary-500)]/30 bg-[var(--color-primary-500)]/10 px-3 py-1 text-xs font-medium text-[var(--color-primary-300)]">
 					<svg class="h-3.5 w-3.5 animate-scan-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -311,6 +329,7 @@
 							</button>
 							<div class="flex flex-wrap gap-2 lg:justify-end">
 								<button onclick={() => openJobDetails(job)} class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)]">Details</button>
+								<ScanJobControls {job} onchanged={() => loadActivity(true)} />
 								{#if canCancelJob(job)}
 									<button onclick={() => cancelJob(job)} class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 hover:bg-amber-500/20">Cancel</button>
 								{:else}
@@ -426,6 +445,8 @@
 									<option value="" class="bg-[var(--color-surface-base)] text-[var(--color-surface-text)]">All statuses</option>
 									<option value="queued" class="bg-[var(--color-surface-base)] text-[var(--color-surface-text)]">Queued</option>
 									<option value="running" class="bg-[var(--color-surface-base)] text-[var(--color-surface-text)]">Running</option>
+									<option value="pausing" class="bg-[var(--color-surface-base)] text-[var(--color-surface-text)]">Pausing</option>
+									<option value="paused" class="bg-[var(--color-surface-base)] text-[var(--color-surface-text)]">Paused</option>
 									<option value="cancelling" class="bg-[var(--color-surface-base)] text-[var(--color-surface-text)]">Cancelling</option>
 									<option value="cancelled" class="bg-[var(--color-surface-base)] text-[var(--color-surface-text)]">Cancelled</option>
 									<option value="completed" class="bg-[var(--color-surface-base)] text-[var(--color-surface-text)]">Completed</option>
@@ -500,6 +521,7 @@
 								</button>
 								<div class="flex flex-wrap gap-2 lg:justify-end">
 									<button onclick={() => openJobDetails(item.job as AdminJob)} class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)]">Details</button>
+									<ScanJobControls job={item.job} onchanged={() => loadActivity(true)} />
 									{#if canReviewJob(item.job)}
 										<button onclick={() => openMetadataReview(item.job as AdminJob)} class="rounded-lg border border-[var(--color-surface-border)] px-3 py-2 text-xs text-[var(--color-surface-text)] hover:bg-[var(--color-surface-overlay)]">Review</button>
 									{/if}
@@ -576,6 +598,18 @@
 				</button>
 			</div>
 			<div class="min-h-0 flex-1 overflow-y-auto p-5">
+				{#if detailJob.job_type === 'library_scan' && detailJob.result?.timings}
+					{@const timings = detailJob.result.timings}
+					<details class="mb-4 rounded-lg border border-[var(--color-surface-border)] p-4 text-sm text-[var(--color-surface-text)]">
+						<summary class="cursor-pointer">Performance · {formatScanDuration(timings.elapsed_ms)} elapsed · {timings.preparation_workers} preparation workers</summary>
+						<dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
+							{#each timingStages as [key, label]}
+								<dt class="text-[var(--color-surface-text-muted)]">{label}</dt><dd>{formatScanDuration(timings[key])}</dd>
+							{/each}
+						</dl>
+						<p class="mt-3 text-xs text-[var(--color-surface-text-muted)]">Timings cover this attempt. Stages overlap, and extraction time includes waiting for its resource limit. Catalog writer time includes any metadata repairs.</p>
+					</details>
+				{/if}
 				{#if detailLoading}
 					<div class="text-sm text-[var(--color-surface-text-muted)]">Loading details...</div>
 				{:else if getJobItems(detailJob).length === 0}

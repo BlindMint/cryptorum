@@ -19,6 +19,13 @@ type Config struct {
 	Email     EmailConfig     `mapstructure:"email"`
 	Tasks     TasksConfig     `mapstructure:"tasks"`
 	Logging   LoggingConfig   `mapstructure:"logging"`
+	Scan      ScanConfig      `mapstructure:"scan"`
+}
+
+// ScanConfig bounds preparation work; heavy extraction and catalog writes each
+// remain serial regardless of this limit.
+type ScanConfig struct {
+	PreparationWorkers int `mapstructure:"preparation_workers"`
 }
 
 // ServerConfig holds server configuration
@@ -96,6 +103,7 @@ func Load(configPath string) (*Config, error) {
 	viper.SetConfigType("yaml")
 
 	// Set defaults
+	viper.SetDefault("scan.preparation_workers", 2)
 	viper.SetDefault("server.port", "6060")
 	viper.SetDefault("server.data_path", "./data")
 	viper.SetDefault("auth.session_duration", "720h")
@@ -148,6 +156,13 @@ func Load(configPath string) (*Config, error) {
 
 // validate validates the configuration
 func validate(config *Config) error {
+	if config.Scan.PreparationWorkers == 0 {
+		config.Scan.PreparationWorkers = 2
+	}
+	if config.Scan.PreparationWorkers < 1 || config.Scan.PreparationWorkers > 4 {
+		return fmt.Errorf("scan.preparation_workers must be between 1 and 4")
+	}
+
 	// Validate auth mode
 	switch config.Auth.Mode {
 	case "none", "password":

@@ -11,10 +11,29 @@ export function pageToRestore(targetPage: number, totalPages?: number): number {
 	return Math.min(target, totalPages);
 }
 
-export function didRestoreLand(measuredPage: number, targetPage: number): boolean {
+interface RestorePageVisibility {
+	pageNumber: number;
+	viewportY: number;
+	scaled: { pageY: number; visibleHeight: number };
+}
+
+export function didRestoreLand(
+	measuredPage: number,
+	targetPage: number,
+	visiblePages: readonly RestorePageVisibility[] = []
+): boolean {
 	const target = Math.max(1, Math.floor(targetPage || 1));
 	if (target <= 1) return true;
-	return measuredPage === target;
+	if (measuredPage === target) return true;
+	// Fit-width zoom uses the widest page in the document. With mixed page
+	// widths, a later page can be more visible than the page we aligned at the
+	// top. Accept that alignment rather than waiting forever for currentPage.
+	return visiblePages.some((page) =>
+		page.pageNumber === target &&
+		page.scaled.visibleHeight > 0 &&
+		page.viewportY >= 0 && page.viewportY <= 16 &&
+		page.scaled.pageY >= 0 && page.scaled.pageY <= 16
+	);
 }
 
 export function shouldAdoptDocumentPageCount(reportedTotal: number | undefined, knownTotal: number): boolean {

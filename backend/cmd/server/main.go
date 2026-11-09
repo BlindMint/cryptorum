@@ -95,7 +95,7 @@ func main() {
 	}
 
 	// Initialize scanner
-	appScanner = scanner.New(appDB.DB, appConfig.Server.DataPath, appConfig.GetCoversPath())
+	appScanner = scanner.NewWithWorkers(appDB.DB, appConfig.Server.DataPath, appConfig.GetCoversPath(), appConfig.Scan.PreparationWorkers)
 	if count, err := appScanner.RepairSwappedFilenameMetadata(); err != nil {
 		slog.Error("Failed to repair swapped filename metadata", "error", err)
 	} else if count > 0 {
@@ -152,6 +152,10 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	<-quit
 	slog.Info("Server shutting down")
+	scanWorkerMu.Lock()
+	scanShutdown.Store(true)
+	scanWorkerMu.Unlock()
+	shutdownDeadline := time.Now().Add(8 * time.Second)
 
 	// Stop watcher
 	if appWatcher != nil {
@@ -163,6 +167,10 @@ func main() {
 		cronRunner.Stop()
 	}
 	stopDatabaseBackupSchedule()
+
+	if !waitForScanShutdown(time.Until(shutdownDeadline)) {
+		slog.Warn("Scan shutdown deadline reached; unfinished work will recover after restart")
+	}
 
 	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -212,12 +220,14 @@ func performInitialScan() {
 			}
 		}
 
-		count, err := appScanner.ScanLibrary(libraryID, lib.Paths)
-		if err != nil {
-			slog.Error("Failed to scan library", "name", lib.Name, "error", err)
-			continue
+		paths, err := configuredLibraryPaths(libraryID)
+		if err == nil {
+			_, _, _, err = queueLibraryScan(libraryID, paths)
 		}
-		slog.Info("Library scan completed", "name", lib.Name, "imported", count)
+		if err != nil {
+			slog.Error("Failed to queue initial library scan", "name", lib.Name, "error", err)
+		}
+
 	}
 }
 
@@ -229,17 +239,30 @@ func initializeWatcher() {
 		appConfig.Bookdrop.Path,
 		func(path string) {
 			slog.Info("File changed, rescanning", "path", path)
-			// Rescan the library containing this file
-			for _, lib := range appConfig.Libraries {
-				for _, libPath := range lib.Paths {
-					if filepath.HasPrefix(path, libPath) {
-						var libraryID int64
-						appDB.QueryRow("SELECT id FROM library WHERE name = ? AND owner_user_id = ?", lib.Name, 1).Scan(&libraryID)
-						appScanner.ScanLibrary(libraryID, []string{filepath.Dir(path)})
-						return
-					}
+			rows, err := appDB.Query(`SELECT library_id,path FROM library_path ORDER BY length(path) DESC`)
+			if err != nil {
+				return
+			}
+			var libraryID int64
+			for rows.Next() {
+				var id int64
+				var root string
+				if rows.Scan(&id, &root) != nil {
+					continue
+				}
+				rel, err := filepath.Rel(root, path)
+				if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+					libraryID = id
+					break
 				}
 			}
+			rows.Close()
+			if libraryID > 0 {
+				if _, err := queueFileImport(libraryID, path, 0); err != nil {
+					slog.Warn("Failed to queue changed file", "error", err)
+				}
+			}
+
 		},
 	)
 	if err != nil {
@@ -247,11 +270,20 @@ func initializeWatcher() {
 		return
 	}
 
-	// Collect all library paths
+	// Library paths edited in the app are authoritative for watching too.
 	var allPaths []string
-	for _, lib := range appConfig.Libraries {
-		allPaths = append(allPaths, lib.Paths...)
+	rows, err := appDB.Query(`SELECT DISTINCT path FROM library_path ORDER BY path`)
+	if err != nil {
+		slog.Error("Failed to load watched library paths", "error", err)
+		return
 	}
+	for rows.Next() {
+		var path string
+		if rows.Scan(&path) == nil {
+			allPaths = append(allPaths, path)
+		}
+	}
+	rows.Close()
 
 	if err := appWatcher.Start(allPaths); err != nil {
 		slog.Error("Failed to start file watcher", "error", err)
@@ -265,11 +297,28 @@ func startCronTasks() {
 	if appConfig.Tasks.LibraryScan.Cron != "" {
 		_, err := cronRunner.AddFunc(appConfig.Tasks.LibraryScan.Cron, func() {
 			slog.Info("Running scheduled library scan")
-			for _, lib := range appConfig.Libraries {
-				var libraryID int64
-				appDB.QueryRow("SELECT id FROM library WHERE name = ? AND owner_user_id = ?", lib.Name, 1).Scan(&libraryID)
-				appScanner.ScanLibrary(libraryID, lib.Paths)
+			rows, err := appDB.Query(`SELECT id FROM library ORDER BY id`)
+			if err != nil {
+				return
 			}
+			var ids []int64
+			for rows.Next() {
+				var id int64
+				if rows.Scan(&id) == nil {
+					ids = append(ids, id)
+				}
+			}
+			rows.Close()
+			for _, libraryID := range ids {
+				paths, err := configuredLibraryPaths(libraryID)
+				if err == nil && len(paths) > 0 {
+					_, _, _, err = queueLibraryScan(libraryID, paths)
+				}
+				if err != nil {
+					slog.Warn("Failed to queue scheduled scan", "library_id", libraryID, "error", err)
+				}
+			}
+
 		})
 		if err != nil {
 			slog.Error("Failed to schedule library scan", "error", err)

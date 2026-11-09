@@ -468,7 +468,7 @@ function createAppActivityStore() {
 			try {
 				const [notificationsRes, jobsRes] = await Promise.all([
 					fetch('/api/notifications?limit=20', { cache: 'no-store' }),
-					fetch('/api/jobs?status=queued,running,cancelling&limit=100', { cache: 'no-store' })
+					fetch('/api/jobs?status=queued,running,cancelling,pausing,paused&limit=100', { cache: 'no-store' })
 				]);
 
 				let notifications = latestState.notifications;

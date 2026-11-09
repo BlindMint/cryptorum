@@ -34,6 +34,7 @@ calibre-cache/
 
 # Generated docs and scratch files; keep checked-in screenshots
 docs/*
+!docs/resumable-scans.md
 !docs/images/
 !docs/images/**
 
