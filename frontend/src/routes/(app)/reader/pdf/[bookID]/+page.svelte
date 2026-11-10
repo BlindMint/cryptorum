@@ -310,7 +310,7 @@
 		}
 	}
 
-	function handleEmbedPdfScrollActivity(delta: number, scrollTop: number) {
+	function handleEmbedPdfScrollActivity(delta: number, _scrollTop: number) {
 		if (!settings.autoHideControls || controlsNeedToStayVisible()) return;
 
 		if (performance.now() < preserveChromeAfterSeekUntil) {
@@ -318,16 +318,8 @@
 			return;
 		}
 
-		const touchLike = typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
-		if (scrollTop <= 2 && !touchLike) {
-			showTopBar(false);
-			return;
-		}
-
 		if (delta > scrollHideThresholdPx) {
 			hideTopBar();
-		} else if (delta < -scrollHideThresholdPx && !touchLike) {
-			showTopBar(false);
 		}
 	}
 

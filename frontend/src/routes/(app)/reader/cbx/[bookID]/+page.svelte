@@ -1,11 +1,15 @@
 <script lang="ts">
 	import { requireReadableFile, fileResponseError } from '$lib/utils/file-availability';
+	import { clampComicZoom, comicZoomScrollDelta } from '$lib/utils/comic-zoom';
+	import { isComicScrollEnd, comicProgressPageAtX } from '$lib/utils/comic-progress';
 	import { resolveComicSettings } from '$lib/utils/comic-settings';
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import { readerSettings, cbxFitModes, cbxScrollModes, type CbxReaderSetting } from '$lib/stores/readerSettings';
+	import ComicPager from '$lib/components/ComicPager.svelte';
+	import { comicPageGroups, comicGroupIndex } from '$lib/utils/comic-pages';
 	import ChoiceChips from '$lib/components/ChoiceChips.svelte';
 	import ReaderSizingControls from '$lib/components/ReaderSizingControls.svelte';
 	import ReaderProgressTrack from '$lib/components/ReaderProgressTrack.svelte';
@@ -45,6 +49,8 @@
 		panelViewEnabled: false,
 		spreadHandling: 'auto',
 		pageTransitionSound: false,
+		showNavigationArrowsDesktop: true,
+		showNavigationArrowsMobile: false,
 		autoHideControls: true,
 		useStandardFullscreen: false,
 		vibrance: 100,
@@ -54,11 +60,98 @@
 	let sessionFitMode = $state<CbxReaderSetting['fitMode']>('fit-page');
 	let zoom = $state(1);
 	let viewerEl = $state<HTMLDivElement>();
+	let comicPager = $state<{ prepareZoom: () => void }>();
+	let pagerTransition = $state<ScrollBehavior>('auto');
+	const pagerGroups = $derived(comicPageGroups(numPages, settings.pageSpread));
+	const pagerIndex = $derived(comicGroupIndex(pagerGroups, currentPage));
+	const canNavigateLeft = $derived(settings.readingDirection === 'rtl' ? pagerIndex < pagerGroups.length - 1 : pagerIndex > 0);
+	const canNavigateRight = $derived(settings.readingDirection === 'rtl' ? pagerIndex > 0 : pagerIndex < pagerGroups.length - 1);
 	const pointers = new Map<number, { x: number; y: number }>();
 	let pinchDistance = 0;
 	let gestureWasPinch = false;
-	function changeZoom(value: number) {
-		zoom = Math.max(0.25, Math.min(5, value));
+	let comicViewportEl = $state<HTMLDivElement>();
+	let comicViewportSize = $state({ width: 0, height: 0 });
+	let stripContentEl = $state<HTMLDivElement>();
+	$effect(() => {
+		const viewport = isStripMode() ? stripScrollEl : comicViewportEl;
+		if (!viewport) return;
+		const measure = () => comicViewportSize = { width: viewport.clientWidth, height: viewport.clientHeight };
+		const observer = new ResizeObserver(measure);
+		observer.observe(viewport);
+		measure();
+		return () => observer.disconnect();
+	});
+	let touchPinchActive = false;
+	let zoomUpdateToken = 0;
+	function changeZoom(value: number, anchor?: { x: number; y: number }) {
+		const nextZoom = clampComicZoom(value);
+		if (nextZoom === zoom) return;
+		cancelStripSeek();
+		const content = isStripMode() ? stripContentEl : viewerEl;
+		const viewport = isStripMode() ? stripScrollEl : viewerEl?.parentElement;
+		const anchorImage = isStripMode() && anchor ? document.elementFromPoint(anchor.x, anchor.y)?.closest<HTMLElement>('.strip-page') : null;
+		const anchorElement = anchorImage ?? content;
+		const before = anchorElement?.getBoundingClientRect();
+		const oldZoom = zoom;
+		zoom = nextZoom;
+		const token = ++zoomUpdateToken;
+		if (!anchor || !content || !viewport || !before) return;
+		void tick().then(() => {
+			if (token !== zoomUpdateToken || !content.isConnected) return;
+			const delta = comicZoomScrollDelta(before, anchorElement!.getBoundingClientRect(), oldZoom, nextZoom, anchor);
+			viewport.scrollLeft += delta.left;
+			viewport.scrollTop += delta.top;
+		});
+	}
+
+	function comicTouchZoom(node: HTMLElement) {
+		let distance = 0;
+		function touchesInside(event: TouchEvent) {
+			return Array.from(event.touches).filter(touch => touch.target instanceof Element &&
+				node.contains(touch.target) && touch.target.closest('.page-viewer, .long-strip'));
+		}
+		function start(event: TouchEvent) {
+			const touches = touchesInside(event);
+			if (touches.length !== 2) return;
+			const [a, b] = touches;
+			distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+			touchPinchActive = true;
+			if (!isStripMode()) comicPager?.prepareZoom();
+			gestureWasPinch = true;
+			readerPointerMoved = true;
+			cancelStripSeek();
+			if (event.cancelable) event.preventDefault();
+		}
+		function move(event: TouchEvent) {
+			const touches = touchesInside(event);
+			if (touches.length !== 2) return;
+			if (event.cancelable) event.preventDefault();
+			const [a, b] = touches;
+			const nextDistance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+			gestureWasPinch = true;
+			readerPointerMoved = true;
+			if (distance > 0) changeZoom(zoom * nextDistance / distance, {
+				x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2
+			});
+			distance = nextDistance;
+		}
+		function end(event: TouchEvent) {
+			if (touchesInside(event).length < 2) {
+				distance = 0;
+				touchPinchActive = false;
+			}
+		}
+		node.addEventListener('touchstart', start, { passive: false });
+		node.addEventListener('touchmove', move, { passive: false });
+		node.addEventListener('touchend', end);
+		node.addEventListener('touchcancel', end);
+		return { destroy() {
+			node.removeEventListener('touchstart', start);
+			node.removeEventListener('touchmove', move);
+			node.removeEventListener('touchend', end);
+			node.removeEventListener('touchcancel', end);
+			touchPinchActive = false;
+		} };
 	}
 	function setFitMode(value: CbxReaderSetting['fitMode']) {
 		const anchor = stripScrollEl?.querySelector<HTMLElement>(`.strip-page[data-page="${currentPage}"]`);
@@ -68,6 +161,7 @@
 		const viewport = stripScrollEl?.getBoundingClientRect();
 		const fraction = rect && viewport ? (horizontal ? (rtl ? rect.right - viewport.right : viewport.left - rect.left) / Math.max(1, rect.width) : (viewport.top - rect.top) / Math.max(1, rect.height)) : 0;
 		sessionFitMode = value;
+		zoomUpdateToken++;
 		zoom = 1;
 		if (anchor && stripScrollEl) {
 			void tick().then(() => {
@@ -77,11 +171,29 @@
 				else stripScrollEl.scrollTop += fraction * anchor.offsetHeight;
 			});
 		}
+		if (!isStripMode()) void tick().then(() => viewerEl?.parentElement?.scrollTo({ left: 0, top: 0 }));
 		readerSettings.updateComic(comicBookId, { fitMode: value, ...(value === 'fit-width' ? { stripMaxWidthPercent: 100 } : {}) });
 	}
 	let leftSidebarOpen = $state(false);
 	let rightSidebarOpen = $state(false);
 	let isDraggingProgress = $state(false);
+	let stripSeekPage = $state<number | null>(null);
+	let stripSeekTimeout: ReturnType<typeof setTimeout> | null = null;
+	function cancelStripSeek() {
+		stripSeekPage = null;
+		if (stripSeekTimeout) clearTimeout(stripSeekTimeout);
+		stripSeekTimeout = null;
+		if (stripRestoreScrollTimeout) clearTimeout(stripRestoreScrollTimeout);
+		stripRestoreScrollTimeout = null;
+	}
+	function holdStripSeek(pageNum: number) {
+		cancelStripSeek();
+		stripSeekPage = pageNum;
+		stripSeekTimeout = setTimeout(() => {
+			cancelStripSeek();
+			updateCurrentPageFromStrip();
+		}, 2000);
+	}
 	let pendingProgressPage = $state<number | null>(null);
 	let progressPreviewPage = $state<number | null>(null);
 	let progressBarEl = $state<HTMLElement | null>(null);
@@ -114,6 +226,7 @@
 
 	let topBarVisible = $state(true);
 	let stripScrollEl = $state<HTMLDivElement | null>(null);
+	let stripProgressFrame: number | null = null;
 	let stripProgressSaveTimeout: ReturnType<typeof setTimeout> | null = null;
 	let stripRestoreScrollTimeout: ReturnType<typeof setTimeout> | null = null;
 	let isRestoringCbxProgress = false;
@@ -137,7 +250,9 @@
 	const TOP_BAR_REVEAL_EDGE_PX = 72;
 	const STRIP_PADDING_PX = 16;
 
-	const progress = $derived(numPages > 1 ? ((currentPage - 1) / (numPages - 1)) * 100 : 0);
+	const readingPage = $derived(!isStripMode() && currentSpreadPages?.includes(numPages) ? numPages : currentPage);
+	const displayedPage = $derived(pendingProgressPage ?? stripSeekPage ?? readingPage);
+	const progress = $derived(numPages > 1 ? ((displayedPage - 1) / (numPages - 1)) * 100 : (numPages === 1 ? 100 : 0));
 	const readerTitle = $derived(getReaderDisplayTitle(book, readerFiles, loading, requestedFormat));
 
 	async function loadComic(bookId: string, formatParam: string | null) {
@@ -146,6 +261,9 @@
 		if (loadedComicKey === nextKey && book) return;
 
 		const loadToken = ++activeComicLoadToken;
+		zoom = 1;
+		zoomUpdateToken++;
+		cancelStripSeek();
 		sessionFitMode = settings.fitMode;
 		if (book && progressController && !sessionEnded) {
 			await endSession();
@@ -215,6 +333,13 @@
 		} finally {
 			if (loadToken === activeComicLoadToken) {
 				loading = false;
+				if (!readerError && isStripMode()) {
+					const restorePage = currentPage;
+					holdStripSeek(restorePage);
+					void tick().then(() => {
+						if (loadToken === activeComicLoadToken) scrollToStripPage(restorePage, 'auto');
+					});
+				}
 			}
 		}
 	}
@@ -277,25 +402,23 @@
 
 	async function saveProgress(_keepalive = false) {
 		if (!book || !progressController || readerError || numPages <= 0) return;
-		const percent = numPages > 1 ? ((currentPage - 1) / (numPages - 1)) * 100 : 0;
+		const percent = numPages > 1 ? ((readingPage - 1) / (numPages - 1)) * 100 : (numPages === 1 ? 100 : 0);
 		await progressController.checkpoint({
 			readerMode: 'comic',
 			percent,
-			locator: { type: 'comic_page', page: currentPage, total_pages: numPages },
-			reachedEnd: numPages > 0 && currentPage === numPages
+			locator: { type: 'comic_page', page: readingPage, total_pages: numPages },
+			reachedEnd: numPages > 0 && readingPage === numPages
 		});
 	}
 
 	function updateSpreadPages() {
-		if (settings.pageSpread !== 'even' && settings.pageSpread !== 'odd') {
-			currentSpreadPages = null;
-		} else if (settings.pageSpread === 'even') {
-			const page = currentPage % 2 === 0 ? currentPage : currentPage + 1;
-			currentSpreadPages = [page - 1, page];
-		} else if (settings.pageSpread === 'odd') {
-			const page = currentPage % 2 === 1 ? currentPage : currentPage - 1;
-			currentSpreadPages = [page, page + 1];
-		}
+		const pages = pagerGroups[pagerIndex];
+		currentSpreadPages = pages?.length === 2 ? [pages[0], pages[1]] : null;
+	}
+	function handlePagerPageChange(pageNum: number) {
+		currentPage = pageNum;
+		updateSpreadPages();
+		void saveProgress();
 	}
 
 	async function startSession() {
@@ -394,8 +517,16 @@
 		return settings.scrollMode === 'long-strip' || settings.scrollMode === 'infinite';
 	}
 
+	function scheduleStripPageUpdate() {
+		if (stripProgressFrame !== null) return;
+		stripProgressFrame = requestAnimationFrame(() => {
+			stripProgressFrame = null;
+			updateCurrentPageFromStrip();
+		});
+	}
+
 	function updateCurrentPageFromStrip() {
-		if (!stripScrollEl || !isStripMode() || !numPages || isRestoringCbxProgress) return;
+		if (!stripScrollEl || !isStripMode() || !numPages || isRestoringCbxProgress || isDraggingProgress || stripSeekPage !== null) return;
 		const pages = Array.from(stripScrollEl.querySelectorAll<HTMLElement>('.strip-page[data-page]'));
 		if (pages.length === 0) return;
 
@@ -428,6 +559,15 @@
 			}
 		}
 
+		const images = pages as HTMLImageElement[];
+		if (isComicScrollEnd(
+			horizontal ? stripScrollEl.scrollLeft : stripScrollEl.scrollTop,
+			horizontal ? stripScrollEl.scrollWidth : stripScrollEl.scrollHeight,
+			horizontal ? stripScrollEl.clientWidth : stripScrollEl.clientHeight,
+			!!images.at(-1)?.complete && (images.at(-1)?.naturalWidth ?? 0) > 0,
+			images.every(image => image.complete && image.naturalWidth > 0)
+		)) activePage = numPages;
+
 		if (activePage !== currentPage) {
 			currentPage = activePage;
 			updateSpreadPages();
@@ -452,17 +592,23 @@
 	}
 
 	function getStripPageLoading(pageNum: number): 'eager' | 'lazy' {
-		return pageNum <= currentPage + 2 ? 'eager' : 'lazy';
+		return Math.abs(pageNum - (stripSeekPage ?? currentPage)) <= 2 ? 'eager' : 'lazy';
 	}
 
-	function handleStripPageLoad(pageNum: number) {
-		if (!isStripMode() || pageNum > currentPage) return;
+	function handleStripPageLoad(pageNum: number, event: Event) {
+		rememberPageAspect(pageNum, event);
+		if (!isStripMode()) return;
+		if (stripSeekPage === null && !isRestoringCbxProgress) {
+			scheduleStripPageUpdate();
+			return;
+		}
+		if (pageNum > (stripSeekPage ?? currentPage)) return;
 		if (stripRestoreScrollTimeout) {
 			clearTimeout(stripRestoreScrollTimeout);
 		}
 		stripRestoreScrollTimeout = setTimeout(() => {
 			stripRestoreScrollTimeout = null;
-			scrollToStripPage(currentPage, 'auto');
+			scrollToStripPage(stripSeekPage ?? currentPage, 'auto');
 		}, 40);
 	}
 
@@ -477,6 +623,7 @@
 	}
 
 	function handleReaderPointerDown(e: PointerEvent) {
+		if (e.target instanceof Element && e.target.closest('.long-strip')) cancelStripSeek();
 		if (!(e.target instanceof Element) || !e.target.closest('.page-viewer, .long-strip')) return;
 		pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 		if (pointers.size > 1) {
@@ -503,6 +650,7 @@
 	function handleReaderPointerMove(e: PointerEvent) {
 		const previous = pointers.get(e.pointerId);
 		if (previous) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+		if (e.pointerType === 'touch' && (touchPinchActive || pointers.size > 1)) return;
 		if (!isStripMode() && pointers.size === 2) {
 			const [a, b] = [...pointers.values()];
 			const distance = Math.hypot(a.x - b.x, a.y - b.y);
@@ -510,13 +658,20 @@
 			pinchDistance = distance;
 			return;
 		}
-		if (!isStripMode() && previous && viewerEl) {
-			viewerEl.scrollTop -= e.clientY - previous.y;
-			if (zoom !== 1 || sessionFitMode === 'actual-size') viewerEl.scrollLeft -= e.clientX - previous.x;
-		}
-		if (!isStripMode() && zoom > 1 && previous && viewerEl?.parentElement) {
-			viewerEl.parentElement.scrollLeft -= e.clientX - previous.x;
-			viewerEl.parentElement.scrollTop -= e.clientY - previous.y;
+		if (!isStripMode() && previous && viewerEl && (zoom !== 1 || e.pointerType !== 'touch')) {
+			let dx = e.clientX - previous.x;
+			let dy = e.clientY - previous.y;
+			const viewport = viewerEl.parentElement;
+			if (viewport) {
+				const left = viewport.scrollLeft;
+				const top = viewport.scrollTop;
+				viewport.scrollLeft -= dx;
+				viewport.scrollTop -= dy;
+				dx -= left - viewport.scrollLeft;
+				dy -= top - viewport.scrollTop;
+			}
+			viewerEl.scrollTop -= dy / zoom;
+			if (zoom !== 1 || sessionFitMode === 'actual-size') viewerEl.scrollLeft -= dx / zoom;
 		}
 		if (readerPointerStart) {
 			const dx = e.clientX - readerPointerStart.x;
@@ -538,14 +693,7 @@
 		pointers.delete(e.pointerId);
 		resetReaderPointerTracking();
 		if (gestureWasPinch) return;
-		if (pointerStart && pointerMoved && !isStripMode() && zoom === 1) {
-			const dx = e.clientX - pointerStart.x;
-			const dy = e.clientY - pointerStart.y;
-			if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-				if (dx < 0) nextPage(); else prevPage();
-			}
-			return;
-		}
+
 		if (controlsNeedToStayVisible()) return;
 		const target = e.target as Element | null;
 		if (target?.closest('input, textarea, select, [contenteditable="true"], .left-sidebar, .right-sidebar, .progress-bar, .reader-progress, .floating-nav')) {
@@ -555,6 +703,11 @@
 		if (pointerMoved) return;
 		if (isReaderCenterTap(e, e.currentTarget as HTMLElement)) {
 			toggleTopBarFromCenterTap();
+		} else if (!isStripMode() && zoom === 1) {
+			const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+			const x = (e.clientX - rect.left) / rect.width;
+			if (x < 0.28) prevPage();
+			else if (x > 0.72) nextPage();
 		}
 	}
 
@@ -564,6 +717,8 @@
 	}
 
 	onDestroy(() => {
+		cancelStripSeek();
+		if (stripProgressFrame !== null) cancelAnimationFrame(stripProgressFrame);
 		if (handlePageExit) {
 			window.removeEventListener('pagehide', handlePageExit);
 			window.removeEventListener('beforeunload', handlePageExit);
@@ -601,56 +756,31 @@
 		resetTopBarBehavior();
 	}
 
-	function prevPage() {
-		zoom = 1;
-		resetTopBarBehavior();
-		if (settings.readingDirection === 'rtl') {
-			if (currentPage < numPages) {
-				currentPage = Math.min(numPages, !isStripMode() && currentSpreadPages ? currentSpreadPages[1] + 1 : currentPage + 1);
-				updateSpreadPages();
-			}
-		} else {
-			if (currentPage > 1) {
-				currentPage = Math.max(1, !isStripMode() && currentSpreadPages ? currentSpreadPages[0] - 1 : currentPage - 1);
-				updateSpreadPages();
-			}
-		}
+	function stepPage(visualDirection: -1 | 1) {
+		const forward = visualDirection * (settings.readingDirection === 'rtl' ? -1 : 1);
 		if (isStripMode()) {
-			scrollToStripPage(currentPage);
-		}
-		saveProgress();
-	}
-
-	function nextPage() {
-		zoom = 1;
-		resetTopBarBehavior();
-		if (settings.readingDirection === 'rtl') {
-			if (currentPage > 1) {
-				currentPage = Math.max(1, !isStripMode() && currentSpreadPages ? currentSpreadPages[0] - 1 : currentPage - 1);
-				updateSpreadPages();
-			}
+			goToPage(Math.max(1, Math.min(numPages, currentPage + forward)));
 		} else {
-			if (currentPage < numPages) {
-				currentPage = Math.min(numPages, !isStripMode() && currentSpreadPages ? currentSpreadPages[1] + 1 : currentPage + 1);
-				updateSpreadPages();
-			}
+			const index = Math.max(0, Math.min(pagerGroups.length - 1, pagerIndex + forward));
+			if (pagerGroups[index]) goToPage(pagerGroups[index][0], 'smooth');
 		}
-		if (isStripMode()) {
-			scrollToStripPage(currentPage);
-		}
-		saveProgress();
 	}
+	function prevPage() { stepPage(-1); }
+	function nextPage() { stepPage(1); }
 
-	function goToPage(pageNum: number) {
+	function goToPage(pageNum: number, behavior: ScrollBehavior = 'auto') {
+		zoomUpdateToken++;
 		zoom = 1;
 		if (pageNum >= 1 && pageNum <= numPages) {
+			pagerTransition = behavior;
 			resetTopBarBehavior();
 			currentPage = pageNum;
 			updateSpreadPages();
 			if (isStripMode()) {
-				scrollToStripPage(currentPage);
+				holdStripSeek(currentPage);
+				void tick().then(() => scrollToStripPage(pageNum, 'auto'));
 			}
-			saveProgress();
+			void saveProgress();
 		}
 	}
 
@@ -672,18 +802,16 @@
 
 	function getProgressPageFromClientX(clientX: number) {
 		if (!progressBarEl || numPages <= 0) return null;
-		const rect = progressBarEl.getBoundingClientRect();
-		if (rect.width <= 0) return null;
-		const x = clientX - rect.left;
-		const percentage = Math.max(0, Math.min(1, x / rect.width));
-		const newPage = Math.max(1, Math.round(percentage * (numPages - 1)) + 1);
-		return newPage >= 1 && newPage <= numPages ? newPage : null;
+		const track = progressBarEl.querySelector('.reader-progress-track') ?? progressBarEl;
+		const rect = track.getBoundingClientRect();
+		return comicProgressPageAtX(clientX, rect.left, rect.width, numPages, settings.readingDirection === 'rtl');
 	}
 
 	function updateProgressDrag(clientX: number) {
 		const newPage = getProgressPageFromClientX(clientX);
 		if (newPage === null) return;
 		pendingProgressPage = newPage;
+		progressPreviewPage = newPage;
 	}
 
 	function updateProgressPreview(clientX: number) {
@@ -768,6 +896,7 @@
 		if (activeProgressPointerId !== null && e.pointerId !== activeProgressPointerId) return;
 		e.preventDefault();
 		e.stopPropagation();
+		updateProgressDrag(e.clientX);
 		finishProgressPointer(e);
 		preserveChromeAfterSeek();
 	}
@@ -778,6 +907,7 @@
 	}
 
 	function resetInterruptedGestureState() {
+		touchPinchActive = false;
 		pointers.clear();
 		cancelProgressPointer();
 		resetReaderPointerTracking();
@@ -785,15 +915,17 @@
 	}
 
 	function handleProgressBarKeydown(e: KeyboardEvent) {
-		if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-			e.preventDefault();
-			prevPage();
-			preserveChromeAfterSeek();
-		} else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-			e.preventDefault();
-			nextPage();
-			preserveChromeAfterSeek();
-		}
+		const rtl = settings.readingDirection === 'rtl';
+		if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return;
+		e.preventDefault();
+		e.stopPropagation();
+		if (e.key === 'Home') goToPage(1);
+		else if (e.key === 'End') goToPage(numPages);
+		else if (e.key === 'ArrowLeft') prevPage();
+		else if (e.key === 'ArrowRight') nextPage();
+		else if (e.key === 'ArrowUp') { if (rtl) nextPage(); else prevPage(); }
+		else { if (rtl) prevPage(); else nextPage(); }
+		preserveChromeAfterSeek();
 	}
 
 	function startCloseBackgroundTasks() {
@@ -881,11 +1013,12 @@
 	}
 
 	function handleWheelNavigation(e: WheelEvent) {
+		if (e.target instanceof Element && e.target.closest('.long-strip')) cancelStripSeek();
 		if (shouldIgnoreWheelNavigation(e.target)) return;
 		if (e.ctrlKey || e.metaKey) {
-			if (!isStripMode()) {
+			if (e.target instanceof Element && e.target.closest('.page-viewer, .long-strip')) {
 				e.preventDefault();
-				changeZoom(zoom * Math.exp(-e.deltaY * 0.005));
+				changeZoom(zoom * Math.exp(-e.deltaY * 0.005), { x: e.clientX, y: e.clientY });
 			}
 			return;
 		}
@@ -897,6 +1030,7 @@
 			}
 			return;
 		}
+		if (!isStripMode() && Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
 		if (zoom !== 1 || sessionFitMode === 'fit-width' || sessionFitMode === 'actual-size' || sessionFitMode === 'fit-height') return;
 		if (
 			settings.scrollMode === 'long-strip' ||
@@ -930,7 +1064,7 @@
 		const container = e.currentTarget as HTMLElement | null;
 		if (!container) return;
 		const scrollTop = settings.scrollMode === 'long-strip' ? Math.abs(container.scrollLeft) : container.scrollTop;
-		updateCurrentPageFromStrip();
+		scheduleStripPageUpdate();
 		if (performance.now() < preserveChromeAfterSeekUntil) {
 			showTopBar(false);
 			lastLongStripScrollTop = scrollTop;
@@ -943,14 +1077,10 @@
 		}
 
 		const delta = scrollTop - lastLongStripScrollTop;
-		const touchLike = typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
-		if (scrollTop <= 2 && !touchLike) {
-			showTopBar(false);
-		} else if (delta > TOP_BAR_SCROLL_DELTA) {
+		if (delta > TOP_BAR_SCROLL_DELTA) {
 			hideTopBar();
-		} else if (delta < -TOP_BAR_SCROLL_DELTA && !touchLike) {
-			showTopBar(false);
 		}
+
 		lastLongStripScrollTop = scrollTop;
 	}
 
@@ -965,9 +1095,6 @@
 		}
 	}
 
-	function getPageImageClass() {
-		return `page-image fit-${sessionFitMode}`;
-	}
 
 	function resetToDefaults() {
 		sessionFitMode = 'fit-page';
@@ -1068,6 +1195,7 @@
 		</div>
 
 		<ReaderProgressTrack
+			direction={settings.readingDirection === 'rtl' ? 'rtl' : 'ltr'}
 			progress={progress}
 			visible={topBarVisible}
 			variant="top"
@@ -1077,6 +1205,7 @@
 	</header>
 
 	<ReaderProgressTrack
+		direction={settings.readingDirection === 'rtl' ? 'rtl' : 'ltr'}
 		bind:element={progressBarEl}
 		progress={progress}
 		visible={topBarVisible}
@@ -1084,11 +1213,11 @@
 		metaAlign="center"
 		interactive={true}
 		showThumb={true}
-		label={`Page ${currentPage} / ${numPages} • ${Math.max(0, Math.min(100, Math.round(progress)))}%`}
+		label={`Page ${displayedPage} / ${numPages} • ${Math.max(0, Math.min(100, Math.round(progress)))}%`}
 		ariaLabel="Reading progress"
 		ariaValueMin={1}
 		ariaValueMax={Math.max(numPages, currentPage)}
-		ariaValueNow={currentPage}
+		ariaValueNow={displayedPage}
 		previewLabel={progressPreviewLabel}
 		previewProgress={progressPreviewProgress}
 		onpointerdown={(e) => handleProgressPointerDown(e)}
@@ -1125,12 +1254,12 @@
 
 		<!-- CBX Container -->
 		<div
-			class="cbx-container"
+			class="cbx-container" class:paginated={!isStripMode()} bind:this={comicViewportEl} use:comicTouchZoom
 			onclick={() => { if (leftSidebarOpen || rightSidebarOpen) { leftSidebarOpen = false; rightSidebarOpen = false; } }}
 			role="button"
 			tabindex="0"
 			aria-label="Close sidebars"
-			onkeydown={(e) => { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); leftSidebarOpen = false; rightSidebarOpen = false; } }}
+			onkeydown={(e) => { if ((leftSidebarOpen || rightSidebarOpen) && (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); leftSidebarOpen = false; rightSidebarOpen = false; } }}
 		>
 			{#if loading}
 				<div class="loading-state" aria-live="polite">
@@ -1140,7 +1269,7 @@
 			{:else if numPages > 0 && !readerError}
 				{#if settings.scrollMode === 'long-strip' || settings.scrollMode === 'infinite'}
 					<div class="long-strip" class:horizontal-strip={settings.scrollMode === 'long-strip'} style:direction={settings.scrollMode === 'long-strip' && settings.readingDirection === 'rtl' ? 'rtl' : 'ltr'} bind:this={stripScrollEl} onscroll={handleLongStripScroll}>
-						<div class="strip-content" class:strip-fit-page={sessionFitMode === 'fit-page' || sessionFitMode === 'automatic'} class:strip-fit-height={sessionFitMode === 'fit-height'}>
+						<div class="strip-content" bind:this={stripContentEl} style:zoom={zoom} style:width={comicViewportSize.width ? `${comicViewportSize.width}px` : undefined} style:height={settings.scrollMode === 'long-strip' && comicViewportSize.height ? `${comicViewportSize.height / zoom}px` : undefined} class:strip-fit-page={sessionFitMode === 'fit-page' || sessionFitMode === 'automatic'} class:strip-fit-height={sessionFitMode === 'fit-height'}>
 							{#each Array(numPages) as _, i (i)}
 								{@const pageNum = i + 1}
 								<img
@@ -1151,67 +1280,22 @@
 									data-page={pageNum}
 									loading={getStripPageLoading(pageNum)}
 									decoding="async"
-									onload={() => handleStripPageLoad(pageNum)}
-									style="width: {sessionFitMode === 'fit-width' ? settings.stripMaxWidthPercent + '%' : 'auto'}; filter: saturate({settings.saturation}%) brightness({settings.vibrance / 100});"
+									onload={(event) => handleStripPageLoad(pageNum, event)}
+									style:aspect-ratio={pageAspectRatios[pageNum] ?? 2 / 3}
+									style="width: {sessionFitMode === 'fit-width' ? settings.stripMaxWidthPercent + '%' : sessionFitMode === 'fit-page' || sessionFitMode === 'automatic' ? `min(100%, calc((100dvh - 32px) * ${pageAspectRatios[pageNum] ?? 2 / 3}))` : 'auto'}; filter: saturate({settings.saturation}%) brightness({settings.vibrance / 100});"
 								/>
 							{/each}
 						</div>
 					</div>
 				{:else}
-					<div
-						class="page-viewer" bind:this={viewerEl} style:zoom={zoom} style:direction={settings.readingDirection === 'rtl' ? 'rtl' : 'ltr'}
-						style:grid-template-columns={currentSpreadPages && (sessionFitMode === 'fit-page' || sessionFitMode === 'automatic') && currentSpreadPages[1] <= numPages ? `${pageAspectRatios[currentSpreadPages[0]] ?? 1}fr ${pageAspectRatios[currentSpreadPages[1]] ?? 1}fr` : undefined}
-						class:fit-page={sessionFitMode === 'fit-page' || sessionFitMode === 'automatic'}
-						class:spread={!!currentSpreadPages && (settings.pageSpread === 'even' || settings.pageSpread === 'odd') && currentSpreadPages[1] <= numPages}
-					>
-						{#if currentSpreadPages && (settings.pageSpread === 'even' || settings.pageSpread === 'odd')}
-							<img
-								src={getPageUrl(currentSpreadPages[0])}
-								alt="Page {currentSpreadPages[0]}"
-								onload={(event) => currentSpreadPages && rememberPageAspect(currentSpreadPages[0], event)}
-								class={getPageImageClass()}
-								style="filter: saturate({settings.saturation}%) brightness({settings.vibrance / 100});"
-							/>
-							{#if currentSpreadPages[1] <= numPages}
-								<img
-									src={getPageUrl(currentSpreadPages[1])}
-									alt="Page {currentSpreadPages[1]}"
-									onload={(event) => currentSpreadPages && rememberPageAspect(currentSpreadPages[1], event)}
-									class={getPageImageClass()}
-									style="filter: saturate({settings.saturation}%) brightness({settings.vibrance / 100});"
-								/>
-							{/if}
-						{:else}
-							<img
-								src={getPageUrl(currentPage)}
-								alt="Page {currentPage}"
-								class={getPageImageClass()}
-								style="filter: saturate({settings.saturation}%) brightness({settings.vibrance / 100});"
-							/>
-						{/if}
-					</div>
+					<ComicPager bind:this={comicPager} total={numPages} {currentPage} spread={settings.pageSpread}
+						fitMode={sessionFitMode} rtl={settings.readingDirection === 'rtl'} {zoom}
+						width={comicViewportSize.width} height={comicViewportSize.height} aspectRatios={pageAspectRatios}
+						saturation={settings.saturation} brightness={settings.vibrance} {getPageUrl} transition={pagerTransition}
+						onpagechange={handlePagerPageChange} oncontentchange={(node) => viewerEl = node}
+						onimageload={rememberPageAspect}
+						onimageerror={() => readerError = 'A comic page could not be loaded. Check your library storage and try again.'} />
 
-					<!-- Floating Nav Buttons -->
-					<button
-						class="floating-nav floating-prev"
-						onclick={prevPage}
-						aria-label="Previous page"
-						disabled={settings.readingDirection === 'rtl' ? currentPage >= numPages : currentPage <= 1}
-					>
-						<svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<polyline points="15 18 9 12 15 6"></polyline>
-						</svg>
-					</button>
-					<button
-						class="floating-nav floating-next"
-						onclick={nextPage}
-						aria-label="Next page"
-						disabled={settings.readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= numPages}
-					>
-						<svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<polyline points="9 18 15 12 9 6"></polyline>
-						</svg>
-					</button>
 				{/if}
 			{:else}
 				<div class="error-message">
@@ -1221,6 +1305,36 @@
 				</div>
 			{/if}
 		</div>
+
+		{#if !loading && numPages > 0 && !readerError && !isStripMode()}
+			<!-- Viewport navigation stays outside the scrolling comic surface. -->
+			<button
+				type="button"
+				class="floating-nav floating-prev"
+				class:hide-desktop-arrows={!settings.showNavigationArrowsDesktop}
+				class:hide-mobile-arrows={!settings.showNavigationArrowsMobile}
+				onclick={() => { leftSidebarOpen = false; rightSidebarOpen = false; prevPage(); }}
+				aria-label="Previous page"
+				disabled={!canNavigateLeft}
+			>
+				<svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<polyline points="15 18 9 12 15 6"></polyline>
+				</svg>
+			</button>
+			<button
+				type="button"
+				class="floating-nav floating-next"
+				class:hide-desktop-arrows={!settings.showNavigationArrowsDesktop}
+				class:hide-mobile-arrows={!settings.showNavigationArrowsMobile}
+				onclick={() => { leftSidebarOpen = false; rightSidebarOpen = false; nextPage(); }}
+				aria-label="Next page"
+				disabled={!canNavigateRight}
+			>
+				<svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<polyline points="9 18 15 12 9 6"></polyline>
+				</svg>
+			</button>
+		{/if}
 
 		<!-- Right Sidebar - Settings -->
 		<aside class="right-sidebar" class:open={rightSidebarOpen} aria-label="Comic settings">
@@ -1286,6 +1400,19 @@
 						oninput={(e) => updateSetting('saturation', parseInt(e.currentTarget.value))} class="range-input-full" />
 				</div>
 				<div class="settings-section">
+					<label class="toggle-option">
+						<input type="checkbox" checked={settings.showNavigationArrowsDesktop} onchange={(e) => updateSetting('showNavigationArrowsDesktop', e.currentTarget.checked)} />
+						<span>Show page arrows on desktop</span>
+					</label>
+				</div>
+				<div class="settings-section">
+					<label class="toggle-option">
+						<input type="checkbox" checked={settings.showNavigationArrowsMobile} onchange={(e) => updateSetting('showNavigationArrowsMobile', e.currentTarget.checked)} />
+						<span>Show page arrows on mobile</span>
+					</label>
+				</div>
+				<p class="settings-help">Arrow visibility applies to all comics. Mobile uses screens up to 768px wide.</p>
+				<div class="settings-section">
 					<label class="toggle-option"><span>Auto-hide controls</span>
 						<input type="checkbox" checked={settings.autoHideControls} onchange={(e) => updateSetting('autoHideControls', e.currentTarget.checked)} />
 					</label>
@@ -1302,6 +1429,7 @@
 
 <style>
 	.cbx-reader {
+		touch-action: pan-x pan-y;
 		--reader-top-bar-height: 64px;
 		position: fixed;
 		inset: 0;
@@ -1489,56 +1617,7 @@
 
 	.cbx-container { box-sizing: border-box; min-height: 0; }
 
-	.page-viewer {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0;
-		width: 100%;
-		height: 100%;
-		overflow: auto;
-		touch-action: none;
-	}
-
-	.page-viewer:not(.fit-page) { align-items: flex-start; justify-content: safe center; }
-	.page-viewer.spread .page-image.fit-fit-width { width: 50%; }
-	.page-viewer.fit-page { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-	.page-viewer.fit-page.spread { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-	.page-viewer.fit-page .page-image { width: 100%; height: 100%; min-width: 0; min-height: 0; }
-
-	.page-image {
-		object-fit: contain;
-		flex: 0 0 auto;
-	}
-
-	.page-image.fit-fit-page,
-	.page-image.fit-automatic {
-		max-width: 100%;
-		max-height: 100%;
-		width: auto;
-		height: auto;
-	}
-
-	.page-image.fit-fit-width {
-		width: 100%;
-		max-width: 100%;
-		height: auto;
-		max-height: none;
-	}
-
-	.page-image.fit-fit-height {
-		height: 100%;
-		max-height: 100%;
-		width: auto;
-		max-width: none;
-	}
-
-	.page-image.fit-actual-size {
-		width: auto;
-		height: auto;
-		max-width: none;
-		max-height: none;
-	}
+	.cbx-container.paginated { overflow: hidden; }
 
 	.long-strip {
 		width: 100%;
@@ -1729,10 +1808,6 @@
 	}
 
 	.option-btn:hover { border-color: var(--color-primary-500, #22c55e); }
-	.option-btn.active {
-		border-color: var(--color-primary-500, #22c55e);
-		background: rgba(34, 197, 94, 0.1);
-	}
 
 	.toggle-option {
 		display: flex;
@@ -1749,7 +1824,12 @@
 		accent-color: var(--color-primary-500, #22c55e);
 	}
 
+	@media (min-width: 769px) {
+		.floating-nav.hide-desktop-arrows { display: none; }
+	}
+
 	@media (max-width: 768px) {
+		.floating-nav.hide-mobile-arrows { display: none; }
 		.cbx-reader {
 			--reader-top-bar-height: 72px;
 		}
@@ -1794,28 +1874,6 @@
 
 		.right-sidebar {
 			border-left: none;
-		}
-
-		.page-viewer {
-			flex-direction: row;
-			gap: 0;
-			width: 100%;
-		}
-
-		.page-image.fit-fit-page,
-		.page-image.fit-automatic {
-			max-height: 100%;
-		}
-
-		.page-image.fit-fit-width {
-			width: 100%;
-			max-width: 100%;
-			max-height: none;
-		}
-
-		.page-image.fit-fit-height {
-			height: calc(100vh - 120px);
-			max-height: 100%;
 		}
 
 		.long-strip {

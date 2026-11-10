@@ -1,7 +1,10 @@
-export type LibraryIconSource = 'prime' | 'svg' | 'custom';
+import { defaultSvgThemeColor, themeSvgMarkup, isPngIconDataUrl } from '$lib/utils/custom-icons';
+import tablerNames from '$lib/icons/tabler-outline.json';
+
+export type LibraryIconSource = 'prime' | 'svg' | 'tabler' | 'custom' | 'image';
 
 export interface LibraryIconDefinition {
-	source: Exclude<LibraryIconSource, 'custom'>;
+	source: Exclude<LibraryIconSource, 'custom' | 'image'>;
 	name: string;
 	label: string;
 	svg: string;
@@ -9,6 +12,9 @@ export interface LibraryIconDefinition {
 }
 
 export interface ParsedLibraryIcon {
+	rawSvg?: string;
+	useThemeColor?: boolean;
+	imageDataUrl?: string;
 	source: LibraryIconSource;
 	name: string;
 	label: string;
@@ -55,7 +61,7 @@ const SVG_LIBRARY_SPECS: Array<[string, string, string]> = [
 	['chef-hat', 'Chef Hat', '<path d="M17 21a1 1 0 0 0 1-1v-5.35c0-.457.316-.844.727-1.041a4 4 0 0 0-2.134-7.589 5 5 0 0 0-9.186 0 4 4 0 0 0-2.134 7.588c.411.198.727.585.727 1.041V20a1 1 0 0 0 1 1Z"/><path d="M6 17h12"/>']
 ];
 
-function makeIconDefinition(source: Exclude<LibraryIconSource, 'custom'>, name: string, label: string, svg: string): LibraryIconDefinition {
+function makeIconDefinition(source: Exclude<LibraryIconSource, 'custom' | 'image'>, name: string, label: string, svg: string): LibraryIconDefinition {
 	return {
 		source,
 		name,
@@ -73,6 +79,15 @@ export const SVG_LIBRARY_ICONS: LibraryIconDefinition[] = SVG_LIBRARY_SPECS.map(
 	makeIconDefinition('svg', name, label, svg)
 );
 
+export const TABLER_LIBRARY_ICONS: LibraryIconDefinition[] = tablerNames.map(name => ({
+	source: 'tabler',
+	name,
+	label: name.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+	value: `tabler|${name}`,
+	svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><use href="/icons/tabler/outline.svg#${name}"/></svg>`
+}));
+const tablerIconsByName = new Map(TABLER_LIBRARY_ICONS.map(icon => [icon.name, icon]));
+
 export function sanitizeSvgMarkup(svg: string): string {
 	return svg
 		.replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -81,31 +96,49 @@ export function sanitizeSvgMarkup(svg: string): string {
 		.trim();
 }
 
-export function serializeCustomLibraryIcon(name: string, svg: string): string {
-	return `custom|${encodeURIComponent(name.trim())}|${encodeURIComponent(svg.trim())}`;
+export function serializeCustomLibraryIcon(name: string, svg: string, useThemeColor?: boolean): string {
+	return `custom|${encodeURIComponent(name.trim())}|${encodeURIComponent(svg.trim())}${useThemeColor === undefined ? '' : useThemeColor ? '|theme' : '|original'}`;
+}
+
+export function serializePngLibraryIcon(name: string, dataUrl: string): string {
+	if (!isPngIconDataUrl(dataUrl)) throw new Error('Invalid PNG icon.');
+	return `image|${encodeURIComponent(name.trim())}|${dataUrl}`;
 }
 
 export function parseLibraryIcon(value: string | null | undefined): ParsedLibraryIcon | null {
 	if (!value || !value.trim()) return null;
 
 	const trimmed = value.trim();
-	const customMatch = /^custom\|([^|]+)\|(.+)$/.exec(trimmed);
+	const customMatch = /^custom\|([^|]+)\|([^|]+)(?:\|(theme|original))?$/.exec(trimmed);
 	if (customMatch) {
-		const name = decodeURIComponent(customMatch[1]);
-		const svg = decodeURIComponent(customMatch[2]);
-		return {
-			source: 'custom',
-			name,
-			label: name,
-			svg,
-			value: trimmed
-		};
+		try {
+			const name = decodeURIComponent(customMatch[1]);
+			const rawSvg = decodeURIComponent(customMatch[2]);
+			const useThemeColor = customMatch[3] ? customMatch[3] === 'theme' : defaultSvgThemeColor(rawSvg);
+			const safeSvg = sanitizeSvgMarkup(rawSvg);
+			return { source: 'custom', name, label: name, rawSvg, useThemeColor,
+				svg: useThemeColor ? themeSvgMarkup(safeSvg) : safeSvg, value: trimmed };
+		} catch { return null; }
+	}
+	const imageMatch = /^image\|([^|]+)\|(.+)$/.exec(trimmed);
+	if (imageMatch) {
+		try {
+			const name = decodeURIComponent(imageMatch[1]);
+			const imageDataUrl = imageMatch[2];
+			if (!isPngIconDataUrl(imageDataUrl)) return null;
+			return { source: 'image', name, label: name, imageDataUrl, value: trimmed,
+				svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><image href="${imageDataUrl}" width="24" height="24" preserveAspectRatio="xMidYMid meet"/></svg>` };
+		} catch { return null; }
 	}
 
 	const normalized = /^([a-z]+)\|(.+)$/.exec(trimmed);
 	if (normalized) {
 		const source = normalized[1] as LibraryIconSource;
 		const name = normalized[2];
+		if (source === 'tabler') {
+			const icon = tablerIconsByName.get(name);
+			return icon ? { ...icon } : { source: 'tabler', name, label: name, svg: '', value: trimmed };
+		}
 		if (source === 'prime') {
 			const icon = PRIME_LIBRARY_ICONS.find(item => item.name === name);
 			return icon ? { ...icon } : { source: 'prime', name, label: name, svg: '', value: trimmed };
@@ -132,5 +165,6 @@ export function iconButtonLabel(icon: string | null | undefined): string {
 	const parsed = parseLibraryIcon(icon);
 	if (!parsed) return '';
 	if (parsed.source === 'custom') return `Custom SVG: ${parsed.name}`;
-	return `${parsed.source === 'svg' ? 'SVG' : 'Prime'}: ${parsed.name}`;
+	if (parsed.source === 'image') return `PNG: ${parsed.name}`;
+	return `${parsed.source === 'tabler' ? 'Tabler' : parsed.source === 'svg' ? 'SVG' : 'Prime'}: ${parsed.name}`;
 }

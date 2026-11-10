@@ -1728,13 +1728,8 @@
 		}
 
 		const delta = scrollTop - lastContinuousScrollTop;
-		const touchLike = typeof window !== 'undefined' && window.matchMedia('(hover: none), (pointer: coarse)').matches;
-		if (scrollTop <= 2 && !touchLike) {
-			showTopBar(false);
-		} else if (delta > TOP_BAR_SCROLL_DELTA) {
+		if (delta > TOP_BAR_SCROLL_DELTA) {
 			hideTopBar();
-		} else if (delta < -TOP_BAR_SCROLL_DELTA && !touchLike) {
-			showTopBar(false);
 		}
 
 		lastContinuousScrollTop = scrollTop;

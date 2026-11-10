@@ -3,7 +3,11 @@
 	import { page } from '$app/stores';
 	import { appActivity, desktopSidebarCollapsed, mobileMenuOpen } from '$lib/stores';
 	import LibraryModal from '$lib/components/LibraryModal.svelte';
+	import SidebarDivider from '$lib/components/SidebarDivider.svelte';
+	import SidebarSectionMenu from '$lib/components/SidebarSectionMenu.svelte';
+	import { parseSidebarDividers, withSidebarDividers, moveSidebarDivider, reorderSidebarEntry, sidebarEntryKey, type SidebarSection, type SidebarDivider as Divider, type SidebarDividers } from '$lib/utils/sidebar-dividers';
 	import ShelfModal from '$lib/components/ShelfModal.svelte';
+	import { sidebarDropPosition, reconcileSidebarItems, createSidebarOrderQueue } from '$lib/utils/sidebar-reorder';
 	import { confirmBulkAction } from '$lib/utils/bulk-confirm';
 	import { parseLibraryIcon } from '$lib/utils/library-icons';
 
@@ -44,13 +48,7 @@
 	let libraryMenuPosition = $state({ top: 0, left: 0 });
 	let librarySortMode = $state<'name' | 'count' | 'length'>('name');
 	let librarySortDir = $state<'asc' | 'desc'>('asc');
-	let draggedLibraryId = $state<number | null>(null);
-	let libraryDropTargetId = $state<number | null>(null);
-	let libraryDropPosition = $state<'before' | 'after'>('before');
 	let showLibrarySortMenu = $state(false);
-	let draggedShelfId = $state<number | null>(null);
-	let shelfDropTargetId = $state<number | null>(null);
-	let shelfDropPosition = $state<'before' | 'after'>('before');
 	let showShelfModal = $state(false);
 	let libraryModalInitialScope = $state<'mixed' | 'books' | 'audio'>('mixed');
 
@@ -62,8 +60,144 @@
 	const SIDEBAR_STORAGE_KEY = 'sidebarWidth';
 	const LIBRARY_NAME_CACHE_KEY = 'cryptorumLibraryNames';
 	const SHELF_SUMMARY_CACHE_KEY = 'cryptorumShelfSummaries';
+	const DIVIDERS_STORAGE_KEY = 'cryptorumSidebarDividers';
+	let dividers = $state<SidebarDividers>({ libraries: [], audio: [], collections: [] });
+	let sidebarDrag = $state<{ section: SidebarSection; key: string; label: string; x: number; y: number } | null>(null);
+	let sidebarDropTarget = $state<{ section: SidebarSection; key: string; position: 'before' | 'after' } | null>(null);
+	let pendingSidebarDrag: { id: number; section: SidebarSection; key: string; label: string; x: number; y: number; element: HTMLElement } | null = null;
+	let sidebarDragFrame: number | null = null;
+	let suppressSidebarClick = false;
+	let canceledSidebarPointer: number | null = null;
+	let sidebarClickTimer: ReturnType<typeof setTimeout> | null = null;
+	let libraryOrderRevision = 0;
+	let shelfOrderRevision = 0;
+	let pendingLibrarySaves = 0;
+	let pendingShelfSaves = 0;
+	const queueLibraryOrder = createSidebarOrderQueue();
+	const queueShelfOrder = createSidebarOrderQueue();
+	let orderError = $state('');
+
+	function cancelSidebarDrag() {
+		const pending = pendingSidebarDrag;
+		if (sidebarDrag && pending) canceledSidebarPointer = pending.id;
+		pendingSidebarDrag = null;
+		sidebarDrag = null;
+		sidebarDropTarget = null;
+		if (sidebarDragFrame !== null) cancelAnimationFrame(sidebarDragFrame);
+		sidebarDragFrame = null;
+		if (pending?.element.hasPointerCapture(pending.id)) pending.element.releasePointerCapture(pending.id);
+	}
+	function startSidebarPointer(event: PointerEvent, section: SidebarSection, key: string, label: string) {
+		if (event.pointerType !== 'mouse' || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+		if (!(event.target instanceof Element) || event.target.closest('button, input, textarea, select, summary, details, form')) return;
+		cancelSidebarDrag();
+		canceledSidebarPointer = null;
+		suppressSidebarClick = false;
+		pendingSidebarDrag = { id: event.pointerId, section, key, label, x: event.clientX, y: event.clientY, element: event.currentTarget as HTMLElement };
+	}
+	function findSidebarDrop(x: number, y: number) {
+		const row = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-sidebar-section][data-sidebar-row]');
+		if (!row || !sidebarDrag || row.dataset.sidebarSection !== sidebarDrag.section || row.dataset.sidebarRow === sidebarDrag.key) return null;
+		const rect = row.getBoundingClientRect();
+		return { section: sidebarDrag.section, key: row.dataset.sidebarRow!, position: sidebarDropPosition(y, rect.top, rect.height) };
+	}
+	function scrollSidebarWhileDragging() {
+		sidebarDragFrame = null;
+		if (!sidebarDrag || !pendingSidebarDrag) return;
+		const nav = pendingSidebarDrag.element.closest('nav');
+		if (nav) {
+			const rect = nav.getBoundingClientRect();
+			const { x, y } = sidebarDrag;
+			const delta = x >= rect.left && x <= rect.right
+				? y < rect.top + 28 ? -10 : y > rect.bottom - 28 ? 10 : 0 : 0;
+			const previous = nav.scrollTop;
+			if (delta) nav.scrollTop += delta;
+			if (nav.scrollTop !== previous) sidebarDropTarget = findSidebarDrop(x, y);
+		}
+		sidebarDragFrame = requestAnimationFrame(scrollSidebarWhileDragging);
+	}
+	function moveSidebarPointer(event: PointerEvent) {
+		const pending = pendingSidebarDrag;
+		if (!pending || event.pointerId !== pending.id) return;
+		if (!sidebarDrag) {
+			if (Math.hypot(event.clientX - pending.x, event.clientY - pending.y) < 4) return;
+			if (event.type !== 'pointerup') pending.element.setPointerCapture(event.pointerId);
+			sidebarDrag = { section: pending.section, key: pending.key, label: pending.label, x: event.clientX, y: event.clientY };
+			sidebarDragFrame = requestAnimationFrame(scrollSidebarWhileDragging);
+		}
+		event.preventDefault();
+		sidebarDrag = { ...sidebarDrag, x: event.clientX, y: event.clientY };
+		sidebarDropTarget = findSidebarDrop(event.clientX, event.clientY);
+	}
+	function suppressReleasedDragClick() {
+		suppressSidebarClick = true;
+		if (sidebarClickTimer) clearTimeout(sidebarClickTimer);
+		sidebarClickTimer = setTimeout(() => { suppressSidebarClick = false; sidebarClickTimer = null; }, 0);
+	}
+	function finishSidebarPointer(event: PointerEvent) {
+		if (!pendingSidebarDrag || event.pointerId !== pendingSidebarDrag.id) {
+			if (canceledSidebarPointer === event.pointerId) {
+				canceledSidebarPointer = null;
+				suppressReleasedDragClick();
+			}
+			return;
+		}
+		// Also handle a release whose final coordinates arrived without a move event.
+		moveSidebarPointer(event);
+		const source = sidebarDrag;
+		const target = source ? findSidebarDrop(event.clientX, event.clientY) : null;
+		if (source) {
+			event.preventDefault();
+			suppressReleasedDragClick();
+		}
+		cancelSidebarDrag();
+		canceledSidebarPointer = null;
+		if (!source || !target) return;
+		const items = source.section === 'libraries' ? standardLibraries : source.section === 'audio' ? audioLibraries : shelves;
+		const next = reorderSidebarEntry(items, dividers[source.section], source.key, target.key, target.position);
+		saveDividers(source.section, next.dividers);
+		if (!source.key.startsWith('item:')) return;
+		if (source.section === 'collections') {
+			void persistShelfOrder(next.items as Shelf[]);
+		} else {
+			const remaining = [...next.items] as Library[];
+			void persistLibraryOrder(libraries.map(item => (item.media_scope === 'audio') === (source.section === 'audio') ? remaining.shift()! : item));
+		}
+	}
+	function suppressDragClick(event: MouseEvent) {
+		if (!suppressSidebarClick) return;
+		suppressSidebarClick = false;
+		event.preventDefault();
+		event.stopPropagation();
+	}
+	let newDividerId = $state<string | null>(null);
+	let dividerError = $state('');
+	function saveDividers(section: SidebarSection, next: Divider[]) {
+		dividers = { ...dividers, [section]: next };
+		try {
+			localStorage.setItem(DIVIDERS_STORAGE_KEY, JSON.stringify(dividers));
+			dividerError = '';
+		} catch { dividerError = 'Sidebar dividers could not be saved on this device.'; }
+	}
+	function addDivider(section: SidebarSection) {
+		const id = crypto.randomUUID();
+		newDividerId = id;
+		saveDividers(section, [...dividers[section], { id, label: '', beforeId: null }]);
+	}
+	function renameDivider(section: SidebarSection, id: string, label: string) {
+		newDividerId = null;
+		saveDividers(section, dividers[section].map(divider => divider.id === id ? { ...divider, label } : divider));
+	}
+	function moveDivider(section: SidebarSection, id: string, direction: -1 | 1) {
+		const items = section === 'libraries' ? standardLibraries : section === 'audio' ? audioLibraries : shelves;
+		saveDividers(section, moveSidebarDivider(items, dividers[section], id, direction));
+	}
 	let standardLibraries = $derived(libraries.filter((library) => library.media_scope !== 'audio'));
 	let audioLibraries = $derived(libraries.filter((library) => library.media_scope === 'audio'));
+
+	const libraryRows = $derived(withSidebarDividers(standardLibraries, dividers.libraries));
+	const audioRows = $derived(withSidebarDividers(audioLibraries, dividers.audio));
+	const shelfRows = $derived(withSidebarDividers(shelves, dividers.collections));
 
 	function clampSidebarWidth(width: number): number {
 		return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -172,6 +306,8 @@
 	});
 
 	onMount(async () => {
+		try { dividers = parseSidebarDividers(localStorage.getItem(DIVIDERS_STORAGE_KEY)); }
+		catch { dividerError = 'Sidebar dividers could not be loaded on this device.'; }
 		const storedWidth = localStorage.getItem(SIDEBAR_STORAGE_KEY);
 		if (storedWidth !== null) {
 			const parsedWidth = Number.parseInt(storedWidth, 10);
@@ -192,6 +328,8 @@
 	});
 
 	onDestroy(() => {
+		cancelSidebarDrag();
+		if (sidebarClickTimer) clearTimeout(sidebarClickTimer);
 		stopResize();
 		document.removeEventListener('click', closeLibraryMenu);
 		if (refreshTimer !== null) {
@@ -334,6 +472,10 @@
 		// Prevent concurrent requests
 		if (isLoading) return;
 		isLoading = true;
+		const libraryRevision = libraryOrderRevision;
+		const shelfRevision = shelfOrderRevision;
+		const librarySaveInFlight = pendingLibrarySaves > 0;
+		const shelfSaveInFlight = pendingShelfSaves > 0;
 
 		try {
 			const [libsRes, shelvesRes] = await Promise.all([
@@ -344,7 +486,7 @@
 			if (libsRes.ok) {
 				const libs = await libsRes.json();
 				if (libs) {
-					libraries = libs;
+					libraries = libraryRevision !== libraryOrderRevision || librarySaveInFlight || pendingLibrarySaves > 0 ? reconcileSidebarItems(libraries, libs) : libs;
 					cacheLibraryNames(libs);
 				}
 			}
@@ -352,7 +494,7 @@
 			if (shelvesRes.ok) {
 				const sh = await shelvesRes.json();
 				if (sh) {
-					shelves = sh;
+					shelves = shelfRevision !== shelfOrderRevision || shelfSaveInFlight || pendingShelfSaves > 0 ? reconcileSidebarItems(shelves, sh) : sh;
 					cacheShelfSummaries(sh);
 				}
 			}
@@ -383,16 +525,17 @@
 
 	async function persistLibraryOrder(nextLibraries: Library[]) {
 		libraries = nextLibraries;
+		libraryOrderRevision++;
+		pendingLibrarySaves++;
+		const ids = nextLibraries.map(item => item.id);
 		try {
-			await fetch('/api/libraries/order', {
-				method: 'PATCH',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ library_ids: nextLibraries.map((library) => library.id) })
+			await queueLibraryOrder(async () => {
+				const response = await fetch('/api/libraries/order', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ library_ids: ids }) });
+				if (!response.ok) throw new Error('Failed to save library order');
 			});
-		} catch (e) {
-			console.error('Failed to save library order:', e);
-			await loadData();
-		}
+			orderError = '';
+		} catch { orderError = 'Library order could not be saved. Move an item again to retry.'; }
+		finally { pendingLibrarySaves--; }
 	}
 
 	function applyLibrarySort(mode = librarySortMode, direction = librarySortDir) {
@@ -425,101 +568,40 @@
 		}
 	}
 
-	function handleLibraryDragStart(event: DragEvent, library: Library) {
-		draggedLibraryId = library.id;
-		libraryDropTargetId = null;
-		event.dataTransfer?.setData('text/plain', String(library.id));
-		if (event.currentTarget instanceof Element) {
-			event.dataTransfer?.setDragImage(event.currentTarget, 12, 12);
-		}
-	}
-
-	function handleLibraryDragOver(event: DragEvent, targetLibrary: Library) {
-		if (!draggedLibraryId || draggedLibraryId === targetLibrary.id) return;
-		event.preventDefault();
-		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-		libraryDropTargetId = targetLibrary.id;
-		libraryDropPosition = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
-	}
-
-	function clearLibraryDragState() {
-		draggedLibraryId = null;
-		libraryDropTargetId = null;
-	}
-
-	function handleLibraryDrop(event: DragEvent, targetLibrary: Library) {
-		event.preventDefault();
-		const sourceId = draggedLibraryId ?? Number(event.dataTransfer?.getData('text/plain'));
-		const dropPosition = libraryDropPosition;
-		clearLibraryDragState();
-		if (!sourceId || sourceId === targetLibrary.id) return;
-		const current = [...libraries];
-		const sourceIndex = current.findIndex((library) => library.id === sourceId);
-		const targetIndex = current.findIndex((library) => library.id === targetLibrary.id);
-		if (sourceIndex === -1 || targetIndex === -1) return;
-		const [moved] = current.splice(sourceIndex, 1);
-		const adjustedTargetIndex = current.findIndex((library) => library.id === targetLibrary.id);
-		const insertIndex = dropPosition === 'after' ? adjustedTargetIndex + 1 : adjustedTargetIndex;
-		current.splice(insertIndex, 0, moved);
-		void persistLibraryOrder(current);
-	}
-
 	async function persistShelfOrder(nextShelves: Shelf[]) {
 		shelves = nextShelves;
+		shelfOrderRevision++;
+		pendingShelfSaves++;
+		const ids = nextShelves.map(item => item.id);
 		try {
-			await fetch('/api/shelves/order', {
-				method: 'PATCH',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ shelf_ids: nextShelves.map((shelf) => shelf.id) })
+			await queueShelfOrder(async () => {
+				const response = await fetch('/api/shelves/order', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shelf_ids: ids }) });
+				if (!response.ok) throw new Error('Failed to save collection order');
 			});
-		} catch (e) {
-			console.error('Failed to save shelf order:', e);
-			await loadData();
-		}
-	}
-
-	function handleShelfDragStart(event: DragEvent, shelf: Shelf) {
-		draggedShelfId = shelf.id;
-		shelfDropTargetId = null;
-		event.dataTransfer?.setData('text/plain', String(shelf.id));
-		if (event.currentTarget instanceof Element) {
-			event.dataTransfer?.setDragImage(event.currentTarget, 12, 12);
-		}
-	}
-
-	function handleShelfDragOver(event: DragEvent, targetShelf: Shelf) {
-		if (!draggedShelfId || draggedShelfId === targetShelf.id) return;
-		event.preventDefault();
-		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-		shelfDropTargetId = targetShelf.id;
-		shelfDropPosition = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
-	}
-
-	function clearShelfDragState() {
-		draggedShelfId = null;
-		shelfDropTargetId = null;
-	}
-
-	function handleShelfDrop(event: DragEvent, targetShelf: Shelf) {
-		event.preventDefault();
-		const sourceId = draggedShelfId ?? Number(event.dataTransfer?.getData('text/plain'));
-		const dropPosition = shelfDropPosition;
-		clearShelfDragState();
-		if (!sourceId || sourceId === targetShelf.id) return;
-		const current = [...shelves];
-		const sourceIndex = current.findIndex((shelf) => shelf.id === sourceId);
-		const targetIndex = current.findIndex((shelf) => shelf.id === targetShelf.id);
-		if (sourceIndex === -1 || targetIndex === -1) return;
-		const [moved] = current.splice(sourceIndex, 1);
-		const adjustedTargetIndex = current.findIndex((shelf) => shelf.id === targetShelf.id);
-		const insertIndex = dropPosition === 'after' ? adjustedTargetIndex + 1 : adjustedTargetIndex;
-		current.splice(insertIndex, 0, moved);
-		void persistShelfOrder(current);
+			orderError = '';
+		} catch { orderError = 'Collection order could not be saved. Move an item again to retry.'; }
+		finally { pendingShelfSaves--; }
 	}
 
 </script>
 
 
+
+<svelte:window onpointermove={moveSidebarPointer} onpointerup={finishSidebarPointer}
+	onpointercancel={cancelSidebarDrag} onblur={cancelSidebarDrag} onclickcapture={suppressDragClick}
+	onkeydown={(event) => { if (event.key === 'Escape') cancelSidebarDrag(); }} />
+
+{#snippet dividerRow(section: SidebarSection, divider: Divider, index: number, total: number)}
+	<SidebarDivider {divider} dragging={sidebarDrag?.key === 'divider:' + divider.id && sidebarDrag.section === section} first={index === 0} last={index === total - 1} startEditing={newDividerId === divider.id}
+		onrename={(label) => renameDivider(section, divider.id, label)}
+		onmove={(direction) => moveDivider(section, divider.id, direction)}
+		onremove={() => saveDividers(section, dividers[section].filter(item => item.id !== divider.id))} />
+{/snippet}
+
+{#if sidebarDrag}
+	<div class="pointer-events-none fixed z-[200] max-w-64 truncate rounded-md border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 text-sm text-[var(--color-surface-text)] shadow-lg"
+		style:left={`${sidebarDrag.x + 12}px`} style:top={`${sidebarDrag.y + 12}px`} aria-hidden="true">{sidebarDrag.label}</div>
+{/if}
 
 <aside
 	id="app-sidebar"
@@ -536,7 +618,7 @@
 >
 	<div class={`flex h-full min-w-[220px] flex-col min-h-0 ${$desktopSidebarCollapsed ? 'lg:pointer-events-none lg:opacity-0' : 'lg:opacity-100'}`}>
 	<div class="flex flex-shrink-0 flex-col space-y-0.5 p-2.5 pb-2 text-[0.9375rem] leading-[1.375rem]">
-		<a
+		<a draggable="false"
 			href="/"
 			onclick={closeMobileNavigation}
 			class="flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
@@ -547,7 +629,7 @@
 			<span>Dashboard</span>
 		</a>
 
-		<a
+		<a draggable="false"
 			href="/library"
 			onclick={closeMobileNavigation}
 			class="flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/library') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
@@ -558,7 +640,7 @@
 			<span>All Books</span>
 		</a>
 
-		<a
+		<a draggable="false"
 			href="/authors"
 			onclick={closeMobileNavigation}
 			class="order-3 flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/authors') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
@@ -569,7 +651,7 @@
 			<span>Authors</span>
 		</a>
 
-		<a
+		<a draggable="false"
 			href="/series"
 			onclick={closeMobileNavigation}
 			class="order-4 flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/series') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
@@ -580,7 +662,7 @@
 			<span>Series</span>
 		</a>
 
-		<a
+		<a draggable="false"
 			href="/audio"
 			onclick={closeMobileNavigation}
 			class="order-2 flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-all duration-200 {isActive('/audio') ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
@@ -593,9 +675,11 @@
 	<div class="mx-2.5 h-px bg-[var(--color-surface-border)]"></div>
 
 	<nav class="custom-scrollbar min-h-0 flex-1 space-y-2.5 overflow-x-hidden overflow-y-auto p-2.5 text-[0.9375rem] leading-[1.375rem]">
+		{#if orderError}<p role="alert" class="px-2.5 text-xs text-[var(--color-surface-text-muted)]">{orderError}</p>{/if}
+		{#if dividerError}<p role="alert" class="px-2.5 text-xs text-[var(--color-surface-text-muted)]">{dividerError}</p>{/if}
 		<div>
 			<div class="flex items-center justify-between px-2.5 py-1.5">
-				<a
+				<a draggable="false"
 					href="/libraries"
 					onclick={closeMobileNavigation}
 					class="flex items-center gap-1.5 rounded-md text-xs font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
@@ -656,33 +740,29 @@
 							</div>
 						{/if}
 					</div>
-					<button
-						onclick={() => openLibraryModal()}
-						class="rounded p-1 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-500)]"
-						title="Add Library"
-					>
-						<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-						</svg>
-					</button>
+					<SidebarSectionMenu label="Libraries" createLabel="Add Library" oncreate={() => openLibraryModal()} onadd={() => addDivider('libraries')} />
 				</div>
 			</div>
 
-			{#each standardLibraries as library}
+			{#each libraryRows as entry, index (entry.type === 'divider' ? 'divider:' + entry.divider.id : 'item:' + entry.item.id)}
+				<div role="listitem" class="sidebar-reorder-row relative" class:sidebar-row-dragging={sidebarDrag?.section === 'libraries' && sidebarDrag.key === sidebarEntryKey(entry)}
+					data-sidebar-section="libraries" data-sidebar-row={sidebarEntryKey(entry)}
+					onpointerdown={(event) => startSidebarPointer(event, 'libraries', sidebarEntryKey(entry), entry.type === 'divider' ? entry.divider.label || 'Divider' : entry.item.name)}>
+					{#if sidebarDropTarget?.section === 'libraries' && sidebarDropTarget.key === sidebarEntryKey(entry)}
+						<div class="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded-full bg-[var(--color-primary-400)] {sidebarDropTarget.position === 'before' ? '-top-0.5' : '-bottom-0.5'}"></div>
+					{/if}
+
+				{#if entry.type === 'divider'}
+					{@render dividerRow('libraries', entry.divider, index, libraryRows.length)}
+				{:else}
+					{@const library = entry.item}
 				{@const parsedLibraryIcon = parseLibraryIcon(library.icon || 'book')}
 				<div
 					role="listitem"
-					draggable="true"
-					ondragstart={(event) => handleLibraryDragStart(event, library)}
-					ondragend={clearLibraryDragState}
-					ondragover={(event) => handleLibraryDragOver(event, library)}
-					ondrop={(event) => handleLibraryDrop(event, library)}
-					class="group/library-row relative flex items-center rounded-md transition-all duration-200 {draggedLibraryId === library.id ? 'opacity-50' : ''} {isActive('/library?library=' + library.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
+					class="group/library-row relative flex items-center rounded-md transition-all duration-200 {isActive('/library?library=' + library.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
 				>
-					{#if libraryDropTargetId === library.id && draggedLibraryId !== library.id}
-						<div class="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded-full bg-[var(--color-primary-400)] shadow-[0_0_10px_var(--color-primary-500)] {libraryDropPosition === 'before' ? '-top-0.5' : '-bottom-0.5'}"></div>
-					{/if}
-					<a
+
+					<a draggable="false"
 						href="/library?library={library.id}"
 						onclick={closeMobileNavigation}
 						class="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5"
@@ -729,24 +809,39 @@
 						</svg>
 					</button>
 				</div>
+
+				{/if}
+
+				</div>
 			{/each}
 		</div>
 
 		<div>
 			<div class="flex items-center justify-between px-2.5 py-1.5">
-				<a href="/audio" onclick={closeMobileNavigation} class="flex items-center gap-1.5 rounded-md text-xs font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]" aria-label="View all audio">
+				<a draggable="false" href="/audio" onclick={closeMobileNavigation} class="flex items-center gap-1.5 rounded-md text-xs font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]" aria-label="View all audio">
 					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 18V5l11-2v12M9 18c0 1.1-1.34 2-3 2s-3-.9-3-2 1.34-2 3-2 3 .9 3 2Zm11-3c0 1.1-1.34 2-3 2s-3-.9-3-2 1.34-2 3-2 3 .9 3 2Z"/></svg>
 					<span>Audio Libraries</span>
 				</a>
-				<button type="button" onclick={() => { openLibraryModal('audio'); closeMobileNavigation(); }} class="rounded p-1 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-500)]" title="Create Audio Library" aria-label="Create Audio Library">
-					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-				</button>
+				<div class="flex items-center gap-0.5">
+					<SidebarSectionMenu label="Audio Libraries" createLabel="Add Audio Library" oncreate={() => { openLibraryModal('audio'); closeMobileNavigation(); }} onadd={() => addDivider('audio')} />
+				</div>
 			</div>
 
-			{#each audioLibraries as library}
+			{#each audioRows as entry, index (entry.type === 'divider' ? 'divider:' + entry.divider.id : 'item:' + entry.item.id)}
+				<div role="listitem" class="sidebar-reorder-row relative" class:sidebar-row-dragging={sidebarDrag?.section === 'audio' && sidebarDrag.key === sidebarEntryKey(entry)}
+					data-sidebar-section="audio" data-sidebar-row={sidebarEntryKey(entry)}
+					onpointerdown={(event) => startSidebarPointer(event, 'audio', sidebarEntryKey(entry), entry.type === 'divider' ? entry.divider.label || 'Divider' : entry.item.name)}>
+					{#if sidebarDropTarget?.section === 'audio' && sidebarDropTarget.key === sidebarEntryKey(entry)}
+						<div class="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded-full bg-[var(--color-primary-400)] {sidebarDropTarget.position === 'before' ? '-top-0.5' : '-bottom-0.5'}"></div>
+					{/if}
+
+				{#if entry.type === 'divider'}
+					{@render dividerRow('audio', entry.divider, index, audioRows.length)}
+				{:else}
+					{@const library = entry.item}
 				{@const parsedAudioLibraryIcon = parseLibraryIcon(library.icon || 'music')}
 				<div class="group/audio-library-row relative flex items-center rounded-md transition-all duration-200 {isActive('/audio?library=' + library.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:translate-x-0.5 hover:bg-[var(--color-surface-base)] hover:shadow-sm'}">
-					<a href="/audio?library={library.id}" onclick={closeMobileNavigation} class="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5">
+					<a draggable="false" href="/audio?library={library.id}" onclick={closeMobileNavigation} class="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5">
 						{#if isLibraryScanActive(library)}
 							<svg class="h-[1.125rem] w-[1.125rem] flex-none animate-scan-spin text-[var(--color-primary-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 0 0 4.582 9M4 4v5h5m11 11v-5h-.581m0 0A8.003 8.003 0 0 1 4.062 13M20 20v-5h-5"/></svg>
 						{:else if parsedAudioLibraryIcon?.svg}
@@ -761,12 +856,16 @@
 						<svg class="absolute h-4 w-4 opacity-0 transition-opacity group-hover/count:opacity-100 {activeLibraryMenu?.id === library.id ? 'opacity-100' : ''}" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
 					</button>
 				</div>
+
+				{/if}
+
+				</div>
 			{/each}
 		</div>
 
 		<div>
 			<div class="flex items-center justify-between px-2.5 py-1.5">
-				<a
+				<a draggable="false"
 					href="/shelves"
 					onclick={closeMobileNavigation}
 					class="flex items-center gap-1.5 rounded-md text-xs font-semibold uppercase tracking-wider text-[var(--color-surface-text-muted)] transition-colors hover:text-[var(--color-surface-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)]"
@@ -777,33 +876,30 @@
 					</svg>
 					<span>Collections</span>
 				</a>
-				<button
-					type="button"
-					onclick={() => { openShelfModal(); closeMobileNavigation(); }}
-					class="rounded p-1 text-[var(--color-surface-text-muted)] transition-colors hover:bg-[var(--color-surface-overlay)] hover:text-[var(--color-primary-500)]"
-					title="Create Collection"
-				>
-					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-					</svg>
-				</button>
+				<div class="flex items-center gap-0.5">
+					<SidebarSectionMenu label="Collections" createLabel="Add Collection" oncreate={() => { openShelfModal(); closeMobileNavigation(); }} onadd={() => addDivider('collections')} />
+				</div>
 			</div>
 
-			{#each shelves as shelf}
+			{#each shelfRows as entry, index (entry.type === 'divider' ? 'divider:' + entry.divider.id : 'item:' + entry.item.id)}
+				<div role="listitem" class="sidebar-reorder-row relative" class:sidebar-row-dragging={sidebarDrag?.section === 'collections' && sidebarDrag.key === sidebarEntryKey(entry)}
+					data-sidebar-section="collections" data-sidebar-row={sidebarEntryKey(entry)}
+					onpointerdown={(event) => startSidebarPointer(event, 'collections', sidebarEntryKey(entry), entry.type === 'divider' ? entry.divider.label || 'Divider' : entry.item.name)}>
+					{#if sidebarDropTarget?.section === 'collections' && sidebarDropTarget.key === sidebarEntryKey(entry)}
+						<div class="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded-full bg-[var(--color-primary-400)] {sidebarDropTarget.position === 'before' ? '-top-0.5' : '-bottom-0.5'}"></div>
+					{/if}
+
+				{#if entry.type === 'divider'}
+					{@render dividerRow('collections', entry.divider, index, shelfRows.length)}
+				{:else}
+					{@const shelf = entry.item}
 				{@const parsedShelfIcon = parseLibraryIcon(shelf.icon || (shelf.is_magic === 1 ? 'sparkles' : 'bookmark'))}
 				<div
 					role="listitem"
-					draggable="true"
-					ondragstart={(event) => handleShelfDragStart(event, shelf)}
-					ondragend={clearShelfDragState}
-					ondragover={(event) => handleShelfDragOver(event, shelf)}
-					ondrop={(event) => handleShelfDrop(event, shelf)}
-					class="group/shelf-row relative flex items-center rounded-md transition-all duration-200 {draggedShelfId === shelf.id ? 'opacity-50' : ''} {isActive('/shelves/' + shelf.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
+					class="group/shelf-row relative flex items-center rounded-md transition-all duration-200 {isActive('/shelves/' + shelf.id) ? 'bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] shadow-sm' : 'text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)] hover:translate-x-0.5 hover:shadow-sm'}"
 				>
-					{#if shelfDropTargetId === shelf.id && draggedShelfId !== shelf.id}
-						<div class="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded-full bg-[var(--color-primary-400)] shadow-[0_0_10px_var(--color-primary-500)] {shelfDropPosition === 'before' ? '-top-0.5' : '-bottom-0.5'}"></div>
-					{/if}
-					<a
+
+					<a draggable="false"
 						href="/shelves/{shelf.id}"
 						class="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5"
 						onclick={closeMobileNavigation}
@@ -841,6 +937,10 @@
 					<span class="mr-1.5 inline-flex h-6 min-w-7 flex-shrink-0 items-center justify-center rounded bg-[var(--color-surface-700)] px-1.5 text-xs font-medium text-[var(--color-surface-500)]">
 						{shelf.book_count}
 					</span>
+				</div>
+
+				{/if}
+
 				</div>
 			{/each}
 		</div>
@@ -887,7 +987,7 @@
 		onclick={(event) => event.stopPropagation()}
 		onkeydown={(event) => event.stopPropagation()}
 	>
-		<a
+		<a draggable="false"
 			href={activeLibraryMenu.media_scope === 'audio' ? `/audio?library=${activeLibraryMenu.id}` : `/library?library=${activeLibraryMenu.id}`}
 			class="block px-2.5 py-1.5 text-sm text-[var(--color-surface-text)] hover:bg-[var(--color-surface-base)]"
 			role="menuitem"
@@ -928,7 +1028,7 @@
 		>
 			Regenerate Missing Covers
 		</button>
-		<a
+		<a draggable="false"
 			href="/settings?tab=general"
 			class="block px-2.5 py-1.5 text-sm text-[var(--color-surface-text-muted)] hover:bg-[var(--color-surface-base)] hover:text-[var(--color-surface-text)]"
 			role="menuitem"
@@ -959,6 +1059,8 @@
 />
 
 <style>
+	.sidebar-reorder-row { user-select: none; }
+	.sidebar-row-dragging { opacity: 0.5; }
 	.sidebar-icon-svg :global(svg) {
 		display: block;
 		width: 100%;

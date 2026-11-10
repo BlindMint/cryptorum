@@ -333,7 +333,7 @@
 							type="text"
 							bind:value={form.name}
 							placeholder="Enter library name"
-							class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+							class="h-11 w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 						>
 					</div>
 
@@ -343,9 +343,10 @@
 							<button
 								type="button"
 								onclick={() => showIconPicker = true}
-								class="flex min-w-0 flex-1 items-center gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-left transition-colors hover:border-[var(--color-primary-500)]/60 hover:bg-[var(--color-surface-overlay)]"
+								aria-label="Choose library icon"
+								class="flex h-11 min-w-0 flex-1 items-center gap-3 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-left transition-colors hover:border-[var(--color-primary-500)]/60 hover:bg-[var(--color-surface-overlay)]"
 							>
-								<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[var(--color-surface-overlay)] text-[var(--color-primary-400)]">
+								<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[var(--color-surface-overlay)] text-[var(--color-primary-400)]">
 									{#if currentLibraryIcon?.svg}
 										<div class="library-icon-preview h-5 w-5">{@html currentLibraryIcon.svg}</div>
 									{:else}
@@ -356,14 +357,13 @@
 									<div class="truncate text-sm font-medium text-[var(--color-surface-text)]">
 										{currentLibraryIcon?.label || currentLibraryIcon?.name || 'Default icon'}
 									</div>
-									<div class="text-xs text-[var(--color-surface-text-muted)]">Click to choose a different icon</div>
 								</div>
 							</button>
 							{#if form.icon}
 								<button
 									type="button"
 									onclick={clearLibraryIcon}
-									class="inline-flex h-[58px] shrink-0 items-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 text-xs font-medium text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)]/50 hover:text-[var(--color-surface-text)]"
+									class="inline-flex h-11 shrink-0 items-center rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 text-xs font-medium text-[var(--color-surface-text-muted)] transition-colors hover:border-[var(--color-primary-500)]/50 hover:text-[var(--color-surface-text)]"
 								>
 									Default
 								</button>

@@ -52,6 +52,26 @@ describe('comic reading preferences', () => {
 		expect(get(reloaded.readerSettings).comicOverrides?.['12'].fitMode).toBe('fit-height');
 	});
 
+	it('defaults arrows by screen size and keeps visibility global across comic overrides', async () => {
+		localStorage.setItem('readerSettings', JSON.stringify({ cbx: { fitMode: 'fit-width' } }));
+		const { readerSettings } = await import('./readerSettings');
+		expect(get(readerSettings).cbx.showNavigationArrowsDesktop).toBe(true);
+		expect(get(readerSettings).cbx.showNavigationArrowsMobile).toBe(false);
+		readerSettings.setComicOverride('12', true);
+		readerSettings.updateComic('12', { showNavigationArrowsDesktop: false, showNavigationArrowsMobile: true });
+		const value = get(readerSettings);
+		for (const bookId of ['12', '13']) {
+			const settings = resolveComicSettings(value.cbx, value.comicOverrides?.[bookId]);
+			expect(settings.showNavigationArrowsDesktop).toBe(false);
+			expect(settings.showNavigationArrowsMobile).toBe(true);
+		}
+		await readerSettings.flushPendingSave();
+		vi.resetModules();
+		const reloaded = await import('./readerSettings');
+		expect(get(reloaded.readerSettings).cbx.showNavigationArrowsDesktop).toBe(false);
+		expect(get(reloaded.readerSettings).cbx.showNavigationArrowsMobile).toBe(true);
+	});
+
 	it('migrates manga mode and opening size once without undoing later selections', async () => {
 		localStorage.setItem('readerSettings', JSON.stringify({ cbx: { mangaMode: true, openingFitMode: 'fit-width', fitMode: 'fit-page' } }));
 		const { readerSettings } = await import('./readerSettings');

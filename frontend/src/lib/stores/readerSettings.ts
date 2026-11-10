@@ -69,6 +69,8 @@ export interface CbxReaderSetting {
 	panelViewEnabled: boolean;
 	spreadHandling: 'auto' | 'force-single' | 'force-double' | 'never-split';
 	pageTransitionSound: boolean;
+	showNavigationArrowsDesktop: boolean;
+	showNavigationArrowsMobile: boolean;
 	autoHideControls: boolean;
 	useStandardFullscreen: boolean;
 	vibrance: number;
@@ -199,6 +201,8 @@ export const defaultReaderSettings: ReaderSettings = {
 		panelViewEnabled: false,
 		spreadHandling: 'auto',
 		pageTransitionSound: false,
+		showNavigationArrowsDesktop: true,
+		showNavigationArrowsMobile: false,
 		autoHideControls: true,
 		useStandardFullscreen: false,
 		vibrance: 100,

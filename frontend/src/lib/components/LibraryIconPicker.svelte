@@ -2,13 +2,17 @@
 	import {
 		PRIME_LIBRARY_ICONS,
 		SVG_LIBRARY_ICONS,
+		TABLER_LIBRARY_ICONS,
 		parseLibraryIcon,
 		sanitizeSvgMarkup,
-		serializeCustomLibraryIcon
+		serializeCustomLibraryIcon,
+		serializePngLibraryIcon,
+		type ParsedLibraryIcon
 	} from '$lib/utils/library-icons';
+	import { defaultSvgThemeColor, themeSvgMarkup, readPngIcon } from '$lib/utils/custom-icons';
 	import { lenientSearchMatch } from '$lib/utils/search';
 
-	type IconTab = 'prime' | 'svg';
+	type IconTab = 'prime' | 'svg' | 'tabler';
 
 	interface Props {
 		open: boolean;
@@ -27,9 +31,57 @@
 	let activeTab = $state<IconTab>('prime');
 	let primeSearch = $state('');
 	let svgSearch = $state('');
+	let tablerSearch = $state('');
+	let tablerPage = $state(0);
+	const TABLER_PAGE_SIZE = 88;
+	const selected = $derived(parseLibraryIcon(selectedIcon));
+	const filteredTablerIcons = $derived(TABLER_LIBRARY_ICONS.filter(icon => !tablerSearch.trim() || lenientSearchMatch(tablerSearch.trim(), `${icon.name} ${icon.label}`)));
+	const tablerPages = $derived(Math.max(1, Math.ceil(filteredTablerIcons.length / TABLER_PAGE_SIZE)));
+	const tablerCurrentPage = $derived(Math.min(tablerPage, tablerPages - 1));
+	const visibleTablerIcons = $derived(filteredTablerIcons.slice(tablerCurrentPage * TABLER_PAGE_SIZE, (tablerCurrentPage + 1) * TABLER_PAGE_SIZE));
 	let showCustomEditor = $state(false);
 	let customName = $state('');
 	let customSvg = $state('');
+	let customFormat = $state<'svg' | 'png'>('svg');
+	let customUseThemeColor = $state<boolean | null>(null);
+	let customPng = $state('');
+	let pngLoading = $state(false);
+	let pngError = $state('');
+	let pngLoadToken = 0;
+	const effectiveThemeColor = $derived(customUseThemeColor ?? defaultSvgThemeColor(customSvg));
+	const customPreview = $derived(customFormat === 'png'
+		? customPng ? parseLibraryIcon(serializePngLibraryIcon(customName || 'PNG', customPng))?.svg ?? '' : ''
+		: effectiveThemeColor ? themeSvgMarkup(sanitizeSvgMarkup(customSvg)) : sanitizeSvgMarkup(customSvg));
+
+	function populateCustomEditor(current: ParsedLibraryIcon | null) {
+		pngLoadToken++;
+		pngLoading = false;
+		pngError = '';
+		customName = current?.source === 'custom' || current?.source === 'image' ? current.name : '';
+		customSvg = current?.source === 'custom' ? current.rawSvg ?? current.svg : '';
+		customUseThemeColor = current?.source === 'custom' ? current.useThemeColor ?? null : null;
+		customFormat = current?.source === 'image' ? 'png' : 'svg';
+		customPng = current?.imageDataUrl ?? '';
+	}
+	async function uploadPng(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		const token = ++pngLoadToken;
+		pngLoading = true;
+		pngError = '';
+		try {
+			const dataUrl = await readPngIcon(file);
+			if (token !== pngLoadToken) return;
+			customPng = dataUrl;
+			if (!customName.trim()) customName = file.name.replace(/\.png$/i, '');
+		} catch (error) {
+			if (token === pngLoadToken) pngError = error instanceof Error ? error.message : 'Could not load this PNG.';
+		} finally {
+			if (token === pngLoadToken) pngLoading = false;
+			input.value = '';
+		}
+	}
 
 	function closePicker() {
 		onClose?.();
@@ -41,8 +93,7 @@
 	}
 
 	function isSelected(value: string): boolean {
-		const current = parseLibraryIcon(selectedIcon);
-		return current?.value === value;
+		return selected?.value === value;
 	}
 
 	function filteredPrimeIcons() {
@@ -63,40 +114,36 @@
 
 	function addCustomIcon() {
 		const name = customName.trim();
-		const svg = sanitizeSvgMarkup(customSvg);
-		if (!name || !svg || !svg.includes('<svg')) return;
-		chooseIcon(serializeCustomLibraryIcon(name, svg));
+		if (!name || pngLoading) return;
+		if (customFormat === 'png') {
+			if (customPng) chooseIcon(serializePngLibraryIcon(name, customPng));
+		} else {
+			const svg = sanitizeSvgMarkup(customSvg);
+			if (!/<svg\b/i.test(svg)) return;
+			chooseIcon(serializeCustomLibraryIcon(name, svg, effectiveThemeColor));
+		}
 	}
 
 	function openCustomEditor() {
 		showCustomEditor = true;
-		const current = parseLibraryIcon(selectedIcon);
-		if (current?.source === 'custom') {
-			customName = current.name;
-			customSvg = current.svg;
-		} else {
-			customName = '';
-			customSvg = '';
-		}
+		populateCustomEditor(parseLibraryIcon(selectedIcon));
 	}
 
 	$effect(() => {
 		if (!open) return;
 		const current = parseLibraryIcon(selectedIcon);
-		if (current?.source === 'svg' || current?.source === 'custom') {
+		if (current?.source === 'tabler') {
+			activeTab = 'tabler';
+			const index = TABLER_LIBRARY_ICONS.findIndex(icon => icon.value === current.value);
+			tablerSearch = '';
+			tablerPage = Math.max(0, Math.floor(index / TABLER_PAGE_SIZE));
+		} else if (current?.source === 'svg' || current?.source === 'custom' || current?.source === 'image') {
 			activeTab = 'svg';
 		} else {
 			activeTab = 'prime';
 		}
-		if (current?.source === 'custom') {
-			showCustomEditor = true;
-			customName = current.name;
-			customSvg = current.svg;
-		} else {
-			showCustomEditor = false;
-			customName = '';
-			customSvg = '';
-		}
+		showCustomEditor = current?.source === 'custom' || current?.source === 'image';
+		populateCustomEditor(current);
 	});
 </script>
 
@@ -126,7 +173,7 @@
 					</div>
 					<div>
 						<h2 class="text-lg font-semibold text-[var(--color-surface-text)]">Choose an icon</h2>
-						<p class="text-sm text-[var(--color-surface-text-muted)]">Pick from the built-in sets or add a custom SVG</p>
+						<p class="text-sm text-[var(--color-surface-text-muted)]">Pick from the built-in sets or add your own SVG or PNG</p>
 					</div>
 				</div>
 
@@ -145,7 +192,7 @@
 
 			<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
 				<div class="border-b border-[var(--color-surface-border)] px-4 sm:px-6">
-					<div class="flex gap-2">
+					<div class="flex gap-2 overflow-x-auto">
 						<button
 							type="button"
 							onclick={() => activeTab = 'prime'}
@@ -166,8 +213,10 @@
 								<path d="M8 4v16"></path>
 								<path d="M4 8h16"></path>
 							</svg>
-							SVG Library
+							SVG & PNG
 						</button>
+						<button type="button" onclick={() => activeTab = 'tabler'} aria-pressed={activeTab === 'tabler'}
+							class="library-icon-tab inline-flex shrink-0 items-center gap-2 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'tabler' ? 'active text-[var(--color-primary-400)]' : 'text-[var(--color-surface-text-muted)] hover:text-[var(--color-surface-text)]'}">Tabler</button>
 					</div>
 				</div>
 
@@ -203,6 +252,33 @@
 								{/each}
 							</div>
 						</div>
+					{:else if activeTab === 'tabler'}
+						<div class="space-y-4">
+							<input type="search" bind:value={tablerSearch} oninput={() => tablerPage = 0}
+								aria-label="Search Tabler icons" placeholder="Search Tabler icons"
+								class="w-full max-w-xl rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] px-3 py-2 text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]" />
+							<div class="flex flex-wrap items-center justify-between gap-3 text-sm text-[var(--color-surface-text-muted)]">
+								<span aria-live="polite">{filteredTablerIcons.length} icons · Page {tablerCurrentPage + 1} of {tablerPages}</span>
+								<div class="flex gap-2">
+									<button type="button" disabled={tablerCurrentPage === 0} onclick={() => tablerPage = tablerCurrentPage - 1}
+										class="rounded-md border border-[var(--color-surface-border)] px-3 py-2 hover:bg-[var(--color-surface-base)] disabled:opacity-40">Previous</button>
+									<button type="button" disabled={tablerCurrentPage >= tablerPages - 1} onclick={() => tablerPage = tablerCurrentPage + 1}
+										class="rounded-md border border-[var(--color-surface-border)] px-3 py-2 hover:bg-[var(--color-surface-base)] disabled:opacity-40">Next</button>
+								</div>
+							</div>
+							<div class="grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-3">
+								{#each visibleTablerIcons as icon (icon.name)}
+									<button type="button" onclick={() => chooseIcon(icon.value)} aria-pressed={isSelected(icon.value)}
+										class="flex min-h-[92px] flex-col items-center justify-center gap-2 rounded-lg border p-3 text-center transition-colors {isSelected(icon.value) ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)]/10 text-[var(--color-primary-400)]' : 'border-[var(--color-surface-border)] bg-[var(--color-surface-base)] text-[var(--color-surface-text)] hover:border-[var(--color-primary-500)] hover:bg-[var(--color-surface-overlay)]'}"
+										title={icon.label}>
+										<div class="library-icon-picker-svg flex h-8 w-8 items-center justify-center">{@html icon.svg}</div>
+										<div class="text-[11px] leading-tight">{icon.label}</div>
+									</button>
+								{:else}
+									<p class="col-span-full text-sm text-[var(--color-surface-text-muted)]">No matching icons.</p>
+								{/each}
+							</div>
+						</div>
 					{:else}
 						<div class="space-y-4">
 							<div class="relative max-w-xl">
@@ -230,13 +306,17 @@
 									</svg>
 									Add custom
 								</button>
-								{#if parseLibraryIcon(selectedIcon)?.source === 'custom'}
-									<span class="text-xs text-[var(--color-surface-text-muted)]">Custom SVG saved with the library.</span>
+								{#if selected?.source === 'custom' || selected?.source === 'image'}
+									<span class="text-xs text-[var(--color-surface-text-muted)]">Custom icon saved with the library.</span>
 								{/if}
 							</div>
 
 							{#if showCustomEditor}
 								<div class="space-y-4 rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-base)] p-4">
+									<div class="flex gap-2" role="group" aria-label="Custom icon format">
+										<button type="button" aria-pressed={customFormat === 'svg'} onclick={() => customFormat = 'svg'} class="format-choice">SVG</button>
+										<button type="button" aria-pressed={customFormat === 'png'} onclick={() => customFormat = 'png'} class="format-choice">PNG</button>
+									</div>
 									<div class="grid gap-4 sm:grid-cols-2">
 										<div>
 											<label class="mb-2 block text-sm font-medium text-[var(--color-surface-text)]" for="custom-icon-name">Icon name</label>
@@ -249,6 +329,7 @@
 											/>
 										</div>
 										<div>
+											{#if customFormat === 'svg'}
 											<label class="mb-2 block text-sm font-medium text-[var(--color-surface-text)]" for="custom-icon-svg">SVG markup</label>
 											<textarea
 												id="custom-icon-svg"
@@ -257,6 +338,19 @@
 												placeholder="<svg ...>...</svg>"
 												class="w-full rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] px-3 py-2 font-mono text-xs text-[var(--color-surface-text)] placeholder:text-[var(--color-surface-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
 											></textarea>
+											<label class="mt-3 flex items-center gap-2 text-sm text-[var(--color-surface-text)]">
+												<input type="checkbox" checked={effectiveThemeColor} onchange={(event) => customUseThemeColor = event.currentTarget.checked} />
+												Use theme color
+											</label>
+											<p class="mt-1 text-xs text-[var(--color-surface-text-muted)]">Matches the icon color to your theme. Transparent areas stay transparent.</p>
+										{:else}
+											<label class="mb-2 block text-sm font-medium text-[var(--color-surface-text)]" for="custom-icon-png">PNG image</label>
+											<input id="custom-icon-png" type="file" accept="image/png,.png" onchange={uploadPng}
+												class="w-full text-sm text-[var(--color-surface-text)]" />
+											<p class="mt-2 text-xs text-[var(--color-surface-text-muted)]">PNG colors and transparency are preserved. Transparent backgrounds work best.</p>
+											{#if pngLoading}<p role="status" class="mt-2 text-xs text-[var(--color-surface-text-muted)]">Preparing image…</p>{/if}
+											{#if pngError}<p role="alert" class="mt-2 text-xs text-red-400">{pngError}</p>{/if}
+										{/if}
 										</div>
 									</div>
 
@@ -264,6 +358,7 @@
 										<button
 											type="button"
 											onclick={addCustomIcon}
+											disabled={!customName.trim() || !customPreview || pngLoading}
 											class="accent-action inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors"
 										>
 											<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -281,16 +376,16 @@
 										</button>
 									</div>
 
-									{#if customName.trim() && customSvg.trim()}
+									{#if customPreview}
 										<div class="rounded-lg border border-[var(--color-surface-border)] bg-[var(--color-surface-overlay)] p-3">
 											<div class="mb-2 text-xs uppercase tracking-wide text-[var(--color-surface-text-muted)]">Preview</div>
 											<div class="flex items-center gap-3">
 												<div class="library-icon-picker-svg flex h-10 w-10 items-center justify-center text-[var(--color-primary-400)]">
-													{@html sanitizeSvgMarkup(customSvg)}
+													{@html customPreview}
 												</div>
 												<div>
 													<div class="text-sm font-medium text-[var(--color-surface-text)]">{customName}</div>
-													<div class="text-xs text-[var(--color-surface-text-muted)]">Custom SVG</div>
+													<div class="text-xs text-[var(--color-surface-text-muted)]">{customFormat === 'png' ? 'PNG image' : 'Custom SVG'}</div>
 												</div>
 											</div>
 										</div>
@@ -322,6 +417,9 @@
 {/if}
 
 <style>
+	.format-choice { border: 1px solid var(--color-surface-border); border-radius: 6px; padding: 6px 14px; font-size: 14px; color: var(--color-surface-text); }
+	.format-choice[aria-pressed="true"] { border-color: var(--color-primary-500); background: color-mix(in srgb, var(--color-primary-500) 12%, transparent); }
+	.format-choice:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 	:global(.library-icon-picker-svg svg) {
 		display: block;
 		width: 100%;

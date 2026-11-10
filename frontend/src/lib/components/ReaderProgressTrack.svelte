@@ -6,6 +6,7 @@
 	let {
 		element = $bindable<HTMLElement | null>(null),
 		progress = 0,
+		direction = 'ltr' as 'ltr' | 'rtl',
 		visible = true,
 		variant = 'top' as Variant,
 		metaAlign = 'between' as 'between' | 'center',
@@ -29,6 +30,7 @@
 	}: {
 		element?: HTMLElement | null;
 		progress?: number;
+		direction?: 'ltr' | 'rtl';
 		visible?: boolean;
 		variant?: Variant;
 		metaAlign?: 'between' | 'center';
@@ -67,8 +69,11 @@
 		class="reader-progress reader-progress-{variant} reader-progress-interactive"
 		class:reader-progress-meta-center={metaAlign === 'center'}
 		class:reader-progress-hidden={!visible}
+		data-direction={direction}
+		dir={direction}
 		style="--reader-progress: {clampedProgress}%; --reader-preview-progress: {clampedPreviewProgress ?? 0}%;"
 		role="slider"
+		aria-orientation="horizontal"
 		aria-label={ariaLabel}
 		aria-valuemin={ariaValueMin}
 		aria-valuemax={ariaValueMax}
@@ -84,15 +89,15 @@
 	>
 		{#if variant === 'bottom' && (label || detail)}
 			<div class="reader-progress-meta">
-				<span>{label}</span>
-				<span>{detail}</span>
+				<span><bdi>{label}</bdi></span>
+				<span><bdi>{detail}</bdi></span>
 			</div>
 		{/if}
-		<div class="reader-progress-track">
+		<div class="reader-progress-track" dir={direction}>
 			<div class="reader-progress-fill"></div>
 			{#if showPreview}
 				<div class="reader-progress-preview-marker" role="presentation"></div>
-				<div class="reader-progress-preview-tooltip" role="presentation">{previewLabel}</div>
+				<div class="reader-progress-preview-tooltip" role="presentation"><bdi>{previewLabel}</bdi></div>
 			{/if}
 			{#if showThumb}
 				<div class="reader-progress-thumb" role="presentation"></div>
@@ -106,6 +111,8 @@
 		class="reader-progress reader-progress-{variant}"
 		class:reader-progress-meta-center={metaAlign === 'center'}
 		class:reader-progress-hidden={!visible}
+		data-direction={direction}
+		dir={direction}
 		style="--reader-progress: {clampedProgress}%;"
 		role="progressbar"
 		aria-label={ariaLabel}
@@ -115,11 +122,11 @@
 	>
 		{#if variant === 'bottom' && (label || detail)}
 			<div class="reader-progress-meta">
-				<span>{label}</span>
-				<span>{detail}</span>
+				<span><bdi>{label}</bdi></span>
+				<span><bdi>{detail}</bdi></span>
 			</div>
 		{/if}
-		<div class="reader-progress-track">
+		<div class="reader-progress-track" dir={direction}>
 			<div class="reader-progress-fill"></div>
 			{#if showThumb}
 				<div class="reader-progress-thumb" role="presentation"></div>
@@ -223,7 +230,7 @@
 
 	.reader-progress-fill {
 		position: absolute;
-		left: 0;
+		inset-inline-start: 0;
 		width: var(--reader-progress);
 		height: 4px;
 		border-radius: 999px;
@@ -239,14 +246,14 @@
 
 	.reader-progress-thumb {
 		position: absolute;
-		left: calc(var(--reader-progress) - 7px);
+		inset-inline-start: calc(var(--reader-progress) - 7px);
 		width: 14px;
 		height: 14px;
 		border-radius: 50%;
 		background: var(--reader-progress-accent);
 		border: 2px solid var(--color-surface-base, #0f172a);
 		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
-		transition: left 0.05s ease, transform 0.1s ease;
+		transition: inset-inline-start 0.05s ease, transform 0.1s ease;
 	}
 
 	.reader-progress-interactive:hover .reader-progress-thumb {
@@ -261,7 +268,7 @@
 	@media (hover: hover) and (pointer: fine) {
 		.reader-progress-preview-marker {
 			position: absolute;
-			left: var(--reader-preview-progress);
+			inset-inline-start: var(--reader-preview-progress);
 			width: 2px;
 			height: 14px;
 			border-radius: 999px;
@@ -275,7 +282,7 @@
 
 		.reader-progress-preview-tooltip {
 			position: absolute;
-			left: clamp(64px, var(--reader-preview-progress), calc(100% - 64px));
+			inset-inline-start: clamp(64px, var(--reader-preview-progress), calc(100% - 64px));
 			bottom: 24px;
 			max-width: min(240px, calc(100vw - 32px));
 			padding: 5px 8px;
@@ -294,6 +301,9 @@
 			z-index: 3;
 		}
 	}
+
+	.reader-progress[data-direction="rtl"] .reader-progress-preview-marker { transform: translateX(1px); }
+	.reader-progress[data-direction="rtl"] .reader-progress-preview-tooltip { transform: translateX(50%); }
 
 	@media (max-width: 768px) {
 		.reader-progress-bottom {
